@@ -4,6 +4,7 @@ import type { Project } from '../types/project';
 import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
+import type { FleetSnapshotRequest } from '../../../shared/types/fleet';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -168,6 +169,20 @@ export class API {
     async fetch(): Promise<IPCResponse<LeaderboardResponse>> {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.leaderboard.fetch();
+    },
+  };
+
+  // Fleet grid
+  static fleet = {
+    /** Every agent pane across all sessions and projects. */
+    async listAgents(options?: { includeArchived?: boolean }) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.fleet.listAgents(options);
+    },
+    /** Batched plain-text screen snapshots for the visible tiles. */
+    async snapshots(request: FleetSnapshotRequest) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.fleet.snapshots(request);
     },
   };
 

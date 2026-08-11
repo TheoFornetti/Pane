@@ -16,6 +16,7 @@ import { CommitMessageDialog } from './session/CommitMessageDialog';
 import { FolderArchiveDialog } from './session/FolderArchiveDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProjectView } from './ProjectView';
+import { FleetView } from './fleet/FleetView';
 import { API } from '../utils/api';
 import { markPaneViewShown } from '../utils/journeyTimings';
 import { useObservedContentBox } from '../hooks/useObservedContentBox';
@@ -1762,6 +1763,11 @@ export const SessionView = memo(() => {
   })();
   
   // Removed unused variables - now handled by panels
+
+  // Live grid of every agent pane — spans all projects.
+  if (activeView === 'fleet') {
+    return <FleetView />;
+  }
 
   // Show project view if navigation is set to project
   if (activeView === 'project' && activeProjectId) {

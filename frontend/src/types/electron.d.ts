@@ -51,6 +51,7 @@ import type {
 } from '../../../shared/types/orchestrationSession';
 import type { UsageIndexStatus, UsageReport, UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
+import type { FleetAgentPanel, FleetSnapshotRequest, FleetSnapshotResult } from '../../../shared/types/fleet';
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
@@ -181,6 +182,12 @@ interface ElectronAPI {
   export: {
     saveImage: (data: string, defaultFilename: string) => Promise<IPCResponse<{ filePath: string } | null>>;
     shareImage: (data: string, filename: string) => Promise<IPCResponse<{ method: 'share' | 'clipboard' }>>;
+  };
+
+  // Fleet grid — every agent pane across all sessions
+  fleet: {
+    listAgents: (options?: { includeArchived?: boolean }) => Promise<IPCResponse<FleetAgentPanel[]>>;
+    snapshots: (request: FleetSnapshotRequest) => Promise<IPCResponse<FleetSnapshotResult>>;
   };
 
   // Session management

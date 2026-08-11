@@ -16,6 +16,7 @@ import { registerScriptHandlers } from './script';
 import { registerSessionHandlers } from './session';
 import { registerVoiceHandlers } from './voice';
 import { registerUsageHandlers } from './usage';
+import { registerFleetHandlers } from './fleet';
 import type { AppServices } from './types';
 import { isDaemonOwnedChannel } from '../../../shared/types/daemon';
 
@@ -24,6 +25,11 @@ const USAGE_CHANNELS = [
   'usage:get-status',
   'usage:rescan',
 ] as const;
+const FLEET_CHANNELS = [
+  'fleet:list-agents',
+  'fleet:snapshots',
+] as const;
+
 const PROJECT_CHANNELS = [
   'projects:get-all',
   'projects:get-active',
@@ -380,6 +386,16 @@ describe('daemon registry IPC bindings', () => {
 
     expect(registry.listChannels()).toEqual([...USAGE_CHANNELS].sort());
     expect(ipcMain.boundChannels.sort()).toEqual([...USAGE_CHANNELS].sort());
+  });
+
+  it('binds daemon-owned fleet channels through the shared registry', () => {
+    const registry = new PaneCommandRegistry();
+    const ipcMain = createIpcMainStub();
+
+    registerFleetHandlers(ipcMain, createServicesStub(), registry);
+
+    expect(registry.listChannels()).toEqual([...FLEET_CHANNELS].sort());
+    expect(ipcMain.boundChannels.sort()).toEqual([...FLEET_CHANNELS].sort());
   });
 
   it('binds daemon-owned prompt channels through the shared registry', () => {

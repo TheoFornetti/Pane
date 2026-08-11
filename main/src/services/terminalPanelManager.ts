@@ -131,6 +131,14 @@ export interface TerminalPanelSnapshot {
   isCliReady?: boolean;
   agentType?: CliAgentType;
   agentSessionId?: string;
+  /**
+   * Live PTY dimensions. A secondary viewer must render at exactly these
+   * dimensions: agent TUIs emit absolute cursor positioning, so replaying
+   * their output into a differently-sized terminal wraps every line and
+   * scrolls without end.
+   */
+  cols?: number;
+  rows?: number;
 }
 
 /**
@@ -1904,6 +1912,8 @@ export class TerminalPanelManager extends EventEmitter {
       isCliReady: customState.isCliReady,
       agentType,
       agentSessionId: customState.agentSessionId ?? terminal.capturedAgentSessionId,
+      cols: terminal.pty?.cols,
+      rows: terminal.pty?.rows,
     };
   }
 

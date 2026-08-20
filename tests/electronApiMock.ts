@@ -58,7 +58,7 @@ type ElectronApiMockOptions = {
   /** Seeded split layout for the session under test (panels:get-layout). */
   initialLayout?: JsonObject | null;
   initialCombinedDiff?: JsonObject | null;
-  initialFleetAgents?: JsonObject[];
+  initialMissionControlAgents?: JsonObject[];
   initialTerminalStates?: Record<string, JsonObject>;
   initialAgentUsage?: JsonObject;
   initialUsageReport?: JsonObject;
@@ -706,8 +706,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success(createPaneChatState());
         },
       }),
-      fleet: namespace({
-        listAgents: () => success(clone(mockOptions.initialFleetAgents ?? [])),
+      missionControl: namespace({
+        listAgents: () => success(clone(mockOptions.initialMissionControlAgents ?? [])),
         snapshots: (request: { panelIds?: string[] }) => success({
           snapshots: (request?.panelIds ?? []).map((panelId) => ({
             panelId,

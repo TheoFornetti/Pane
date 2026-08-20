@@ -431,10 +431,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('export:share-image', data, filename),
   },
 
-  // Fleet grid — live overview of every agent pane across all sessions
-  fleet: {
-    listAgents: (options?: { includeArchived?: boolean }): Promise<IPCResponse> => invokeIpc('fleet:list-agents', options),
-    snapshots: (request: { panelIds: string[]; maxLines?: number }): Promise<IPCResponse> => invokeIpc('fleet:snapshots', request),
+  // Mission Control — live overview of every agent pane across all sessions
+  missionControl: {
+    listAgents: (options?: { includeArchived?: boolean }): Promise<IPCResponse> => invokeIpc('mission-control:list-agents', options),
+    snapshots: (request: { panelIds: string[]; maxLines?: number }): Promise<IPCResponse> => invokeIpc('mission-control:snapshots', request),
   },
 
   // Session management

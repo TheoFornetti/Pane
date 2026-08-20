@@ -53,7 +53,7 @@ interface NavigationState {
   navigateToProject: (projectId: number) => void;
   navigateToSessions: () => void;
   navigateToPaneChat: () => void;
-  navigateToFleet: () => void;
+  navigateToMissionControl: () => void;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -136,9 +136,9 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
     activeProjectId: null
   }),
 
-  // The fleet grid spans every project, so it clears the project scope.
-  navigateToFleet: () => set({
-    activeView: 'fleet',
+  // Mission Control spans every project, so it clears the project scope.
+  navigateToMissionControl: () => set({
+    activeView: 'mission-control',
     activeProjectId: null
   }),
 }));

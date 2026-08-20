@@ -1582,11 +1582,11 @@ export class TerminalPanelManager extends EventEmitter {
         terminal.exitDuringDestroy ??= exitCode;
         return;
       }
-      try {
-        this.retireTerminal(terminal, exitCode);
-      } finally {
-        terminal.screenEmulator?.dispose();
-      }
+      terminal.exitDuringDestroy ??= exitCode;
+      // Drain the persisted snapshot before retiring this terminal lifetime.
+      void this.destroyTerminal(terminal.panelId).catch(error => {
+        console.error('[TerminalPanelManager] Failed to save exiting terminal', error);
+      });
 
       // Notify frontend (include signal for crash detection)
       this.sendRendererEvent('terminal:exited', {
@@ -1791,6 +1791,9 @@ export class TerminalPanelManager extends EventEmitter {
       cwd: cwd,
       scrollbackBuffer: savedScrollback,
       alternateScreenBuffer: terminal.alternateScreenBuffer,
+      // Survives dispose: the emulator keeps its last screen text, so a panel
+      // saved on exit still knows what the agent finished on.
+      screenText: terminal.screenEmulator?.getScreenText(),
       isAlternateScreen: savedIsAlternateScreen,
       lastActivityTime: terminal.lastActivity.toISOString(),
       serializedBuffer: restore?.isAlternateScreen

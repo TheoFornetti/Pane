@@ -12,7 +12,8 @@ import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
 import { AgentStatusDot } from './ui/AgentStatusDot';
 import type { DropdownItem } from './ui/Dropdown';
-import { useSessionAgentDisplayStatus } from '../hooks/useAgentStatus';
+import { useSessionAgentDisplayStatus, useBlockedAgentCount } from '../hooks/useAgentStatus';
+import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { API } from '../utils/api';
 import { cn } from '../utils/cn';
@@ -150,10 +151,7 @@ export function ProjectSessionList({
   const projectById = useMemo(() => createProjectById(projects), [projects]);
 
   /** Agents across every session that are waiting on the user — the Mission Control badge. */
-  const blockedAgentCount = useMemo(
-    () => Object.values(agentStatusByPanel).filter(state => state === 'blocked').length,
-    [agentStatusByPanel]
-  );
+  const blockedAgentCount = useBlockedAgentCount();
 
   const pinnedSessions = useMemo(() => {
     return getPinnedSessions(sessions, projectById);

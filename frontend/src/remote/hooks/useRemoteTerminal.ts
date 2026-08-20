@@ -6,6 +6,7 @@ import type { RemotePaneConnectionStatus } from '../../../../shared/types/remote
 import type { SessionOutput } from '../../types/session';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { terminalOutputByteLength } from '../../utils/terminalRestore';
 
 interface UseRemoteTerminalOptions {
   adapter: RemoteRuntimeAdapter;
@@ -140,7 +141,7 @@ export function useRemoteTerminal({
       );
       if (!payload || payload.panelId !== panel.id) return;
       terminal.write(payload.output);
-      void adapter.ackTerminalOutput(panel.id, byteLength(payload.output)).catch(() => {});
+      void adapter.ackTerminalOutput(panel.id, terminalOutputByteLength(payload.output)).catch(() => {});
     });
 
     let disposed = false;
@@ -204,10 +205,6 @@ export function useRemoteTerminal({
 
 function formatSessionOutput(output: SessionOutput): string {
   return output.type === 'json' ? `${JSON.stringify(output.data)}\r\n` : String(output.data);
-}
-
-function byteLength(value: string): number {
-  return new TextEncoder().encode(value).byteLength;
 }
 
 function getTerminalViewerId(): string {

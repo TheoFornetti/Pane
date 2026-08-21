@@ -1320,7 +1320,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
               // Read the current mode at flush time, including when a local
               // ptyId survived a switch to a remote host.
               acknowledgeTerminalOutput(
-                panel.id, bytes, currentPtyIdRef.current, terminalRuntimeRef.current.isRemoteMode,
+                panel.id, bytes, currentPtyIdRef.current, terminalRuntimeRef.current.isRemoteMode, TERMINAL_VISIBILITY_VIEWER_ID,
               );
             }
           };

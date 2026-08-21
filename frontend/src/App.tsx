@@ -34,6 +34,7 @@ import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
 import { startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
 import { createVisibilityAwareInterval } from './utils/performanceUtils';
+import { useWindowActive } from './hooks/useWindowActive';
 import { ContextMenuProvider } from './contexts/ContextMenuContext';
 
 import { CommandPalette } from './components/CommandPalette';
@@ -86,6 +87,7 @@ function App() {
   const [isSupportPaneOpen, setIsSupportPaneOpen] = useState(false);
   const [hasCheckedOnboarding, setHasCheckedOnboarding] = useState(false);
   const [completedOnboardingThisSession, setCompletedOnboardingThisSession] = useState(false);
+  const { visible: windowVisible, focused: windowFocused } = useWindowActive();
   const analyticsCheckStarted = useRef(false);
   const analyticsIdentityPromise = useRef<Promise<AnalyticsIdentity | undefined> | null>(null);
   const appFirstOpenedCaptured = useRef(false);
@@ -463,32 +465,18 @@ function App() {
     const handleSessionSwitch = () => runCleanup();
     window.addEventListener('session-switched', handleSessionSwitch);
 
-    // Pause animations when window is hidden to save battery
-    const handleVisibilityChange = () => {
-      document.documentElement.classList.toggle('window-hidden', document.hidden);
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Also pause animations on window blur — document.hidden rarely fires for a
-    // visible-but-unfocused window (notably on macOS), so gate on the focus event too.
-    window.electronAPI.window?.isFocused?.()
-      .then((focused) => {
-        document.documentElement.classList.toggle('window-blurred', !focused);
-      })
-      .catch(() => {
-        // Default to focused if the focus query is unavailable.
-      });
-    const cleanupFocusChanged = window.electronAPI.events.onWindowFocusChanged((focused) => {
-      document.documentElement.classList.toggle('window-blurred', !focused);
-    });
-
     return () => {
       cleanupDispose();
       window.removeEventListener('session-switched', handleSessionSwitch);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      cleanupFocusChanged();
     };
   }, []);
+
+  // Pause animations while the window is hidden or in the background, which is
+  // the same pair of signals Mission Control idles on.
+  useEffect(() => {
+    document.documentElement.classList.toggle('window-hidden', !windowVisible);
+    document.documentElement.classList.toggle('window-blurred', !windowFocused);
+  }, [windowVisible, windowFocused]);
 
   // Check if onboarding should be shown after analytics defaults are resolved.
   useEffect(() => {

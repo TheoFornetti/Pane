@@ -156,6 +156,31 @@ function App() {
   // Subscribe to live statuses and reconcile the daemon baseline on attach/reconnect.
   useEffect(() => subscribePanelStatus(), []);
 
+  /**
+   * Forget a pane's status when the pane itself goes.
+   *
+   * `SessionView` already reconciles the *active* session's panel list, but a
+   * pane deleted in a background session — from RunPane, from Mission Control,
+   * from a remote daemon — leaves its status entries behind: the sidebar keeps
+   * a "needs input" badge for a pane that no longer exists, and Mission Control
+   * keeps a tile waiting on output that will never come. Archiving a session
+   * deletes its panes without a per-panel event, so it is handled the same way
+   * from the session side.
+   */
+  useEffect(() => {
+    const events = window.electronAPI?.events;
+    const unsubscribePanel = events?.onPanelDeleted?.((data) => {
+      usePanelStore.getState().forgetPanel(data.panelId);
+    });
+    const unsubscribeSession = events?.onSessionDeleted?.((session) => {
+      usePanelStore.getState().forgetSession(session.id);
+    });
+    return () => {
+      unsubscribePanel?.();
+      unsubscribeSession?.();
+    };
+  }, []);
+
   useEffect(() => {
     const clearViewedCompletedActivity = (event: Event) => {
       if (!(event instanceof CustomEvent)) return;

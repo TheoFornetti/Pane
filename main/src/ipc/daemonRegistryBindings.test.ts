@@ -131,6 +131,7 @@ const PANEL_CHANNELS = [
   'panels:get-layout',
   'panels:set-layout',
   'terminal:input',
+  'terminal:reply',
   'terminal:resize',
   'terminal:getState',
   'terminal:saveState',

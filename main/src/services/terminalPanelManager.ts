@@ -902,7 +902,7 @@ export class TerminalPanelManager extends EventEmitter {
     // state machine (see `main/src/ptyHost/flowControl.ts`).
     flowControlOnPtyBytes(
       terminal.flowControl,
-      data.length,
+      Buffer.byteLength(data, 'utf8'),
       () => this.pausePty(terminal),
       () => this.resumePty(terminal),
     );

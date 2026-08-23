@@ -35,7 +35,7 @@ import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/
 import {
   loadTerminalCapabilities, terminalCapabilityOptions, type LoadedTerminalCapabilities,
 } from '../../utils/terminalCapabilities';
-import { selectTerminalRestoreContent } from '../../utils/terminalRestore';
+import { selectTerminalRestoreContent, terminalOutputByteLength } from '../../utils/terminalRestore';
 import { TerminalInterceptor } from '../../services/terminalInterceptor/TerminalInterceptor';
 import { createAtTerminalHandler } from '../../services/terminalInterceptor/handlers/atTerminalHandler';
 import { InterceptorDropdown } from '../terminal/InterceptorDropdown';
@@ -1545,7 +1545,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // Core write-and-ack: consume a raw output chunk for this panel.
           const writeAndAck = (output: string) => {
             if (!terminal || disposed) return;
-            const outputLength = output.length;
+            const outputLength = terminalOutputByteLength(output);
             terminal.write(output, () => {
               if (disposed) return;
               markPanelOutput(panel.id);

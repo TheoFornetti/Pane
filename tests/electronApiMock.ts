@@ -718,7 +718,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             lastActivityAt: null,
           })),
           missing: [],
-          capturedAt: new Date(0).toISOString(),
         }),
       }),
       panels: namespace({

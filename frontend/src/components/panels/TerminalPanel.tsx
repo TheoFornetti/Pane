@@ -35,7 +35,7 @@ import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/
 import {
   loadTerminalCapabilities, terminalCapabilityOptions, type LoadedTerminalCapabilities,
 } from '../../utils/terminalCapabilities';
-import { selectTerminalRestoreContent, terminalOutputByteLength } from '../../utils/terminalRestore';
+import { createTerminalOutputAcknowledger, selectTerminalRestoreContent } from '../../utils/terminalRestore';
 import { TerminalInterceptor } from '../../services/terminalInterceptor/TerminalInterceptor';
 import { createAtTerminalHandler } from '../../services/terminalInterceptor/handlers/atTerminalHandler';
 import { InterceptorDropdown } from '../terminal/InterceptorDropdown';
@@ -1272,27 +1272,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             }
           });
 
-          // Ack batching for flow control
-          const ACK_BATCH_SIZE = 5_000; // 5KB - aligned with main LOW_WATERMARK per VS Code FlowControlConstants
-          const ACK_BATCH_INTERVAL = 100; // ms
-          let pendingAckBytes = 0;
-          let ackFlushTimer: ReturnType<typeof setTimeout> | null = null;
-
-          const flushAck = () => {
-            if (ackFlushTimer) {
-              clearTimeout(ackFlushTimer);
-              ackFlushTimer = null;
-            }
-            if (pendingAckBytes > 0) {
-              const bytes = pendingAckBytes;
-              pendingAckBytes = 0;
-              // Read the current mode at flush time, including when a local
-              // ptyId survived a switch to a remote host.
-              acknowledgeTerminalOutput(
-                panel.id, bytes, currentPtyIdRef.current, terminalRuntimeRef.current.isRemoteMode, TERMINAL_VISIBILITY_VIEWER_ID,
-              );
-            }
-          };
+          const acknowledger = createTerminalOutputAcknowledger(bytes => {
+            acknowledgeTerminalOutput(
+              panel.id, bytes, currentPtyIdRef.current, terminalRuntimeRef.current.isRemoteMode, TERMINAL_VISIBILITY_VIEWER_ID,
+            );
+          });
 
           // Snapshot persistence: see the active-to-inactive effect below and
           // the dispose-time snapshot in this effect's cleanup. The previous
@@ -1545,17 +1529,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // Core write-and-ack: consume a raw output chunk for this panel.
           const writeAndAck = (output: string) => {
             if (!terminal || disposed) return;
-            const outputLength = terminalOutputByteLength(output);
             terminal.write(output, () => {
               if (disposed) return;
               markPanelOutput(panel.id);
               // Ack AFTER xterm has rendered the data — proper backpressure
-              pendingAckBytes += outputLength;
-              if (pendingAckBytes >= ACK_BATCH_SIZE) {
-                flushAck();
-              } else if (!ackFlushTimer) {
-                ackFlushTimer = setTimeout(flushAck, ACK_BATCH_INTERVAL);
-              }
+              acknowledger.acknowledge(output);
               // Read scroll position LIVE after render, not before write —
               // avoids stale shouldSnap=true yanking user back to bottom
               if (isNearBottomRef.current && terminal) {
@@ -1764,8 +1742,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             disposed = true;
             interceptor.dispose();
             interceptorRef.current = null;
-            flushAck();
-            if (ackFlushTimer) clearTimeout(ackFlushTimer);
+            acknowledger.dispose();
             resizeObserver?.disconnect();
             resizeObserver = null;
             if (resizeTimer) clearTimeout(resizeTimer);

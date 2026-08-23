@@ -72,6 +72,11 @@ import { printVersion } from './version';
 
 const SOURCE = 'npm' as const;
 
+interface CliFailure {
+  message: string;
+  code: string;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const telemetryContext = createInitialTelemetryContext(argv);
   if (argv.length === 0) {
@@ -467,7 +472,8 @@ function createParsedArgs(command: ParsedArgs['command'], overrides: Partial<Par
     verbose: false,
     json: false,
     remoteSetupArgs: [],
-    ...overrides
+    ...overrides,
+    retry: overrides.retry ?? 0,
   };
 }
 
@@ -628,10 +634,10 @@ function printDryRun(
 }
 
 if (require.main === module) {
-  main(process.argv.slice(2)).then((code) => {
+  runCli(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   }).catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(`runpane failed to report its command result: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
   });
 }

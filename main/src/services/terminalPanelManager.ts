@@ -1120,13 +1120,16 @@ export class TerminalPanelManager extends EventEmitter {
     // Wait for a spawn slot (caps concurrent PTY spawns to prevent CPU spikes)
     await this.acquireSpawnSlot(priority);
 
-    // Re-check after waiting — another call may have initialized this panel
+    try {
+    // Re-check after waiting — another call may have initialized this panel,
+    // or its owning panel may have been deleted while queued.
     if (this.terminals.has(panel.id)) {
-      this.releaseSpawnSlot();
       return;
     }
-
-    try {
+    if (!panelManager.getPanel(panel.id)) {
+      console.info(`[TerminalPanelManager] Panel ${panel.id} was deleted while waiting for a spawn slot; skipping spawn`);
+      return;
+    }
 
     let shellPath: string;
     let shellArgs: string[];
@@ -1242,6 +1245,11 @@ export class TerminalPanelManager extends EventEmitter {
 
     let ptyProcess: pty.IPty;
     let ptyHostId: string | undefined;
+
+    if (!panelManager.getPanel(panel.id)) {
+      console.info(`[TerminalPanelManager] Panel ${panel.id} was deleted before terminal spawn; skipping spawn`);
+      return;
+    }
 
     if (usePtyHost && supervisor) {
       // Flag-on path: spawn via ptyHost UtilityProcess. Critical invariant:

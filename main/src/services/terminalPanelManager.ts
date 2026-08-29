@@ -1121,336 +1121,400 @@ export class TerminalPanelManager extends EventEmitter {
     await this.acquireSpawnSlot(priority);
 
     try {
-    // Re-check after waiting — another call may have initialized this panel,
-    // or its owning panel may have been deleted while queued.
-    if (this.terminals.has(panel.id)) {
-      return;
-    }
-    if (!panelManager.getPanel(panel.id)) {
-      console.info(`[TerminalPanelManager] Panel ${panel.id} was deleted while waiting for a spawn slot; skipping spawn`);
-      return;
-    }
-
-    let shellPath: string;
-    let shellArgs: string[];
-    let shellType: string;
-    let spawnCwd: string | undefined = cwd;
-
-    if (wslContext && process.platform === 'win32') {
-      const wslShell = getWSLShellSpawn(wslContext.distribution, cwd);
-      shellPath = wslShell.path;
-      shellArgs = wslShell.args;
-      if (sessionRuntimeRc) {
-        shellArgs = ['-d', wslContext.distribution, '--exec', 'bash', '-lc',
-          `cd ${escapeForBash(cwd)} && exec bash --rcfile ${escapeForBash(sessionRuntimeRc)} -i`];
+      // Re-check after waiting — another call may have initialized this panel,
+      // or its owning panel may have been deleted while queued.
+      if (this.terminals.has(panel.id)) {
+        return;
       }
-      shellType = 'bash';
-      spawnCwd = undefined; // WSL handles cwd
-    } else {
-      const preferredShell = getRuntimeConfigManager().getPreferredShell();
-      const shellInfo = ShellDetector.getDefaultShell(preferredShell);
-      shellPath = shellInfo.path;
-      shellArgs = shellInfo.args || [];
-      shellType = shellInfo.name;
-    }
+      if (!panelManager.getPanel(panel.id)) {
+        console.info(`[TerminalPanelManager] Panel ${panel.id} was deleted while waiting for a spawn slot; skipping spawn`);
+        return;
+      }
 
-    const isLinux = process.platform === 'linux';
-    const enhancedPath = isLinux ? (process.env.PATH || '') : getShellPath();
+      let shellPath: string;
+      let shellArgs: string[];
+      let shellType: string;
+      let spawnCwd: string | undefined = cwd;
 
-    /**
-     * PANE_PORT: deterministic port block per session (10 consecutive ports).
-     * Avoids port conflicts when running parallel worktree dev servers.
-     * Hash the sessionId to a port in the 3000–8990 range (600 blocks of 10).
-     * Usage in pane.json: { "scripts": { "run": "PORT=$PANE_PORT pnpm dev" } }
-     */
-    let portHash = 0;
-    for (let i = 0; i < panel.sessionId.length; i++) {
-      portHash = ((portHash << 5) - portHash) + panel.sessionId.charCodeAt(i);
-      portHash |= 0;
-    }
-    const panePort = 3000 + (Math.abs(portHash) % 600) * 10;
-
-    /**
-     * When spawning into WSL, pty.spawn's `env` sets variables on the wsl.exe
-     * Windows process, which does NOT propagate them to the bash shell inside
-     * the distro. WSLENV is Microsoft's opt-in mechanism: listing a var name
-     * here tells WSL to copy that var's value from the Windows env into the
-     * Linux env at shell startup. Without this, GIT_COMMITTER_* (and every
-     * PANE_* var) silently disappear inside WSL terminals.
-     */
-    const isWSL = !!wslContext && process.platform === 'win32';
-    const panelCustomState = terminalCustomState(panel.state);
-    const wslEnvVars: Record<string, string> = isWSL
-      ? {
-          WSLENV: buildWSLENV([
-            'GIT_COMMITTER_NAME',
-            'GIT_COMMITTER_EMAIL',
-            'PANE_PORT',
-            'PANE_SESSION_ID',
-            'PANE_PANEL_ID',
-            'PANE_ORCHESTRATION_SESSION_ID',
-            'GIT_CEILING_DIRECTORIES',
-            'WORKTREE_PATH',
-            'PANE_WORKSPACE_PATH',
-          ]),
+      if (wslContext && process.platform === 'win32') {
+        const wslShell = getWSLShellSpawn(wslContext.distribution, cwd);
+        shellPath = wslShell.path;
+        shellArgs = wslShell.args;
+        if (sessionRuntimeRc) {
+          shellArgs = ['-d', wslContext.distribution, '--exec', 'bash', '-lc',
+            `cd ${escapeForBash(cwd)} && exec bash --rcfile ${escapeForBash(sessionRuntimeRc)} -i`];
         }
-      : {};
-
-    // Build spawn env once so legacy and ptyHost paths receive identical values.
-    const spawnCols = initialDimensions?.cols || 80;
-    const spawnRows = initialDimensions?.rows || 30;
-
-    // The ptyHost RPC DTO requires `Record<string, string>`, so both the legacy
-    // `pty.spawn` path and the ptyHost path get the same undefined-free shape.
-    const inheritedEnv = interactiveTerminalEnv();
-    // A Pane launched from an orchestrator must not inherit the parent's role.
-    delete inheritedEnv.PANE_ORCHESTRATION_SESSION_ID;
-    const baseSpawnEnv = {
-      ...inheritedEnv,
-      ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
-      PATH: enhancedPath,
-      TERM: 'xterm-256color',
-      COLORTERM: 'truecolor',
-      LANG: process.env.LANG || 'en_US.UTF-8',
-      WORKTREE_PATH: cwd,
-      PANE_SESSION_ID: panel.sessionId,
-      PANE_PANEL_ID: panel.id,
-      PANE_PORT: String(panePort),
-      PANE_WORKSPACE_PATH: cwd,
-      ...wslEnvVars,
-    } satisfies Record<string, string>;
-    const roleEnv: Record<string, string> = panelCustomState.orchestrationSessionId
-      ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId, GIT_CEILING_DIRECTORIES: sessionRuntimePath(sessionGitCeiling(), isWSL ? { runtime: 'wsl', wslDistribution: wslContext?.distribution } : undefined) }
-      : baseSpawnEnv;
-    // Pane's own runpane goes first on PATH (see runpaneShim.ts). WSL shells
-    // cannot run the Windows Electron binary, so they keep their own PATH.
-    const launch = isWSL ? { args: shellArgs, env: roleEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, roleEnv);
-    shellArgs = launch.args;
-    const spawnEnv = launch.env;
-
-    // Read the setting once per spawn so we don't scatter config reads.
-    // `getPtyHostRuntime()` returns null when the setting is off or when
-    // supervisor startup failed; in either case we transparently fall back to
-    // the legacy `pty.spawn` path.
-    const runtimeConfigManager = getRuntimeConfigManager();
-    const useFlag = runtimeConfigManager.getUsePtyHost();
-    let supervisor: PtyHostRuntime | null = null;
-    if (useFlag) {
-      supervisor = getPtyHostRuntime();
-      if (!supervisor) {
-        console.warn('[ptyHost] supervisor unavailable, falling back to legacy pty.spawn');
+        shellType = 'bash';
+        spawnCwd = undefined; // WSL handles cwd
+      } else {
+        const preferredShell = getRuntimeConfigManager().getPreferredShell();
+        const shellInfo = ShellDetector.getDefaultShell(preferredShell);
+        shellPath = shellInfo.path;
+        shellArgs = shellInfo.args || [];
+        shellType = shellInfo.name;
       }
-    }
-    const usePtyHost = !!supervisor;
 
-    let ptyProcess: pty.IPty;
-    let ptyHostId: string | undefined;
+      const isLinux = process.platform === 'linux';
+      const enhancedPath = isLinux ? (process.env.PATH || '') : getShellPath();
 
-    if (!panelManager.getPanel(panel.id)) {
-      console.info(`[TerminalPanelManager] Panel ${panel.id} was deleted before terminal spawn; skipping spawn`);
-      return;
-    }
-
-    if (usePtyHost && supervisor) {
-      // Flag-on path: spawn via ptyHost UtilityProcess. Critical invariant:
-      // `this.terminals.set(...)` happens only AFTER the spawn response lands
-      // so synchronous `.pid` readers (getSessionPids, killProcessTree) never
-      // observe a pid-less handle.
-      const spawned = await supervisor.spawn({
-        shell: shellPath,
-        args: shellArgs,
-        cwd: spawnCwd,
-        cols: spawnCols,
-        rows: spawnRows,
-        env: spawnEnv,
-        name: 'xterm-256color',
-      });
-      const handle = supervisor.getHandle(spawned.ptyId);
-      if (!handle) {
-        throw new Error(`[ptyHost] supervisor returned ptyId=${spawned.ptyId} but getHandle() was undefined`);
+      /**
+       * PANE_PORT: deterministic port block per session (10 consecutive ports).
+       * Avoids port conflicts when running parallel worktree dev servers.
+       * Hash the sessionId to a port in the 3000–8990 range (600 blocks of 10).
+       * Usage in pane.json: { "scripts": { "run": "PORT=$PANE_PORT pnpm dev" } }
+       */
+      let portHash = 0;
+      for (let i = 0; i < panel.sessionId.length; i++) {
+        portHash = ((portHash << 5) - portHash) + panel.sessionId.charCodeAt(i);
+        portHash |= 0;
       }
-      ptyProcess = new PtyHandleShim(handle, spawnCols, spawnRows);
-      ptyHostId = spawned.ptyId;
-    } else {
-      // Flag-off path: legacy direct pty.spawn. Unchanged behavior.
-      ptyProcess = pty.spawn(shellPath, shellArgs, {
-        name: 'xterm-256color',
-        cols: spawnCols,
-        rows: spawnRows,
-        cwd: spawnCwd,
-        env: spawnEnv,
-      });
-    }
+      const panePort = 3000 + (Math.abs(portHash) % 600) * 10;
 
-    // Another initialization can finish while the ptyHost spawn is awaited.
-    if (this.terminals.has(panel.id)) {
-      ptyProcess.kill();
-      return;
-    }
+      /**
+       * When spawning into WSL, pty.spawn's `env` sets variables on the wsl.exe
+       * Windows process, which does NOT propagate them to the bash shell inside
+       * the distro. WSLENV is Microsoft's opt-in mechanism: listing a var name
+       * here tells WSL to copy that var's value from the Windows env into the
+       * Linux env at shell startup. Without this, GIT_COMMITTER_* (and every
+       * PANE_* var) silently disappear inside WSL terminals.
+       */
+      const isWSL = !!wslContext && process.platform === 'win32';
+      const panelCustomState = terminalCustomState(panel.state);
+      const wslEnvVars: Record<string, string> = isWSL
+        ? {
+            WSLENV: buildWSLENV([
+              'GIT_COMMITTER_NAME',
+              'GIT_COMMITTER_EMAIL',
+              'PANE_PORT',
+              'PANE_SESSION_ID',
+              'PANE_PANEL_ID',
+              'PANE_ORCHESTRATION_SESSION_ID',
+              'GIT_CEILING_DIRECTORIES',
+              'WORKTREE_PATH',
+              'PANE_WORKSPACE_PATH',
+            ]),
+          }
+        : {};
 
-    // Create terminal process object
-    const terminalProcess: TerminalProcess = {
-      pty: ptyProcess,
-      ptyId: ptyHostId,
-      isPtyHost: usePtyHost,
-      panelId: panel.id,
-      sessionId: panel.sessionId,
-      scrollbackBuffer: '',
-      alternateScreenBuffer: '',
-      screenEmulator: this.emulatorHost().createEmulator(spawnCols, spawnRows),
-      commandHistory: [],
-      currentCommand: '',
-      lastActivity: new Date(),
-      outputGeneration: 0,
-      isWSL: !!(wslContext && process.platform === 'win32'),
-      // Capture wslContext so `respawnAll` can re-inject the same WSLENV /
-      // distro / user settings after a ptyHost supervisor restart without
-      // having to reconstruct it from project state.
-      wslContext: wslContext ?? null,
-      flowControl: createFlowControlRecord(),
-      outputBuffer: '',
-      outputFlushTimer: null,
-      // No viewer means nobody can ACK. Preserve registered viewers on a
-      // supervisor respawn; new panels become visible when a client attaches.
-      isVisible: (this.visibleViewersByPanel.get(panel.id)?.size ?? 0) > 0,
-      isAlternateScreen: false,
-      inSyncBlock: false,
-      filterInAltScreen: false,
-      agentType: this.resolveTerminalAgentType(terminalCustomState(panel.state)),
-      shellProcessName: normalizeProcessName(shellPath),
-      agentSessionScrapeBuffer: ''
-    };
+      // Build spawn env once so legacy and ptyHost paths receive identical values.
+      const spawnCols = initialDimensions?.cols || 80;
+      const spawnRows = initialDimensions?.rows || 30;
 
-    // Store in map (ptyHost path: pid is already populated on the shim).
-    this.terminals.set(panel.id, terminalProcess);
+      // The ptyHost RPC DTO requires `Record<string, string>`, so both the legacy
+      // `pty.spawn` path and the ptyHost path get the same undefined-free shape.
+      const inheritedEnv = interactiveTerminalEnv();
+      // A Pane launched from an orchestrator must not inherit the parent's role.
+      delete inheritedEnv.PANE_ORCHESTRATION_SESSION_ID;
+      const baseSpawnEnv = {
+        ...inheritedEnv,
+        ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
+        PATH: enhancedPath,
+        TERM: 'xterm-256color',
+        COLORTERM: 'truecolor',
+        LANG: process.env.LANG || 'en_US.UTF-8',
+        WORKTREE_PATH: cwd,
+        PANE_SESSION_ID: panel.sessionId,
+        PANE_PANEL_ID: panel.id,
+        PANE_PORT: String(panePort),
+        PANE_WORKSPACE_PATH: cwd,
+        ...wslEnvVars,
+      } satisfies Record<string, string>;
+      const roleEnv: Record<string, string> = panelCustomState.orchestrationSessionId
+        ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId, GIT_CEILING_DIRECTORIES: sessionRuntimePath(sessionGitCeiling(), isWSL ? { runtime: 'wsl', wslDistribution: wslContext?.distribution } : undefined) }
+        : baseSpawnEnv;
+      // Pane's own runpane goes first on PATH (see runpaneShim.ts). WSL shells
+      // cannot run the Windows Electron binary, so they keep their own PATH.
+      const launch = isWSL ? { args: shellArgs, env: roleEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, roleEnv);
+      shellArgs = launch.args;
+      const spawnEnv = launch.env;
 
-    // Install lifetime guards before any launch-state persistence can yield.
-    this.setupTerminalHandlers(terminalProcess);
+      // Read the setting once per spawn so we don't scatter config reads.
+      // `getPtyHostRuntime()` returns null when the setting is off or when
+      // supervisor startup failed; in either case we transparently fall back to
+      // the legacy `pty.spawn` path.
+      const runtimeConfigManager = getRuntimeConfigManager();
+      const useFlag = runtimeConfigManager.getUsePtyHost();
+      let supervisor: PtyHostRuntime | null = null;
+      if (useFlag) {
+        supervisor = getPtyHostRuntime();
+        if (!supervisor) {
+          console.warn('[ptyHost] supervisor unavailable, falling back to legacy pty.spawn');
+        }
+      }
+      const usePtyHost = !!supervisor;
 
-    // Begin at-a-glance status detection for AI/CLI agent panels.
-    this.registerAgentStatusPanel(terminalProcess);
+      let ptyProcess: pty.IPty;
+      let ptyHostId: string | undefined;
 
-    // Tell the renderer which `ptyId` backs this panel so `TerminalPanel.tsx`
-    // can ack flow-control bytes over the ptyHost port. Flag-off path skips
-    // this: the renderer acks over IPC.
-    if (usePtyHost && ptyHostId) {
-      this.sendRendererEvent('terminal:ptyReady', {
-        sessionId: panel.sessionId,
-        panelId: panel.id,
+      if (!panelManager.getPanel(panel.id)) {
+        console.info(`[TerminalPanelManager] Panel ${panel.id} was deleted before terminal spawn; skipping spawn`);
+        return;
+      }
+
+      // Another initialization can finish while the ptyHost spawn is awaited.
+      if (this.terminals.has(panel.id)) {
+        ptyProcess.kill();
+        return;
+      }
+
+      // Create terminal process object
+      const terminalProcess: TerminalProcess = {
+        pty: ptyProcess,
         ptyId: ptyHostId,
-      });
-    }
-    
-    // Get initialCommand from existing state before updating
-    const existingState = terminalCustomState(panel.state);
-    const initialCommand = existingState?.initialCommand;
-    const initialInput = existingState?.initialInput;
-
-    // Wait for the shell prompt before sending an initial command.
-    let commandToRun: string | undefined;
-    let launchResolution: CliLaunchResolution | undefined;
-    if (initialCommand) {
-      try {
-        launchResolution = this.resolveCliLaunchCommand(panel.id, initialCommand, existingState || {}, shellType, terminalProcess.isWSL);
-      } catch (error) {
-        // Leave the shell usable and say why the command did not start.
-        const reason = error instanceof Error ? error.message : String(error);
-        console.warn(`[TerminalPanelManager] Could not launch ${initialCommand} in panel ${panel.id}:`, error);
-        terminalProcess.outputBuffer += `\r\n\x1b[31mPane could not start "${initialCommand}": ${reason}\x1b[0m\r\n`;
-        this.flushOutputBuffer(terminalProcess);
-      }
-    }
-    if (initialCommand && launchResolution) {
-      commandToRun = launchResolution.commandToRun;
-      const isCliCommand = launchResolution.isCliCommand;
-
-      if (isCliCommand) {
-        panel.state.customState = launchResolution.customState;
-        await panelManager.updatePanel(panel.id, { state: panel.state }).catch(error => {
-          console.warn(`[TerminalPanelManager] Failed to persist CLI launch state for panel ${panel.id}:`, error);
-        });
-      }
-
-      if (this.terminals.get(panel.id) !== terminalProcess || terminalProcess.destroying) return;
-
-      // Detect the interactive prompt before injecting the command.
-      // Previous approaches (fixed 500ms delay, then fire-on-any-data + 300ms) failed
-      // because shell init output (MINGW banner, .bashrc) fires before the prompt is ready.
-      // We check only the LAST line of the latest data chunk for a prompt pattern,
-      // so banner lines ending with % or > don't trigger a false positive.
-      const panelId = panel.id;
-      const injectCommand = () => {
-        if (this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
-        this.writeToTerminal(panelId, commandToRun! + '\r');
-
-        // For CLI tool terminals, signal the frontend when the CLI responds
-        if (isCliCommand) {
-          let cliReadySignaled = false;
-          // Declare before signalCliReady so the closure can reference it
-          let onCliOutput: ReturnType<typeof ptyProcess.onData> | null = null;
-
-          const signalCliReady = () => {
-            if (cliReadySignaled || this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
-            cliReadySignaled = true;
-            if (onCliOutput) onCliOutput.dispose();
-
-            // Persist isCliReady on panel state (best-effort, fire-and-forget)
-            const currentPanel = panelManager.getPanel(panelId);
-            if (currentPanel) {
-              const ps = currentPanel.state;
-              const cs2 = terminalCustomState(ps);
-              cs2.isCliReady = true;
-              ps.customState = cs2;
-              panelManager.updatePanel(panelId, { state: ps }); // async, not awaited
-            }
-
-            // Emit to renderer
-            this.sendRendererEvent('terminal:cliReady', { panelId });
-            this.holdInitialInput(panelId);
-          };
-
-          // Listen for CLI output after command injection. Cursor launches are
-          // preceded by the create-chat compound's shell traffic, so ready is
-          // gated on the TUI's own first render signal; other agents keep the
-          // first-byte trigger. Either way, fire a single delayed signal.
-          const cursorReady = launchResolution.customState.agentType === 'cursor'
-            ? createCursorReadyDetector()
-            : null;
-          onCliOutput = ptyProcess.onData((chunk: string) => {
-            if (cursorReady && !cursorReady(chunk)) return;
-            if (onCliOutput) onCliOutput.dispose();
-            onCliOutput = null;
-            // Small delay to let the CLI render its first frame
-            setTimeout(signalCliReady, 300);
-          });
-
-          // Safety timeout: dismiss after 10s regardless
-          setTimeout(signalCliReady, 10000);
-        } else if (initialInput) {
-          setTimeout(() => {
-            if (this.terminals.get(panelId) === terminalProcess && !terminalProcess.destroying) this.sendInitialInputOnce(panelId);
-          }, 1000);
-        }
+        isPtyHost: usePtyHost,
+        panelId: panel.id,
+        sessionId: panel.sessionId,
+        scrollbackBuffer: '',
+        alternateScreenBuffer: '',
+        screenEmulator: this.emulatorHost().createEmulator(spawnCols, spawnRows),
+        commandHistory: [],
+        currentCommand: '',
+        lastActivity: new Date(),
+        outputGeneration: 0,
+        isWSL: !!(wslContext && process.platform === 'win32'),
+        // Capture wslContext so `respawnAll` can re-inject the same WSLENV /
+        // distro / user settings after a ptyHost supervisor restart without
+        // having to reconstruct it from project state.
+        wslContext: wslContext ?? null,
+        flowControl: createFlowControlRecord(),
+        outputBuffer: '',
+        outputFlushTimer: null,
+        // No viewer means nobody can ACK. Preserve registered viewers on a
+        // supervisor respawn; new panels become visible when a client attaches.
+        isVisible: (this.visibleViewersByPanel.get(panel.id)?.size ?? 0) > 0,
+        isAlternateScreen: false,
+        inSyncBlock: false,
+        filterInAltScreen: false,
+        agentType: this.resolveTerminalAgentType(terminalCustomState(panel.state)),
+        shellProcessName: normalizeProcessName(shellPath),
+        agentSessionScrapeBuffer: ''
       };
 
-      this.scheduleAfterShellPrompt(ptyProcess, injectCommand);
-    } else if (initialInput) {
-      setTimeout(() => {
-        if (this.terminals.get(panel.id) === terminalProcess && !terminalProcess.destroying) this.sendInitialInputOnce(panel.id);
-      }, 1000);
-    }
+      // Store in map (ptyHost path: pid is already populated on the shim).
+      this.terminals.set(panel.id, terminalProcess);
 
-    // Update panel state
-    const state = panel.state;
-    state.customState = {
-      ...state.customState,
-      isInitialized: true,
-      cwd: cwd,
-      shellType: path.basename(shellPath),
-      dimensions: { cols: initialDimensions?.cols || 80, rows: initialDimensions?.rows || 30 }
-    };
+      // Install lifetime guards before any launch-state persistence can yield.
+      this.setupTerminalHandlers(terminalProcess);
 
-    await panelManager.updatePanel(panel.id, { state });
+      // Begin at-a-glance status detection for AI/CLI agent panels.
+      this.registerAgentStatusPanel(terminalProcess);
+
+      // Tell the renderer which `ptyId` backs this panel so `TerminalPanel.tsx`
+      // can ack flow-control bytes over the ptyHost port. Flag-off path skips
+      // this: the renderer acks over IPC.
+      if (usePtyHost && ptyHostId) {
+        this.sendRendererEvent('terminal:ptyReady', {
+          sessionId: panel.sessionId,
+          panelId: panel.id,
+          ptyId: ptyHostId,
+        });
+      }
+      
+      // Get initialCommand from existing state before updating
+      const existingState = terminalCustomState(panel.state);
+      const initialCommand = existingState?.initialCommand;
+      const initialInput = existingState?.initialInput;
+
+      // Wait for the shell prompt before sending an initial command.
+      let commandToRun: string | undefined;
+      let launchResolution: CliLaunchResolution | undefined;
+      if (initialCommand) {
+        try {
+          launchResolution = this.resolveCliLaunchCommand(panel.id, initialCommand, existingState || {}, shellType, terminalProcess.isWSL);
+        } catch (error) {
+          // Leave the shell usable and say why the command did not start.
+          const reason = error instanceof Error ? error.message : String(error);
+          console.warn(`[TerminalPanelManager] Could not launch ${initialCommand} in panel ${panel.id}:`, error);
+          terminalProcess.outputBuffer += `\r\n\x1b[31mPane could not start "${initialCommand}": ${reason}\x1b[0m\r\n`;
+          this.flushOutputBuffer(terminalProcess);
+        }
+      }
+      if (initialCommand && launchResolution) {
+        commandToRun = launchResolution.commandToRun;
+        const isCliCommand = launchResolution.isCliCommand;
+
+        if (isCliCommand) {
+          panel.state.customState = launchResolution.customState;
+          await panelManager.updatePanel(panel.id, { state: panel.state }).catch(error => {
+            console.warn(`[TerminalPanelManager] Failed to persist CLI launch state for panel ${panel.id}:`, error);
+          });
+        }
+
+        if (this.terminals.get(panel.id) !== terminalProcess || terminalProcess.destroying) return;
+
+        // Detect the interactive prompt before injecting the command.
+        // Previous approaches (fixed 500ms delay, then fire-on-any-data + 300ms) failed
+        // because shell init output (MINGW banner, .bashrc) fires before the prompt is ready.
+        // We check only the LAST line of the latest data chunk for a prompt pattern,
+        // so banner lines ending with % or > don't trigger a false positive.
+        const panelId = panel.id;
+        const injectCommand = () => {
+          if (this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
+          this.writeToTerminal(panelId, commandToRun! + '\r');
+
+          // For CLI tool terminals, signal the frontend when the CLI responds
+          if (isCliCommand) {
+            let cliReadySignaled = false;
+            // Declare before signalCliReady so the closure can reference it
+            let onCliOutput: ReturnType<typeof ptyProcess.onData> | null = null;
+
+            const signalCliReady = () => {
+              if (cliReadySignaled || this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
+              cliReadySignaled = true;
+              if (onCliOutput) onCliOutput.dispose();
+
+              // Persist isCliReady on panel state (best-effort, fire-and-forget)
+              const currentPanel = panelManager.getPanel(panelId);
+              if (currentPanel) {
+                const ps = currentPanel.state;
+                const cs2 = terminalCustomState(ps);
+                cs2.isCliReady = true;
+                ps.customState = cs2;
+                panelManager.updatePanel(panelId, { state: ps }); // async, not awaited
+              }
+
+              // Emit to renderer
+              this.sendRendererEvent('terminal:cliReady', { panelId });
+              this.holdInitialInput(panelId);
+            };
+
+            // Listen for CLI output after command injection. Cursor launches are
+            // preceded by the create-chat compound's shell traffic, so ready is
+            // gated on the TUI's own first render signal; other agents keep the
+            // first-byte trigger. Either way, fire a single delayed signal.
+            const cursorReady = launchResolution.customState.agentType === 'cursor'
+              ? createCursorReadyDetector()
+              : null;
+            onCliOutput = ptyProcess.onData((chunk: string) => {
+              if (cursorReady && !cursorReady(chunk)) return;
+              if (onCliOutput) onCliOutput.dispose();
+              onCliOutput = null;
+              // Small delay to let the CLI render its first frame
+              setTimeout(signalCliReady, 300);
+            });
+
+            // Safety timeout: dismiss after 10s regardless
+            setTimeout(signalCliReady, 10000);
+          } else if (initialInput) {
+            setTimeout(() => {
+              if (this.terminals.get(panelId) === terminalProcess && !terminalProcess.destroying) this.sendInitialInputOnce(panelId);
+            }, 1000);
+          }
+        };
+
+        this.scheduleAfterShellPrompt(ptyProcess, injectCommand);
+      } else if (initialInput) {
+        setTimeout(() => {
+          if (this.terminals.get(panel.id) === terminalProcess && !terminalProcess.destroying) this.sendInitialInputOnce(panel.id);
+        }, 1000);
+      }
+
+      // Update panel state
+      const state = panel.state;
+      state.customState = {
+        ...state.customState,
+        isInitialized: true,
+        cwd: cwd,
+        shellType: path.basename(shellPath),
+        dimensions: { cols: initialDimensions?.cols || 80, rows: initialDimensions?.rows || 30 }
+      };
+
+      // Get initialCommand from existing state before updating
+      const existingState = terminalCustomState(panel.state);
+      const initialCommand = existingState?.initialCommand;
+      const initialInput = existingState?.initialInput;
+
+      // If we have an initial command, set up the prompt detection listener BEFORE
+      // setupTerminalHandlers so we don't miss early shell output.
+      let commandToRun: string | undefined;
+      if (initialCommand) {
+        const launchResolution = this.resolveCliLaunchCommand(panel.id, initialCommand, existingState || {}, shellType);
+        commandToRun = launchResolution.commandToRun;
+        const isCliCommand = launchResolution.isCliCommand;
+
+        if (isCliCommand) {
+          panel.state.customState = launchResolution.customState;
+          await panelManager.updatePanel(panel.id, { state: panel.state }).catch(error => {
+            console.warn(`[TerminalPanelManager] Failed to persist CLI launch state for panel ${panel.id}:`, error);
+          });
+        }
+
+        // Detect the interactive prompt before injecting the command.
+        // Previous approaches (fixed 500ms delay, then fire-on-any-data + 300ms) failed
+        // because shell init output (MINGW banner, .bashrc) fires before the prompt is ready.
+        // We check only the LAST line of the latest data chunk for a prompt pattern,
+        // so banner lines ending with % or > don't trigger a false positive.
+        const panelId = panel.id;
+        const injectCommand = () => {
+          this.writeToTerminal(panelId, commandToRun! + '\r');
+
+          // For CLI tool terminals, signal the frontend when the CLI responds
+          if (isCliCommand) {
+            let cliReadySignaled = false;
+            // Declare before signalCliReady so the closure can reference it
+            let onCliOutput: ReturnType<typeof ptyProcess.onData> | null = null;
+
+            const signalCliReady = () => {
+              if (cliReadySignaled) return;
+              cliReadySignaled = true;
+              if (onCliOutput) onCliOutput.dispose();
+
+              // Persist isCliReady on panel state (best-effort, fire-and-forget)
+              const currentPanel = panelManager.getPanel(panelId);
+              if (currentPanel) {
+                const ps = currentPanel.state;
+                const cs2 = terminalCustomState(ps);
+                cs2.isCliReady = true;
+                ps.customState = cs2;
+                panelManager.updatePanel(panelId, { state: ps }); // async, not awaited
+              }
+
+              // Emit to renderer
+              this.sendRendererEvent('terminal:cliReady', { panelId });
+              this.sendInitialInputOnce(panelId);
+            };
+
+            // Listen for CLI output after command injection. Cursor launches are
+            // preceded by the create-chat compound's shell traffic, so ready is
+            // gated on the TUI's own first render signal; other agents keep the
+            // first-byte trigger. Either way, fire a single delayed signal.
+            const cursorReady = launchResolution.customState.agentType === 'cursor'
+              ? createCursorReadyDetector()
+              : null;
+            onCliOutput = ptyProcess.onData((chunk: string) => {
+              if (cursorReady && !cursorReady(chunk)) return;
+              if (onCliOutput) onCliOutput.dispose();
+              onCliOutput = null;
+              // Small delay to let the CLI render its first frame
+              setTimeout(signalCliReady, 300);
+            });
+
+            // Safety timeout: dismiss after 10s regardless
+            setTimeout(signalCliReady, 10000);
+          } else if (initialInput) {
+            setTimeout(() => this.sendInitialInputOnce(panelId), 1000);
+          }
+        };
+
+        this.scheduleAfterShellPrompt(ptyProcess, injectCommand);
+      } else if (initialInput) {
+        setTimeout(() => this.sendInitialInputOnce(panel.id), 1000);
+      }
+
+      // Set up event handlers
+      this.setupTerminalHandlers(terminalProcess);
+
+      // Update panel state
+      const state = panel.state;
+      state.customState = {
+        ...state.customState,
+        isInitialized: true,
+        cwd: cwd,
+        shellType: path.basename(shellPath),
+        dimensions: { cols: initialDimensions?.cols || 80, rows: initialDimensions?.rows || 30 }
+      };
+
+      await panelManager.updatePanel(panel.id, { state });
 
     } finally {
       this.releaseSpawnSlot();

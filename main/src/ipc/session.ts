@@ -26,6 +26,7 @@ import {
 } from '../utils/sessionValidation';
 import { detectProjectConfig } from '../services/projectConfigDetector';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { SessionDisplayNameError } from '../services/sessionManager';
 
 const DAEMON_SESSION_CHANNELS = [
   'sessions:get-all',
@@ -1444,7 +1445,10 @@ export function registerSessionHandlers(
       return { success: true, data: updatedSession };
     } catch (error) {
       console.error('Failed to rename session:', error);
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to rename session' };
+      return {
+        success: false,
+        error: error instanceof SessionDisplayNameError ? error.message : 'Failed to rename session',
+      };
     }
   });
 

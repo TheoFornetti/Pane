@@ -225,7 +225,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
 
   const handlePanelCreate = useCallback(
     async (type: ToolPanelType, options?: PanelCreateOptions) => {
-      if (!mainRepoSessionId) return;
+      if (!mainRepoSessionId) return false;
 
       // For terminal panels with initialCommand (e.g., Terminal (Claude))
       let initialState = options?.initialState;
@@ -501,7 +501,11 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                       initialCommand: launchFailure.initialCommand,
                       title: launchFailure.agentTitle,
                       agentType: launchFailure.agentType,
-                    }).then(clearLaunchFailure);
+                    }).then(created => {
+                      if (created) clearLaunchFailure();
+                    }).catch(error => {
+                      console.error('Failed to open agent after automatic launch failure:', error);
+                    });
                   }}
                   onDismiss={clearLaunchFailure}
                 />

@@ -242,11 +242,13 @@ export function ProjectSessionList({
     }
   }, []);
 
-  const openPaneMenu = (event: React.MouseEvent<HTMLDivElement>, session: Session, label: string) => {
+  const openPaneMenu = (event: React.MouseEvent<HTMLDivElement>, session: Session) => {
     event.preventDefault();
     event.stopPropagation();
-    menuOpenerRef.current = event.currentTarget.querySelector<HTMLButtonElement>('button[aria-label]');
-    setPaneMenu({ session, label, x: event.clientX, y: event.clientY });
+    const opener = event.currentTarget.querySelector<HTMLButtonElement>('button[aria-label]');
+    if (!opener) return;
+    menuOpenerRef.current = opener;
+    setPaneMenu({ session, opener, x: event.clientX, y: event.clientY });
   };
 
   const closeRenameDialog = () => {
@@ -558,7 +560,7 @@ export function ProjectSessionList({
                       onClick={() => handleSessionClick(session.id, 'repositories')}
                       onArchive={() => handleArchiveSession(session.id)}
                       onTogglePinned={() => handleTogglePinnedSession(session.id)}
-                      onContextMenu={(event) => openPaneMenu(event, session, session.name || 'Untitled')}
+                      onContextMenu={(event) => openPaneMenu(event, session)}
                       rowLayout={sidebarPaneRowLayout}
                       nested
                     />

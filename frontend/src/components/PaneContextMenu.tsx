@@ -3,7 +3,7 @@ import { Modal, ModalBody, ModalHeader, ModalFooter } from './ui/Modal';
 import { Input } from './ui/Input';
 import { Button } from './ui/Button';
 import { useSessionStore } from '../stores/sessionStore';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { RenamePaneDialog } from './RenamePaneDialog';
 import { PromotePaneDialog } from './PromotePaneDialog';
 import { Archive, Pin, ArrowUpRight, Pencil } from 'lucide-react';
@@ -34,14 +34,6 @@ export function PaneContextMenu({ menu, onClose, onRename, onTogglePinned, onArc
   const menuRef = useRef<HTMLDivElement>(null);
   const [focusedIndex, setFocusedIndex] = useState(0);
 
-  useEffect(() => {
-    if (!menu) return;
-    setFocusedIndex(0);
-    requestAnimationFrame(() => {
-      menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
-    });
-  }, [menu]);
-
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
     if (items.length === 0) return;
@@ -66,7 +58,7 @@ export function PaneContextMenu({ menu, onClose, onRename, onTogglePinned, onArc
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
-      const opener = menu?.opener;
+      const opener = menu.opener;
       onClose();
       requestAnimationFrame(() => opener?.focus());
       return;
@@ -87,7 +79,7 @@ export function PaneContextMenu({ menu, onClose, onRename, onTogglePinned, onArc
         aria-label={`Pane actions for ${menu?.session.name || 'Untitled'}`}
         onKeyDown={handleKeyDown}
       >
-        <PopoverButton role="menuitem" tabIndex={focusedIndex === 0 ? 0 : -1} onFocus={() => setFocusedIndex(0)} onClick={() => { if (onRename) onRename(); else if (menu) { setDisplayRenaming(menu.session); onClose(); } }}>
+        <PopoverButton autoFocus role="menuitem" tabIndex={focusedIndex === 0 ? 0 : -1} onFocus={() => setFocusedIndex(0)} onClick={() => { if (onRename) onRename(); else if (menu) { setDisplayRenaming(menu.session); onClose(); } }}>
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename</span>
         </PopoverButton>
         <PopoverButton role="menuitem" tabIndex={focusedIndex === 1 ? 0 : -1} onFocus={() => setFocusedIndex(1)} onClick={onTogglePinned}>

@@ -10,7 +10,7 @@ import ProjectSettings from './ProjectSettings';
 import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
 import { SessionStatusBadge } from './SessionStatusBadge';
-import { PaneContextMenu, type PaneContextMenuState } from './PaneContextMenu';
+import { PaneContextMenu } from './PaneContextMenu';
 import { RenamePaneDialog } from './RenamePaneDialog';
 import { AgentStatusDot } from './ui/AgentStatusDot';
 import type { DropdownItem } from './ui/Dropdown';
@@ -28,6 +28,7 @@ import {
   useOrchestrationSessionStore,
 } from '../stores/orchestrationSessionStore';
 import type { SidebarNavigationScope } from '../stores/navigationStore';
+import { usePaneContextMenu } from '../hooks/usePaneContextMenu';
 import {
   createProjectById,
   flattenSessionsByProjects,
@@ -82,9 +83,14 @@ export function ProjectSessionList({
 
   // Add project dialog state
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
-  const [paneMenu, setPaneMenu] = useState<PaneContextMenuState | null>(null);
-  const [renameTarget, setRenameTarget] = useState<Session | null>(null);
-  const menuOpenerRef = useRef<HTMLElement | null>(null);
+  const {
+    menu: paneMenu,
+    openMenu,
+    closeMenu,
+    renameTarget,
+    startRename,
+    finishRename,
+  } = usePaneContextMenu();
   useEffect(() => {
     onRegisterAddRepository?.(() => setShowAddProjectDialog(true));
   }, [onRegisterAddRepository]);
@@ -243,17 +249,9 @@ export function ProjectSessionList({
   }, []);
 
   const openPaneMenu = (event: React.MouseEvent<HTMLDivElement>, session: Session) => {
-    event.preventDefault();
-    event.stopPropagation();
     const opener = event.currentTarget.querySelector<HTMLButtonElement>('button[aria-label]')
       ?? event.currentTarget;
-    menuOpenerRef.current = opener;
-    setPaneMenu({ session, opener, x: event.clientX, y: event.clientY });
-  };
-
-  const closeRenameDialog = () => {
-    setRenameTarget(null);
-    requestAnimationFrame(() => menuOpenerRef.current?.focus());
+    openMenu(event, session, opener);
   };
 
   // Project operations
@@ -605,21 +603,18 @@ export function ProjectSessionList({
       )}
       <PaneContextMenu
         menu={paneMenu}
-        onClose={() => setPaneMenu(null)}
-        onRename={() => {
-          setRenameTarget(paneMenu?.session ?? null);
-          setPaneMenu(null);
-        }}
+        onClose={closeMenu}
+        onRename={startRename}
         onTogglePinned={() => {
           if (paneMenu) void handleTogglePinnedSession(paneMenu.session.id);
-          setPaneMenu(null);
+          closeMenu();
         }}
         onArchive={() => {
           if (paneMenu) void handleArchiveSession(paneMenu.session.id);
-          setPaneMenu(null);
+          closeMenu();
         }}
       />
-      <RenamePaneDialog session={renameTarget} onClose={closeRenameDialog} />
+      <RenamePaneDialog session={renameTarget} onClose={finishRename} />
     </>
   );
 }

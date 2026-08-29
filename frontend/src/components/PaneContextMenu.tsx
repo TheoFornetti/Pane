@@ -4,26 +4,30 @@ import { Input } from './ui/Input';
 import { Button } from './ui/Button';
 import { useSessionStore } from '../stores/sessionStore';
 import { useState } from 'react';
+import { RenamePaneDialog } from './RenamePaneDialog';
 import { PromotePaneDialog } from './PromotePaneDialog';
 import { Archive, Pin, ArrowUpRight, Pencil } from 'lucide-react';
 import type { Session } from '../types/session';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 
-export interface CompactSessionMenuState {
+export interface PaneContextMenuState {
   session: Session;
+  label?: string;
   x: number;
   y: number;
 }
 
-interface CompactSessionMenuProps {
-  menu: CompactSessionMenuState | null;
+interface PaneContextMenuProps {
+  menu: PaneContextMenuState | null;
   onClose: () => void;
+  onRename?: () => void;
   onTogglePinned: () => void;
   onArchive: () => void;
 }
 
 /** Right-click actions for a pane in the collapsed sidebar rail. */
-export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }: CompactSessionMenuProps) {
+export function PaneContextMenu({ menu, onClose, onRename, onTogglePinned, onArchive }: PaneContextMenuProps) {
+  const [displayRenaming, setDisplayRenaming] = useState<Session | null>(null);
   const [promoting, setPromoting] = useState<Session | null>(null);
   const [renaming, setRenaming] = useState<Session | null>(null);
   return (<>
@@ -34,6 +38,9 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
       onClose={onClose}
     >
       <div role="menu" aria-label={`Pane actions for ${menu?.session.name || 'Untitled'}`}>
+        <PopoverButton autoFocus role="menuitem" onClick={() => { if (onRename) onRename(); else if (menu) { setDisplayRenaming(menu.session); onClose(); } }}>
+          <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename</span>
+        </PopoverButton>
         <PopoverButton role="menuitem" onClick={onTogglePinned}>
           <span className="flex items-center gap-2">
             <Pin className="h-4 w-4 rotate-45" />
@@ -57,6 +64,7 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
         </PopoverButton>
       </div>
     </TerminalPopover>
+    <RenamePaneDialog session={displayRenaming} onClose={() => setDisplayRenaming(null)} />
     {renaming && <RenameWorktreeDialog key={renaming.id} session={renaming} onClose={() => setRenaming(null)} />}
     {promoting && <PromotePaneDialog key={promoting.id} paneId={promoting.id} paneName={promoting.name} onClose={() => setPromoting(null)} />}
   </>);

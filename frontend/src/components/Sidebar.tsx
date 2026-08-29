@@ -24,10 +24,11 @@ import type { Session } from '../types/session';
 import { useSessionNavigationHotkeys } from '../hooks/useSessionNavigationHotkeys';
 import { useRemoteRuntimeState } from '../hooks/useRemoteRuntimeState';
 import { useAppBuildInfo } from '../hooks/useAppBuildInfo';
-import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { getRemoteFooterStatus, getRemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
 import { RemoteHostSwitcher } from './RemoteHostSwitcher';
 import { useConfigStore } from '../stores/configStore';
+import { PaneContextMenu, type PaneContextMenuState } from './PaneContextMenu';
+import { RenamePaneDialog } from './RenamePaneDialog';
 import { usePanelStore } from '../stores/panelStore';
 import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
 import { createProjectById, getPinnedSessions, groupSessionsByProject } from '../utils/sessionOrdering';
@@ -235,7 +236,9 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   // State for collapsed sidebar
   const [projects, setProjects] = useState<Project[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [compactSessionMenu, setCompactSessionMenu] = useState<CompactSessionMenuState | null>(null);
+  const [compactSessionMenu, setCompactSessionMenu] = useState<PaneContextMenuState | null>(null);
+  const [renameTarget, setRenameTarget] = useState<Session | null>(null);
+  const menuOpenerRef = useRef<HTMLElement | null>(null);
   const activeProjectId = useNavigationStore((state) => state.activeProjectId);
   const activeView = useNavigationStore((state) => state.activeView);
   const expandedProjects = useNavigationStore((state) => state.expandedProjects);
@@ -309,10 +312,16 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     navigateToSessions();
   }, [navigateToSessions, setActiveSession, setSidebarNavigationScope]);
 
-  const openCompactSessionMenu = useCallback((event: React.MouseEvent, session: Session) => {
+  const openCompactSessionMenu = useCallback((event: React.MouseEvent<HTMLElement>, session: Session) => {
     event.preventDefault();
     event.stopPropagation();
-    setCompactSessionMenu({ session, x: event.clientX, y: event.clientY });
+    menuOpenerRef.current = event.currentTarget;
+    setCompactSessionMenu({ session, label: session.name || 'Untitled', x: event.clientX, y: event.clientY });
+  }, []);
+
+  const closeRenameDialog = useCallback(() => {
+    setRenameTarget(null);
+    requestAnimationFrame(() => menuOpenerRef.current?.focus());
   }, []);
 
   const archiveCompactSession = useCallback(async () => {
@@ -713,12 +722,17 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           />
         )}
 
-        <CompactSessionMenu
+        <PaneContextMenu
           menu={compactSessionMenu}
           onClose={() => setCompactSessionMenu(null)}
+          onRename={() => {
+            setRenameTarget(compactSessionMenu?.session ?? null);
+            setCompactSessionMenu(null);
+          }}
           onTogglePinned={() => void toggleCompactSessionPinned()}
           onArchive={() => void archiveCompactSession()}
         />
+        <RenamePaneDialog session={renameTarget} onClose={closeRenameDialog} />
       </>
     );
   }

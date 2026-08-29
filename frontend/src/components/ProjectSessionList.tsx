@@ -1,4 +1,3 @@
-import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
 import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
@@ -10,6 +9,9 @@ import { AddProjectDialog } from './AddProjectDialog';
 import ProjectSettings from './ProjectSettings';
 import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
+import { SessionStatusBadge } from './SessionStatusBadge';
+import { PaneContextMenu, type PaneContextMenuState } from './PaneContextMenu';
+import { RenamePaneDialog } from './RenamePaneDialog';
 import { AgentStatusDot } from './ui/AgentStatusDot';
 import type { DropdownItem } from './ui/Dropdown';
 import { useSessionAgentDisplayStatus } from '../hooks/useAgentStatus';
@@ -32,6 +34,7 @@ import {
   getPinnedSessions,
   groupSessionsByProject,
 } from '../utils/sessionOrdering';
+import { resolveSessionLabel } from '../utils/paneTitle';
 
 const SIDEBAR_ROW_BASE = 'flex w-[calc(100%-1rem)] items-center text-left transition-colors';
 const SIDEBAR_ROW_PADDING = 'mx-2 px-2';
@@ -79,6 +82,9 @@ export function ProjectSessionList({
 
   // Add project dialog state
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
+  const [paneMenu, setPaneMenu] = useState<PaneContextMenuState | null>(null);
+  const [renameTarget, setRenameTarget] = useState<Session | null>(null);
+  const menuOpenerRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     onRegisterAddRepository?.(() => setShowAddProjectDialog(true));
   }, [onRegisterAddRepository]);
@@ -235,6 +241,18 @@ export function ProjectSessionList({
       console.error('Failed to toggle pinned session:', e);
     }
   }, []);
+
+  const openPaneMenu = (event: React.MouseEvent<HTMLDivElement>, session: Session, label: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    menuOpenerRef.current = event.currentTarget.querySelector<HTMLButtonElement>('button[aria-label]');
+    setPaneMenu({ session, label, x: event.clientX, y: event.clientY });
+  };
+
+  const closeRenameDialog = () => {
+    setRenameTarget(null);
+    requestAnimationFrame(() => menuOpenerRef.current?.focus());
+  };
 
   // Project operations
   const handleDeleteProject = async (projectId: number) => {
@@ -540,6 +558,7 @@ export function ProjectSessionList({
                       onClick={() => handleSessionClick(session.id, 'repositories')}
                       onArchive={() => handleArchiveSession(session.id)}
                       onTogglePinned={() => handleTogglePinnedSession(session.id)}
+                      onContextMenu={(event) => openPaneMenu(event, session, session.name || 'Untitled')}
                       rowLayout={sidebarPaneRowLayout}
                       nested
                     />
@@ -582,6 +601,23 @@ export function ProjectSessionList({
           onDelete={handleProjectSettingsDeleted}
         />
       )}
+      <PaneContextMenu
+        menu={paneMenu}
+        onClose={() => setPaneMenu(null)}
+        onRename={() => {
+          setRenameTarget(paneMenu?.session ?? null);
+          setPaneMenu(null);
+        }}
+        onTogglePinned={() => {
+          if (paneMenu) void handleTogglePinnedSession(paneMenu.session.id);
+          setPaneMenu(null);
+        }}
+        onArchive={() => {
+          if (paneMenu) void handleArchiveSession(paneMenu.session.id);
+          setPaneMenu(null);
+        }}
+      />
+      <RenamePaneDialog session={renameTarget} onClose={closeRenameDialog} />
     </>
   );
 }
@@ -598,7 +634,6 @@ function SessionRowContent({
   adds,
   dels,
   displayName,
-  showActivity,
   showUnviewedCompleted,
   agentDisplayStatus,
   rowLayout,
@@ -610,12 +645,11 @@ function SessionRowContent({
   adds: number;
   dels: number;
   displayName?: string;
-  showActivity: boolean;
   showUnviewedCompleted: boolean;
   agentDisplayStatus: AgentDisplayStatus;
   rowLayout: SidebarPaneRowLayout;
 }) {
-  const title = displayName || gs?.prTitle || session.name || 'Untitled';
+  const title = resolveSessionLabel(session, displayName);
   const prNumber = gs?.prNumber;
   const PullRequestIcon = gs?.prIsDraft ? GitPullRequestDraft : GitPullRequest;
   const showMetadata = Boolean(prNumber || hasDiff || session.worktreeOwnership === 'external');
@@ -631,7 +665,6 @@ function SessionRowContent({
         <AgentStatusDot status={agentDisplayStatus} size="sm" className="flex-shrink-0" />
         <span className={cn(
           'min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary decoration-status-info decoration-2 underline-offset-4',
-          showActivity && 'animate-sidebar-active-label',
           showUnviewedCompleted && 'underline decoration-dashed'
         )}>
           {title}
@@ -651,7 +684,6 @@ function SessionRowContent({
       <div className="flex min-w-0 flex-1 flex-col">
         <span className={cn(
           'min-w-0 truncate text-[13px] font-medium leading-5 text-text-primary decoration-status-info decoration-2 underline-offset-4',
-          showActivity && 'animate-sidebar-active-label',
           showUnviewedCompleted && 'underline decoration-dashed'
         )}>
           {title}
@@ -686,6 +718,7 @@ interface SessionRowProps {
   onClick: () => void;
   onArchive: () => void;
   onTogglePinned: () => void;
+  onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
   displayName?: string;
   rowLayout: SidebarPaneRowLayout;
   nested?: boolean;
@@ -698,9 +731,9 @@ interface GitStatusIPCResponse {
 
 function SessionRow({
   session, isActive, globalIndex, onClick,
-  onArchive, onTogglePinned, displayName, rowLayout, nested = false,
+  onArchive, onTogglePinned, onContextMenu, displayName, rowLayout, nested = false,
 }: SessionRowProps) {
-  const [contextMenu, setContextMenu] = useState<CompactSessionMenuState | null>(null);
+  const [contextMenu, setContextMenu] = useState<PaneContextMenuState | null>(null);
   const [localGitStatus, setLocalGitStatus] = useState<GitStatus | undefined>(session.gitStatus);
   const initialGitStatusRequestRef = useRef<string | null>(null);
 
@@ -766,17 +799,18 @@ function SessionRow({
   const dels = (gs?.commitDeletions ?? 0) + (gs?.deletions ?? 0);
   const hasDiff = adds > 0 || dels > 0;
   const showActivity = agentDisplayStatus === 'working';
-  const accessibleName = displayName || gs?.prTitle || session.name || 'Untitled';
+  const accessibleName = resolveSessionLabel(session, displayName);
 
   return (<>
     <div
-      onContextMenu={event => { event.preventDefault(); setContextMenu({ session, x: event.clientX, y: event.clientY }); }}
+      onContextMenu={event => { if (onContextMenu) onContextMenu(event); else { event.preventDefault(); setContextMenu({ session, label: session.name, x: event.clientX, y: event.clientY }); } }}
       className={cn(
         'group/session relative mx-2 flex w-[calc(100%-1rem)] items-center gap-1 rounded-md pr-2 text-left transition-colors',
         nested ? 'pl-6' : 'pl-2',
         rowLayout === 'single' ? 'py-1' : 'py-1.5',
         isActive ? 'bg-surface-selected' : 'hover:bg-surface-hover'
       )}
+      onContextMenu={onContextMenu}
     >
       <Tooltip
         content={<SessionDetailTooltip session={session} gitStatus={localGitStatus} showName showDiffStats={false} globalIndex={globalIndex} />}
@@ -800,7 +834,6 @@ function SessionRow({
           adds={adds}
           dels={dels}
           displayName={accessibleName}
-          showActivity={showActivity}
           showUnviewedCompleted={hasUnviewedCompletedActivity && !isActive && !showActivity}
           agentDisplayStatus={agentDisplayStatus}
           rowLayout={rowLayout}
@@ -830,7 +863,7 @@ function SessionRow({
         </button>
       </div>
     </div>
-    <CompactSessionMenu menu={contextMenu} onClose={() => setContextMenu(null)}
+    <PaneContextMenu menu={contextMenu} onClose={() => setContextMenu(null)}
       onArchive={() => { setContextMenu(null); onArchive(); }}
       onTogglePinned={() => { setContextMenu(null); onTogglePinned(); }} />
   </>);

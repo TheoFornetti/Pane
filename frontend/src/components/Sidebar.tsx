@@ -42,9 +42,9 @@ import { usePaneContextMenu } from '../hooks/usePaneContextMenu';
 function CollapsedProjectTooltip({ project, sessionCount }: { project: Project; sessionCount: number }) {
   return (
     <div className="max-w-xs space-y-1">
-      <p className="text-[11px] text-text-primary font-medium">{project.name}</p>
-      <p className="text-[10px] text-text-tertiary font-mono break-all">{project.path}</p>
-      <p className="text-[10px] text-text-tertiary">
+      <p className="text-[11px] text-navigation-primary font-medium">{project.name}</p>
+      <p className="text-[10px] text-navigation-muted font-mono break-all">{project.path}</p>
+      <p className="text-[10px] text-navigation-muted">
         {sessionCount} {sessionCount === 1 ? 'workspace' : 'workspaces'}
       </p>
     </div>
@@ -58,15 +58,7 @@ function CompactSessionTooltip({
   session: Session;
   label: string;
 }) {
-  return (
-    <div className="max-w-xs space-y-1.5">
-      <p className="text-[11px] font-medium leading-snug text-text-primary whitespace-pre-wrap break-words">
-        {label}
-      </p>
-      <div className="border-t border-border-primary" />
-      <SessionDetailTooltip session={session} showName={false} />
-    </div>
-  );
+  return <SessionDetailTooltip session={session} name={label} />;
 }
 
 interface SidebarProps {
@@ -90,8 +82,8 @@ const REMOTE_DESKTOP_URL = 'https://remotedesktop.google.com/access';
 const REMOTE_DESKTOP_TOOLTIP = 'Use Remote Desktop to access the host device for Electron apps, native windows, and UI running on the remote machine.';
 type SidebarSection = 'pinned' | 'repositories';
 const COMPACT_RAIL_BUTTON = 'relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded transition-colors focus:outline-none focus:ring-2 focus:ring-interactive';
-const COMPACT_RAIL_IDLE = 'text-text-tertiary hover:bg-surface-hover hover:text-text-primary';
-const COMPACT_RAIL_ACTIVE = 'bg-surface-selected text-text-primary';
+const COMPACT_RAIL_IDLE = 'text-navigation-muted hover:bg-surface-hover hover:text-navigation-primary';
+const COMPACT_RAIL_ACTIVE = 'bg-surface-selected text-navigation-primary';
 
 
 const HelpCircleIcon = ({ className }: { className?: string }) => (
@@ -190,8 +182,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   );
   const remoteFooterTooltip = (
     <div className="max-w-[260px] space-y-1">
-      <p className="text-[11px] font-medium text-text-primary">{remoteFooterStatus.title}</p>
-      <p className="text-[10px] text-text-tertiary">{remoteFooterStatus.description}</p>
+      <p className="text-[11px] font-medium text-navigation-primary">{remoteFooterStatus.title}</p>
+      <p className="text-[10px] text-navigation-muted">{remoteFooterStatus.description}</p>
     </div>
   );
   const showRemoteDesktopLink = remoteConnectionState.mode === 'remote' && remoteConnectionState.status === 'connected';
@@ -436,13 +428,13 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         <button
           type="button"
           aria-label={`Agents run on ${remoteHostSwitcher.label}. Switch host`}
-          className="ml-1 flex h-6 max-w-[180px] items-center gap-1.5 rounded-full border border-border-primary bg-surface-secondary pl-2 pr-1.5 text-[12px] text-text-primary hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+          className="ml-1 flex h-6 max-w-[180px] items-center gap-1.5 rounded-full border border-border-primary bg-surface-primary pl-2 pr-1.5 text-[12px] text-navigation-primary hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
         >
           {remoteHostSwitcher.dotClassName
             ? <span className={`h-2 w-2 shrink-0 rounded-full ${remoteHostSwitcher.dotClassName}`} />
-            : <Laptop className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />}
+            : <Laptop className="h-3.5 w-3.5 shrink-0 text-navigation-muted" />}
           <span className="truncate">{remoteHostSwitcher.label}</span>
-          <ChevronDown className="h-3 w-3 shrink-0 text-text-tertiary" />
+          <ChevronDown className="h-3 w-3 shrink-0 text-navigation-muted" />
         </button>,
         'bottom-left',
       )}
@@ -454,7 +446,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       <>
         <div
           data-testid="sidebar"
-          className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-secondary text-text-primary h-full flex flex-col flex-shrink-0"
+          className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-primary text-navigation-primary h-full flex flex-col flex-shrink-0"
           style={{ width: '48px' }}
         >
           {titleBarControlsSlot && createPortal(headerControls, titleBarControlsSlot)}
@@ -541,6 +533,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                     key={`compact-pinned-${session.id}`}
                     content={<CompactSessionTooltip session={session} label={label} />}
                     side="right"
+                    contentClassName="p-3"
                     interactive
                   >
                     <button
@@ -558,7 +551,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                           <SquareTerminal
                             data-testid={`compact-pinned-pane-placeholder-${session.id}`}
                             aria-hidden="true"
-                            className="h-4 w-4 text-text-tertiary"
+                            className="h-4 w-4 text-navigation-muted"
                           />
                         )}
                       />
@@ -620,6 +613,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                         key={session.id}
                         content={<CompactSessionTooltip session={session} label={session.name || 'Untitled'} />}
                         side="right"
+                        contentClassName="p-3"
                         interactive
                       >
                         <button
@@ -637,7 +631,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                               <SquareTerminal
                                 data-testid={`compact-repository-pane-placeholder-${session.id}`}
                                 aria-hidden="true"
-                                className="h-4 w-4 text-text-tertiary"
+                                className="h-4 w-4 text-navigation-muted"
                               />
                             )}
                           />
@@ -736,7 +730,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     <>
       <div
         data-testid="sidebar"
-        className="pane-sidebar-shell bg-surface-secondary text-text-primary h-full flex flex-col relative flex-shrink-0"
+        className="pane-sidebar-shell bg-surface-primary text-navigation-primary h-full flex flex-col relative flex-shrink-0"
         style={{ width: `${width}px` }}
       >
         {/* Resize handle */}
@@ -760,7 +754,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         <button
           type="button"
           onClick={() => addRepositoryRef.current?.()}
-          className="mx-2 mt-1 flex h-7 flex-shrink-0 items-center gap-2 rounded-md bg-surface-hover px-2 text-[13px] font-medium text-text-secondary hover:text-text-primary"
+          className="mx-2 mt-1 flex h-7 flex-shrink-0 items-center gap-2 rounded-md bg-surface-hover px-2 text-[13px] font-medium text-navigation-secondary hover:text-navigation-primary"
         >
           <Plus className="h-3.5 w-3.5 flex-shrink-0" />
           <span>New project</span>
@@ -795,11 +789,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               <button
                 type="button"
                 aria-label="Home menu"
-                className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md bg-surface-hover/40 px-2 text-[13px] font-medium text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary"
+                className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md bg-surface-hover/40 px-2 text-[13px] font-medium text-navigation-secondary hover:bg-surface-hover/60 hover:text-navigation-primary"
               >
                 <Home className="h-3.5 w-3.5 shrink-0" />
                 <span className="min-w-0 flex-1 truncate text-left">Home</span>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-navigation-muted" />
               </button>
             }
             items={sidebarMenuItems}
@@ -811,7 +805,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
             type="button"
             onClick={onFeedbackClick}
             aria-label="Feedback"
-            className="flex h-8 flex-shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+            className="flex h-8 flex-shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-navigation-muted hover:bg-surface-hover hover:text-navigation-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
           >
             <MessageSquare className="h-3.5 w-3.5" />
             {!useCompactFooterActions && <span>Feedback</span>}
@@ -820,7 +814,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
             type="button"
             onClick={onDiscordClick}
             aria-label="Discord"
-            className="flex h-8 flex-shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+            className="flex h-8 flex-shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-navigation-muted hover:bg-surface-hover hover:text-navigation-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
           >
             <DiscordIcon className="h-3.5 w-3.5" />
             {!useCompactFooterActions && <span>Discord</span>}

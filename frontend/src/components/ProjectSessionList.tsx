@@ -41,8 +41,8 @@ const SIDEBAR_ROW_BASE = 'flex w-[calc(100%-1rem)] items-center text-left transi
 const SIDEBAR_ROW_PADDING = 'mx-2 px-2';
 const SIDEBAR_ROW_GAP = 'gap-2';
 const SIDEBAR_SECTION_ROW = 'mt-3 flex w-full items-center justify-between gap-2 pl-4 pr-3 py-1';
-const SIDEBAR_SECTION_LABEL = 'truncate text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary';
-const SIDEBAR_SECTION_TOGGLE = 'group/section relative z-20 flex min-h-4 min-w-0 flex-1 items-center justify-between gap-2 text-left text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary';
+const SIDEBAR_SECTION_LABEL = 'truncate text-[10px] font-semibold uppercase tracking-wider leading-4 text-navigation-muted';
+const SIDEBAR_SECTION_TOGGLE = 'group/section relative z-20 flex min-h-4 min-w-0 flex-1 items-center justify-between gap-2 text-left text-navigation-muted transition-colors hover:text-navigation-primary focus-visible:text-navigation-primary';
 
 interface ProjectSessionListProps {
   projects: Project[];
@@ -401,10 +401,10 @@ export function ProjectSessionList({
               SIDEBAR_ROW_BASE,
               SIDEBAR_ROW_GAP,
               SIDEBAR_ROW_PADDING,
-              'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary',
+              'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-navigation-primary',
               activeView === 'pane-chat'
-                ? 'bg-surface-hover text-text-primary'
-                : 'text-text-secondary',
+                ? 'bg-surface-hover text-navigation-primary'
+                : 'text-navigation-secondary',
             )}
           >
             <MessageSquare className="h-3.5 w-3.5" />
@@ -418,7 +418,7 @@ export function ProjectSessionList({
             <button
               type="button"
               onClick={onRemoteDesktopClick}
-              className={cn(SIDEBAR_ROW_BASE, SIDEBAR_ROW_GAP, SIDEBAR_ROW_PADDING, 'h-7 rounded-md text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary')}
+              className={cn(SIDEBAR_ROW_BASE, SIDEBAR_ROW_GAP, SIDEBAR_ROW_PADDING, 'h-7 rounded-md text-[13px] text-navigation-secondary hover:bg-surface-hover hover:text-navigation-primary')}
             >
               <Monitor className="h-3.5 w-3.5" />
               <span>Remote Desktop</span>
@@ -499,7 +499,7 @@ export function ProjectSessionList({
                 onDragLeave={() => setDragOverProjectId(null)}
               >
                 <Tooltip
-                  content={<span className="text-[10px] text-text-tertiary font-mono break-all">{project.path}</span>}
+                  content={<span className="text-[10px] text-navigation-muted font-mono break-all">{project.path}</span>}
                   side="right"
                 >
                   <button
@@ -511,10 +511,10 @@ export function ProjectSessionList({
                     className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
                   />
                 </Tooltip>
-                <span className="pointer-events-none relative z-10 flex h-4 w-3 flex-shrink-0 items-center text-text-tertiary">
+                <span className="pointer-events-none relative z-10 flex h-4 w-3 flex-shrink-0 items-center text-navigation-muted">
                   {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                 </span>
-                <span className="pointer-events-none relative z-10 min-w-0 flex-1 truncate text-[13px] font-semibold text-text-primary">{project.name}</span>
+                <span className="pointer-events-none relative z-10 min-w-0 flex-1 truncate text-[13px] font-semibold text-navigation-primary">{project.name}</span>
                 <div
                   className="relative z-10 flex-shrink-0 opacity-0 group-hover/project:opacity-100 group-focus-within/project:opacity-100 transition-opacity ml-auto"
                 >
@@ -523,7 +523,7 @@ export function ProjectSessionList({
                       <button
                         type="button"
                         aria-label={`Project actions for ${project.name}`}
-                        className="p-1 rounded text-text-muted hover:text-text-tertiary hover:bg-surface-hover transition-colors"
+                        className="p-1 rounded text-text-muted hover:text-navigation-muted hover:bg-surface-hover transition-colors"
                       >
                         <MoreHorizontal className="w-3.5 h-3.5" />
                       </button>
@@ -540,7 +540,7 @@ export function ProjectSessionList({
                     e.stopPropagation();
                     handleNewSession(project);
                   }}
-                  className="relative z-10 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:text-text-primary hover:bg-surface-hover transition-colors"
+                  className="relative z-10 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-navigation-muted hover:text-navigation-primary hover:bg-surface-hover transition-colors"
                   aria-label={`New pane in ${project.name}`}
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -661,7 +661,7 @@ function SessionRowContent({
         )}
         <AgentStatusDot status={agentDisplayStatus} size="sm" className="flex-shrink-0" />
         <span className={cn(
-          'min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary decoration-status-info decoration-2 underline-offset-4',
+          'min-w-0 flex-1 truncate text-[13px] font-medium text-navigation-primary decoration-status-info decoration-2 underline-offset-4',
           showUnviewedCompleted && 'underline decoration-dashed'
         )}>
           {title}
@@ -680,7 +680,7 @@ function SessionRowContent({
       <AgentStatusDot status={agentDisplayStatus} size="sm" className="mt-0.5 flex-shrink-0" />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className={cn(
-          'min-w-0 truncate text-[13px] font-medium leading-5 text-text-primary decoration-status-info decoration-2 underline-offset-4',
+          'min-w-0 truncate text-[13px] font-medium leading-5 text-navigation-primary decoration-status-info decoration-2 underline-offset-4',
           showUnviewedCompleted && 'underline decoration-dashed'
         )}>
           {title}
@@ -688,7 +688,7 @@ function SessionRowContent({
         {showMetadata && (
           <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[10px] font-semibold leading-3">
             {prNumber && (
-              <span className="text-text-tertiary">#{prNumber}</span>
+              <span className="text-navigation-muted">#{prNumber}</span>
             )}
             {hasDiff && (
               <>
@@ -697,7 +697,7 @@ function SessionRowContent({
               </>
             )}
             {session.worktreeOwnership === 'external' && (
-              <span className="text-text-tertiary">External</span>
+              <span className="text-navigation-muted">External</span>
             )}
           </span>
         )}
@@ -790,7 +790,7 @@ function SessionRow({
     ? 'text-status-success'
     : session.status === 'error'
     ? 'text-status-error'
-    : 'text-text-tertiary';
+    : 'text-navigation-muted';
 
   const adds = (gs?.commitAdditions ?? 0) + (gs?.additions ?? 0);
   const dels = (gs?.commitDeletions ?? 0) + (gs?.deletions ?? 0);
@@ -810,8 +810,9 @@ function SessionRow({
       onContextMenu={onContextMenu}
     >
       <Tooltip
-        content={<SessionDetailTooltip session={session} gitStatus={localGitStatus} showName showDiffStats={false} globalIndex={globalIndex} />}
+        content={<SessionDetailTooltip session={session} gitStatus={localGitStatus} globalIndex={globalIndex} />}
         side="right"
+        contentClassName="p-3"
         interactive
       >
         <button
@@ -852,7 +853,7 @@ function SessionRow({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
-          className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-tertiary"
+          className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-navigation-muted"
           title={session.isFavorite ? 'Unpin' : 'Pin'}
           aria-label={`${session.isFavorite ? 'Unpin' : 'Pin'} ${accessibleName}`}
         >
@@ -1028,7 +1029,7 @@ export function ArchivedSessions() {
           onClick={toggleArchived}
           aria-expanded={showArchived}
           aria-controls={archivedContentId}
-          className="min-w-0 flex-1 flex h-7 items-center gap-2 pl-2 pr-1 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary hover:text-text-primary transition-colors"
+          className="min-w-0 flex-1 flex h-7 items-center gap-2 pl-2 pr-1 text-[10px] font-semibold uppercase tracking-wider text-navigation-muted hover:text-navigation-primary transition-colors"
         >
           {showArchived ? (
             <ChevronDown className="w-3 h-3 flex-shrink-0" />
@@ -1071,7 +1072,7 @@ export function ArchivedSessions() {
             <>
               <div data-testid="archived-orchestration-sessions" className="pb-1">
                 <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Sessions</p>
-                {archivedOrchestrationSessions.length === 0 && <p className="px-5 py-2 text-xs text-text-tertiary">No archived Sessions</p>}
+                {archivedOrchestrationSessions.length === 0 && <p className="px-5 py-2 text-xs text-navigation-muted">No archived Sessions</p>}
                 {archivedOrchestrationSessions.map(session => (
                   <div
                     key={`archived-orchestration-${session.id}`}
@@ -1079,7 +1080,7 @@ export function ArchivedSessions() {
                     className="group/archived relative flex items-center gap-2 pl-8 pr-1 py-1.5 hover:bg-surface-hover transition-colors"
                   >
                     <Archive className="h-3 w-3 flex-shrink-0 text-text-muted" />
-                    <span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">
+                    <span className="min-w-0 flex-1 truncate text-xs text-navigation-muted">
                       {session.name || 'Untitled'}
                     </span>
                     <button
@@ -1095,7 +1096,7 @@ export function ArchivedSessions() {
                 ))}
               </div>
               <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Worktrees</p>
-              {archivedPaneCount === 0 && <p className="px-5 py-2 text-xs text-text-tertiary">No archived worktrees</p>}
+              {archivedPaneCount === 0 && <p className="px-5 py-2 text-xs text-navigation-muted">No archived worktrees</p>}
               {archivedProjects.map(project => {
                 const isExpanded = expandedArchivedProjects.has(project.id);
                 return (
@@ -1105,7 +1106,7 @@ export function ArchivedSessions() {
                       onClick={() => toggleArchivedProject(project.id)}
                       aria-expanded={isExpanded}
                       aria-controls={`archived-project-${project.id}`}
-                      className="w-full flex items-center gap-2 pl-5 pr-4 py-1.5 text-xs text-text-tertiary hover:text-text-secondary hover:bg-surface-hover transition-colors"
+                      className="w-full flex items-center gap-2 pl-5 pr-4 py-1.5 text-xs text-navigation-muted hover:text-navigation-secondary hover:bg-surface-hover transition-colors"
                     >
                       {isExpanded ? (
                         <ChevronDown className="w-3 h-3 flex-shrink-0" />
@@ -1129,7 +1130,7 @@ export function ArchivedSessions() {
                         <div className="relative z-10 pointer-events-none flex-1 text-left min-w-0">
                           <div className="flex items-center gap-2 min-w-0">
                             <Archive className="w-3 h-3 flex-shrink-0 text-text-muted" />
-                            <span className="text-xs text-text-tertiary truncate">
+                            <span className="text-xs text-navigation-muted truncate">
                               {session.name || 'Untitled'}
                             </span>
                           </div>

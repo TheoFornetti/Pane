@@ -10398,6 +10398,8 @@ export const RUNPANE_CONTRACT = {
             "--remote <name>",
             "--no-focus",
             "--focus",
+            "--source <user|agent>",
+            "--ready-timeout-ms <ms>",
             "--dry-run",
             "--yes",
             "--json"

@@ -68,6 +68,8 @@ export interface ParsedArgs {
   merged?: boolean;
   launch?: boolean;
   handoffTo?: string;
+  branch?: string;
+  remote?: string;
   park?: boolean;
   archive?: boolean;
   includeDirty?: boolean;
@@ -632,6 +634,14 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--to') {
     parsed.handoffTo = value;
+    return;
+  }
+  if (flag === '--branch') {
+    parsed.branch = value;
+    return;
+  }
+  if (flag === '--remote') {
+    parsed.remote = value;
     return;
   }
   if (flag === '--limit') {

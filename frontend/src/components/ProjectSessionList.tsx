@@ -618,7 +618,8 @@ function SessionRowContent({
   const title = displayName || gs?.prTitle || session.name || 'Untitled';
   const prNumber = gs?.prNumber;
   const PullRequestIcon = gs?.prIsDraft ? GitPullRequestDraft : GitPullRequest;
-  const showMetadata = Boolean(prNumber || hasDiff || session.worktreeOwnership === 'external');
+  const isHandedOff = Boolean(session.handedOffAt);
+  const showMetadata = Boolean(prNumber || hasDiff || session.worktreeOwnership === 'external' || isHandedOff);
 
   if (rowLayout === 'single') {
     return (
@@ -636,6 +637,19 @@ function SessionRowContent({
         )}>
           {title}
         </span>
+        {showMetadata && (
+          <span className="flex flex-shrink-0 items-center gap-1.5 text-xs tabular-nums">
+            {hasDiff && (
+              <span className="flex items-center gap-1">
+                <span className="font-semibold text-status-success">+{adds}</span>
+                <span className="font-semibold text-status-error">-{dels}</span>
+              </span>
+            )}
+            {prNumber && <span className="text-text-tertiary">#{prNumber}</span>}
+            {session.worktreeOwnership === 'external' && <span className="text-text-tertiary">External</span>}
+            {isHandedOff && <span className="text-text-tertiary">Handed off</span>}
+          </span>
+        )}
       </div>
     );
   }
@@ -669,6 +683,9 @@ function SessionRowContent({
             )}
             {session.worktreeOwnership === 'external' && (
               <span className="text-text-tertiary">External</span>
+            )}
+            {isHandedOff && (
+              <span className="text-text-tertiary">Handed off</span>
             )}
           </span>
         )}

@@ -34,6 +34,7 @@ import {
   runPanelsWait,
   runPanesArchive,
   runPanesAdopt,
+  runPanesHandoff,
   runPanesCreate,
   runPanesCost,
   runPanesList,
@@ -206,6 +207,9 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   },
   'panes archive': async (parsed, telemetryContext) => {
     return runPanesArchive(parsed);
+  },
+  'panes handoff': async (parsed, telemetryContext) => {
+    return runPanesHandoff(parsed);
   },
   'panes pin': async (parsed, telemetryContext) => {
     return runPanesPin(parsed, true);

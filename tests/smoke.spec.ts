@@ -419,3 +419,48 @@ test('remote terminal ignores output that arrives after its panel is replaced', 
   }));
   expect(pageErrors).toEqual([]);
 });
+
+test('remote terminal ignores output that arrives after its panel is replaced', async ({ page }) => {
+  test.setTimeout(60_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await openConnectedRemotePwa(page);
+
+  let releaseOutput = () => {};
+  const outputGate = new Promise<void>(resolve => { releaseOutput = resolve; });
+  let reportOutputRequest = () => {};
+  const outputRequested = new Promise<void>(resolve => { reportOutputRequest = resolve; });
+  const deliveries: Promise<void>[] = [];
+  await page.route('**/invoke', async route => {
+    const body = route.request().postDataJSON();
+    if (body.channel !== 'panels:get-output' || body.args[0] !== 'anim-panel-1') {
+      await route.fallback();
+      return;
+    }
+    reportOutputRequest();
+    const delivery = outputGate.then(() => route.fulfill({
+      json: { ok: true, result: { success: true, data: [{
+        type: 'stdout',
+        data: 'Output from the replaced terminal\r\n'.repeat(50),
+        timestamp: new Date(0).toISOString(),
+      }] } },
+    }));
+    deliveries.push(delivery);
+    await delivery;
+  });
+
+  try {
+    await page.getByRole('tab', { name: 'shell', exact: true }).click();
+    await outputRequested;
+    await page.getByRole('tab', { name: 'claude', exact: true }).click();
+    await expect(page.getByRole('tab', { name: 'claude', exact: true })).toHaveAttribute('aria-selected', 'true');
+  } finally {
+    releaseOutput();
+  }
+  await Promise.all(deliveries);
+  // Let xterm's queued rendering run after the stale response is consumed.
+  await page.evaluate(() => new Promise<void>(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  expect(pageErrors).toEqual([]);
+});

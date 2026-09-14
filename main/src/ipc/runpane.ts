@@ -4835,7 +4835,7 @@ function workspaceCadenceOptions(
     idleBackoff: idleSchedule.backoff === true,
     filter: workspaceFilterKey(filter),
   });
-  return { settleMs, blockedSettleMs, minIntervalMs, emitKinds: request.kinds, key };
+  return { settleMs, blockedSettleMs, minIntervalMs, emitKinds: request.kinds, quietPanelIds: request.quietPanelIds, key };
 }
 
 function workspaceNextCommand(

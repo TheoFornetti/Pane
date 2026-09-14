@@ -418,7 +418,7 @@ export function workspaceFilterKey(filter: WorkspaceJournalFilter): string {
   });
 }
 
-function matchesFilter(
+export function matchesFilter(
   entry: RunpaneWorkspaceEntry,
   filter: WorkspaceJournalFilter,
   membership?: WorkspaceSessionMembership,

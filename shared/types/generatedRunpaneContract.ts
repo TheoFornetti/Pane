@@ -1297,7 +1297,7 @@ export const RUNPANE_CONTRACT = {
       "name": "peers inbox",
       "summary": "Read or atomically claim queued tasks. Inspect received tasks after uncertain delivery; never reclaim automatically.",
       "usage": [
-        "runpane peers inbox [--claim --yes] [--include-received] [--limit <1-100>] [--timeout-ms <0-120000>] [--peer <id>] [--pane-dir <path>] [--json]"
+        "runpane peers inbox [--id <request-id>] [--claim --yes] [--include-received] [--limit <1-100>] [--timeout-ms <0-120000>] [--peer <id>] [--pane-dir <path>] [--json]"
       ],
       "localControl": true
     },
@@ -3030,7 +3030,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "peers inbox": [
         "Usage:",
-        "  runpane peers inbox [--claim --yes] [--include-received] [--limit <1-100>] [--timeout-ms <0-120000>] [--peer <id>] [--pane-dir <path>] [--json]",
+        "  runpane peers inbox [--id <request-id>] [--claim --yes] [--include-received] [--limit <1-100>] [--timeout-ms <0-120000>] [--peer <id>] [--pane-dir <path>] [--json]",
         "",
         "Read or atomically claim queued tasks. Inspect received tasks after uncertain delivery; never reclaim automatically.",
         "",
@@ -4169,7 +4169,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "peers inbox": [
         "Usage:",
-        "  runpane peers inbox [--claim --yes] [--include-received] [--limit <1-100>] [--timeout-ms <0-120000>] [--peer <id>] [--pane-dir <path>] [--json]",
+        "  runpane peers inbox [--id <request-id>] [--claim --yes] [--include-received] [--limit <1-100>] [--timeout-ms <0-120000>] [--peer <id>] [--pane-dir <path>] [--json]",
         "",
         "Read or atomically claim queued tasks. Inspect received tasks after uncertain delivery; never reclaim automatically.",
         "",
@@ -13563,6 +13563,12 @@ export const RUNPANE_CONTRACT = {
         "mutates": true,
         "arguments": [
           {
+            "name": "--id",
+            "value": "<request-id>",
+            "required": false,
+            "description": "Read or claim only this message id, preserving the target of a terminal wake."
+          },
+          {
             "name": "--claim",
             "description": "Atomically mark queued inbox messages received; requires --yes.",
             "required": false
@@ -13608,7 +13614,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane peers inbox [--claim --yes] [--include-received] [--limit <1-100>] [--timeout-ms <0-120000>] [--peer <id>] [--pane-dir <path>] [--json]"
+          "runpane peers inbox [--id <request-id>] [--claim --yes] [--include-received] [--limit <1-100>] [--timeout-ms <0-120000>] [--peer <id>] [--pane-dir <path>] [--json]"
         ],
         "notes": [
           "Use the compact `peers self` discovery first. Identity is local-user scoped, not an authentication credential.",

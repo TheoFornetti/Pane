@@ -42,20 +42,25 @@
         "chokidar",
         "electron-updater",
         "smol-toml",
+        "web-streams-polyfill",
         "ws",
         "electron-builder-squirrel-windows"
       ]
     },
     "frontend": {
       "entry": [
-        "src/main.tsx",
-        "src/remote/main.tsx",
+        "src/main.tsx!",
+        "src/remote/main.tsx!",
         "src/**/*.test.{ts,tsx}",
         "vite.config.ts"
       ],
       "project": [
-        "src/**/*.{ts,tsx}",
-        "vite.config.{ts,js}"
+        "src/**/*.{ts,tsx}!",
+        "vite.config.{ts,js}",
+        "!src/**/*.test.{ts,tsx}!",
+        "!src/**/*.spec.{ts,tsx}!",
+        "!src/**/__tests__/**!",
+        "!src/test/**!"
       ],
       "vite": {
         "config": [
@@ -65,18 +70,22 @@
     },
     "main": {
       "entry": [
-        "src/index.ts",
-        "src/preload.ts",
-        "src/daemon/headless.ts",
-        "src/ptyHost/ptyHostMain.ts",
-        "src/services/mcpPermissionBridge.ts",
+        "src/index.ts!",
+        "src/preload.ts!",
+        "src/daemon/headless.ts!",
+        "src/ptyHost/ptyHostMain.ts!",
+        "src/services/mcpPermissionBridge.ts!",
         "src/**/*.test.ts",
         "src/**/__tests__/**/*.ts",
         "build-mcp-bridge.js"
       ],
       "project": [
-        "src/**/*.ts",
-        "build-mcp-bridge.js"
+        "src/**/*.ts!",
+        "build-mcp-bridge.js",
+        "!src/**/*.test.{ts,tsx}!",
+        "!src/**/*.spec.{ts,tsx}!",
+        "!src/**/__tests__/**!",
+        "!src/test/**!"
       ],
       "ignoreBinaries": [
         "fc-list",
@@ -94,16 +103,20 @@
     },
     "packages/runpane": {
       "entry": [
-        "src/cli.ts",
-        "src/doctor.ts",
-        "src/installers.ts",
-        "src/releases.ts",
-        "src/telemetry.ts",
+        "src/cli.ts!",
+        "src/doctor.ts!",
+        "src/installers.ts!",
+        "src/releases.ts!",
+        "src/telemetry.ts!",
         "scripts/mark-executable.js"
       ],
       "project": [
-        "src/**/*.ts",
-        "scripts/**/*.js"
+        "src/**/*.ts!",
+        "scripts/**/*.js",
+        "!src/**/*.test.{ts,tsx}!",
+        "!src/**/*.spec.{ts,tsx}!",
+        "!src/**/__tests__/**!",
+        "!src/test/**!"
       ],
       "ignoreBinaries": [
         "ditto"
@@ -128,34 +141,13 @@
       ]
     },
     "native": {
-      "entry": [
-        "src/app/**/*.tsx",
-        "src/**/*.test.ts",
-        "metro.config.js",
-        "vitest.config.ts",
-        "terminal-web/page.ts",
-        "scripts/*.mjs"
-      ],
-      "project": [
-        "src/**/*.{ts,tsx}",
-        "metro.config.js",
-        "vitest.config.ts",
-        "terminal-web/*.ts",
-        "scripts/*.mjs"
-      ],
-      "ignoreDependencies": [
-        "expo-updates"
-      ]
+      "entry": ["src/app/**/*.tsx", "src/**/*.test.ts", "metro.config.js", "vitest.config.ts", "terminal-web/page.ts", "scripts/*.mjs"],
+      "project": ["src/**/*.{ts,tsx}", "metro.config.js", "vitest.config.ts", "terminal-web/*.ts", "scripts/*.mjs"],
+      "ignoreDependencies": ["expo-updates"]
     },
     "shared": {
-      "entry": [
-        "types/*.ts",
-        "remoteClient/index.ts"
-      ],
-      "project": [
-        "types/*.ts",
-        "remoteClient/*.ts"
-      ]
+      "entry": ["types/*.ts", "remoteClient/index.ts"],
+      "project": ["**/*.ts", "!**/*.test.ts"]
     }
   }
 }

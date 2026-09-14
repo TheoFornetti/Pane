@@ -440,10 +440,6 @@ Package: @radix-ui/primitive
 Version: 1.1.2
 Homepage: https://radix-ui.com/primitives
 
-Package: @radix-ui/react-compose-refs
-Version: 1.1.2
-Homepage: https://radix-ui.com/primitives
-
 Package: @radix-ui/react-context
 Version: 1.1.2
 Homepage: https://radix-ui.com/primitives
@@ -452,27 +448,7 @@ Package: @radix-ui/react-direction
 Version: 1.1.1
 Homepage: https://radix-ui.com/primitives
 
-Package: @radix-ui/react-focus-guards
-Version: 1.1.2
-Homepage: https://radix-ui.com/primitives
-
 Package: @radix-ui/react-id
-Version: 1.1.1
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-use-callback-ref
-Version: 1.1.1
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-use-escape-keydown
-Version: 1.1.1
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-use-layout-effect
-Version: 1.1.1
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-use-previous
 Version: 1.1.1
 Homepage: https://radix-ui.com/primitives
 
@@ -504,10 +480,6 @@ Package: @react-native/codegen
 Version: 0.86.3
 Homepage: https://github.com/react/react-native/tree/HEAD/packages/react-native-codegen#readme
 
-Package: @react-native/community-cli-plugin
-Version: 0.86.3
-Homepage: https://github.com/react/react-native/tree/HEAD/packages/community-cli-plugin#readme
-
 Package: @react-native/debugger-shell
 Version: 0.86.3
 Homepage: https://github.com/react/react-native/tree/HEAD/packages/debugger-shell#readme
@@ -535,10 +507,6 @@ Homepage: https://github.com/react/react-native/tree/HEAD/packages/metro-config#
 Package: @react-native/normalize-colors
 Version: 0.86.3
 Homepage: https://github.com/react/react-native/tree/HEAD/packages/normalize-color#readme
-
-Package: @react-native/virtualized-lists
-Version: 0.86.3
-Homepage: https://github.com/react/react-native/tree/HEAD/packages/virtualized-lists#readme
 
 Package: @rolldown/binding-darwin-arm64
 Version: 1.2.9
@@ -1109,16 +1077,6 @@ Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Repository: https://github.com/babel/babel.git
 
-Package: @babel/helper-create-class-features-plugin
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Repository: https://github.com/babel/babel.git
-
-Package: @babel/helper-create-regexp-features-plugin
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Repository: https://github.com/babel/babel.git
-
 Package: @babel/helper-globals
 Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
@@ -1148,11 +1106,6 @@ Package: @babel/helper-plugin-utils
 Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Homepage: https://babel.dev/docs/en/next/babel-helper-plugin-utils
-
-Package: @babel/helper-remap-async-to-generator
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-helper-remap-async-to-generator
 
 Package: @babel/helper-replace-supers
 Version: 7.29.7
@@ -1199,11 +1152,6 @@ Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Homepage: https://babel.dev/docs/en/next/babel-plugin-proposal-decorators
 
-Package: @babel/plugin-proposal-export-default-from
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-proposal-export-default-from
-
 Package: @babel/plugin-syntax-decorators
 Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
@@ -1212,11 +1160,6 @@ Homepage: https://babel.dev/docs/en/next/babel-plugin-syntax-decorators
 Package: @babel/plugin-syntax-dynamic-import
 Version: 7.8.3
 Repository: https://github.com/babel/babel/tree/master/packages/babel-plugin-syntax-dynamic-import
-
-Package: @babel/plugin-syntax-export-default-from
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-syntax-export-default-from
 
 Package: @babel/plugin-syntax-flow
 Version: 7.29.7
@@ -1228,178 +1171,40 @@ Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Homepage: https://babel.dev/docs/en/next/babel-plugin-syntax-jsx
 
-Package: @babel/plugin-syntax-nullish-coalescing-operator
-Version: 7.8.3
-Repository: https://github.com/babel/babel/tree/master/packages/babel-plugin-syntax-nullish-coalescing-operator
-
-Package: @babel/plugin-syntax-optional-chaining
-Version: 7.8.3
-Repository: https://github.com/babel/babel/tree/master/packages/babel-plugin-syntax-optional-chaining
-
 Package: @babel/plugin-syntax-typescript
 Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Homepage: https://babel.dev/docs/en/next/babel-plugin-syntax-typescript
-
-Package: @babel/plugin-transform-arrow-functions
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-arrow-functions
-
-Package: @babel/plugin-transform-async-generator-functions
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-async-generator-functions
-
-Package: @babel/plugin-transform-async-to-generator
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-async-to-generator
-
-Package: @babel/plugin-transform-block-scoping
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-block-scoping
-
-Package: @babel/plugin-transform-class-properties
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-class-properties
-
-Package: @babel/plugin-transform-class-static-block
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-class-static-block
 
 Package: @babel/plugin-transform-classes
 Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-classes
 
-Package: @babel/plugin-transform-destructuring
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-destructuring
-
-Package: @babel/plugin-transform-export-namespace-from
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-export-namespace-from
-
-Package: @babel/plugin-transform-flow-strip-types
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-flow-strip-types
-
 Package: @babel/plugin-transform-for-of
 Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-for-of
-
-Package: @babel/plugin-transform-logical-assignment-operators
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-logical-assignment-operators
-
-Package: @babel/plugin-transform-modules-commonjs
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-modules-commonjs
-
-Package: @babel/plugin-transform-named-capturing-groups-regex
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-named-capturing-groups-regex
-
-Package: @babel/plugin-transform-nullish-coalescing-operator
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-nullish-coalescing-operator
-
-Package: @babel/plugin-transform-object-rest-spread
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-object-rest-spread
-
-Package: @babel/plugin-transform-optional-catch-binding
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-optional-catch-binding
-
-Package: @babel/plugin-transform-optional-chaining
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-optional-chaining
 
 Package: @babel/plugin-transform-parameters
 Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-parameters
 
-Package: @babel/plugin-transform-private-methods
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-private-methods
-
-Package: @babel/plugin-transform-private-property-in-object
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-private-property-in-object
-
-Package: @babel/plugin-transform-react-display-name
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-react-display-name
-
 Package: @babel/plugin-transform-react-jsx
 Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-react-jsx
-
-Package: @babel/plugin-transform-react-jsx-development
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Repository: https://github.com/babel/babel.git
-
-Package: @babel/plugin-transform-react-jsx-self
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-react-jsx-self
-
-Package: @babel/plugin-transform-react-jsx-source
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-react-jsx-source
-
-Package: @babel/plugin-transform-react-pure-annotations
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Repository: https://github.com/babel/babel.git
 
 Package: @babel/plugin-transform-runtime
 Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-runtime
 
-Package: @babel/plugin-transform-shorthand-properties
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-shorthand-properties
-
-Package: @babel/plugin-transform-template-literals
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-template-literals
-
 Package: @babel/plugin-transform-typescript
 Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-typescript
-
-Package: @babel/plugin-transform-unicode-regex
-Version: 7.29.7
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-unicode-regex
 
 Package: @babel/preset-typescript
 Version: 7.29.7
@@ -1434,47 +1239,6 @@ Homepage: https://babel.dev/docs/en/next/babel-types
 MIT License
 
 Copyright (c) 2014-present Sebastian McKenzie and other contributors
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
---------------------------------------------------------------------------------
-
-Package: @babel/helper-define-polyfill-provider
-Version: 0.6.8
-Repository: https://github.com/babel/babel-polyfills.git
-
-Package: babel-plugin-polyfill-corejs2
-Version: 0.4.17
-Repository: https://github.com/babel/babel-polyfills.git
-
-Package: babel-plugin-polyfill-corejs3
-Version: 0.13.0
-Repository: https://github.com/babel/babel-polyfills.git
-
-Package: babel-plugin-polyfill-regenerator
-Version: 0.6.8
-Repository: https://github.com/babel/babel-polyfills.git
-
-MIT License
-
-Copyright (c) 2014-present Nicolò Ribaudo and other contributors
 
 Permission is hereby granted, free of charge, to any person obtaining
 a copy of this software and associated documentation files (the
@@ -1557,37 +1321,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-
---------------------------------------------------------------------------------
-
-Package: @babel/plugin-transform-regenerator
-Version: 7.29.8
-Author: The Babel Team (https://babel.dev/team)
-Homepage: https://babel.dev/docs/en/next/babel-plugin-transform-regenerator
-
-MIT License
-
-Copyright (c) 2014-present Sebastian McKenzie and other contributors
-Copyright (c) 2014-present Facebook, Inc.
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
 
@@ -4309,10 +4042,6 @@ Package: @radix-ui/react-collection
 Version: 1.1.7
 Homepage: https://radix-ui.com/primitives
 
-Package: @radix-ui/react-compose-refs
-Version: 1.1.5
-Homepage: https://radix-ui.com/primitives
-
 Package: @radix-ui/react-context
 Version: 1.2.2
 Homepage: https://radix-ui.com/primitives
@@ -4325,16 +4054,12 @@ Package: @radix-ui/react-direction
 Version: 1.1.4
 Homepage: https://radix-ui.com/primitives
 
-Package: @radix-ui/react-dismissable-layer
-Version: 1.1.10
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-focus-scope
-Version: 1.1.7
-Homepage: https://radix-ui.com/primitives
-
 Package: @radix-ui/react-id
 Version: 1.1.4
+Homepage: https://radix-ui.com/primitives
+
+Package: @radix-ui/react-menu
+Version: 2.1.15
 Homepage: https://radix-ui.com/primitives
 
 Package: @radix-ui/react-popper
@@ -4346,11 +4071,11 @@ Version: 1.1.9
 Homepage: https://radix-ui.com/primitives
 
 Package: @radix-ui/react-presence
-Version: 1.1.10
+Version: 1.1.4
 Homepage: https://radix-ui.com/primitives
 
 Package: @radix-ui/react-presence
-Version: 1.1.4
+Version: 1.1.10
 Homepage: https://radix-ui.com/primitives
 
 Package: @radix-ui/react-primitive
@@ -4359,10 +4084,6 @@ Homepage: https://radix-ui.com/primitives
 
 Package: @radix-ui/react-primitive
 Version: 2.1.3
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-roving-focus
-Version: 1.1.19
 Homepage: https://radix-ui.com/primitives
 
 Package: @radix-ui/react-select
@@ -4381,75 +4102,9 @@ Package: @radix-ui/react-tabs
 Version: 1.1.21
 Homepage: https://radix-ui.com/primitives
 
-Package: @radix-ui/react-use-callback-ref
-Version: 1.1.4
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-use-controllable-state
-Version: 1.2.2
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-use-controllable-state
-Version: 1.2.6
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-use-effect-event
-Version: 0.0.2
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-use-effect-event
-Version: 0.0.5
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-use-is-hydrated
-Version: 0.1.3
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-use-layout-effect
-Version: 1.1.4
-Homepage: https://radix-ui.com/primitives
-
-Package: @radix-ui/react-visually-hidden
-Version: 1.2.3
-Homepage: https://radix-ui.com/primitives
-
 MIT License
 
 Copyright (c) 2022 WorkOS
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
---------------------------------------------------------------------------------
-
-Package: @react-native-masked-view/masked-view
-Version: 0.3.2
-Author: Mike Nedosekin <crespo8800@gmail.com>
-Homepage: https://github.com/react-native-masked-view/masked-view#readme
-
-Package: react-native-webview
-Version: 13.16.1
-Author: Jamon Holmgren <jamon@infinite.red>
-Homepage: https://github.com/react-native-webview/react-native-webview#readme
-
-MIT License
-
-Copyright (c) 2015-present, Facebook, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -6459,6 +6114,43 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+Package: babel-plugin-polyfill-corejs2
+Version: 0.4.17
+Repository: https://github.com/babel/babel-polyfills.git
+
+Package: babel-plugin-polyfill-corejs3
+Version: 0.13.0
+Repository: https://github.com/babel/babel-polyfills.git
+
+Package: babel-plugin-polyfill-regenerator
+Version: 0.6.8
+Repository: https://github.com/babel/babel-polyfills.git
+
+MIT License
+
+Copyright (c) 2014-present Nicolò Ribaudo and other contributors
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
 
@@ -16473,11 +16165,6 @@ SOFTWARE.
 
 --------------------------------------------------------------------------------
 
-Package: react-native-gesture-handler
-Version: 2.32.0
-Author: Krzysztof Magiera
-Homepage: https://docs.swmansion.com/react-native-gesture-handler/
-
 Package: react-native-reanimated
 Version: 4.5.1
 Author: Krzysztof Magiera
@@ -16507,64 +16194,6 @@ SOFTWARE.
 
 --------------------------------------------------------------------------------
 
-Package: react-native-is-edge-to-edge
-Version: 1.3.1
-Author: Mathieu Acthernoene <zoontek@gmail.com>
-Homepage: https://github.com/zoontek/react-native-edge-to-edge
-
-MIT License
-
-Copyright (c) 2024 Mathieu Acthernoene
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
---------------------------------------------------------------------------------
-
-Package: react-native-safe-area-context
-Version: 5.7.0
-Author: Janic Duplessis <janicduplessis@gmail.com>
-Homepage: https://github.com/AppAndFlow/react-native-safe-area-context#readme
-
-MIT License
-
-Copyright (c) 2019 Th3rd Wave
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
---------------------------------------------------------------------------------
-
 Package: react-native-screens
 Version: 4.26.2
 Author: Krzysztof Magiera
@@ -16573,6 +16202,35 @@ Homepage: https://github.com/software-mansion/react-native-screens#readme
 The MIT License (MIT)
 
 Copyright (c) 2018 Software Mansion <swmansion.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+Package: react-native-webview
+Version: 13.16.1
+Author: Jamon Holmgren <jamon@infinite.red>
+Homepage: https://github.com/react-native-webview/react-native-webview#readme
+
+MIT License
+
+Copyright (c) 2015-present, Facebook, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22331,26 +21989,6 @@ Version: 2.5.1
 Author: OpenTelemetry Authors
 Homepage: https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-core
 
-Package: @opentelemetry/exporter-logs-otlp-http
-Version: 0.208.0
-Author: OpenTelemetry Authors
-Homepage: https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/exporter-logs-otlp-http
-
-Package: @opentelemetry/instrumentation
-Version: 0.220.0
-Author: OpenTelemetry Authors
-Homepage: https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/opentelemetry-instrumentation
-
-Package: @opentelemetry/otlp-exporter-base
-Version: 0.208.0
-Author: OpenTelemetry Authors
-Homepage: https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/otlp-exporter-base
-
-Package: @opentelemetry/otlp-transformer
-Version: 0.208.0
-Author: OpenTelemetry Authors
-Homepage: https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/otlp-transformer
-
 Package: @opentelemetry/resources
 Version: 2.10.0
 Author: OpenTelemetry Authors
@@ -22380,11 +22018,6 @@ Package: @opentelemetry/sdk-trace
 Version: 2.10.0
 Author: OpenTelemetry Authors
 Homepage: https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/sdk-trace
-
-Package: @opentelemetry/sdk-trace-base
-Version: 2.10.0
-Author: OpenTelemetry Authors
-Homepage: https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-sdk-trace-base
 
 Package: @opentelemetry/sdk-trace-base
 Version: 2.2.0
@@ -31178,7 +30811,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ================================================================================
 
 Package: Pane
-Version: 2.4.150
+Version: 2.4.151
 Author: Dcouple Inc
 License: AGPL-3.0
 

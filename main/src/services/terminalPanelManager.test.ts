@@ -9,7 +9,7 @@ import type { TerminalPanelState } from '../../../shared/types/panels';
 
 import { TerminalPanelManager } from './terminalPanelManager';
 import { ShellDetector } from '../utils/shellDetector';
-import { panelManager } from '../test/setup';
+import { panelManager } from '../test/panelManagerFake';
 
 vi.spyOn(panelManager, 'emitPanelEvent');
 vi.spyOn(panelManager, 'getPanel');
@@ -201,7 +201,7 @@ describe('TerminalPanelManager terminal resize', () => {
 
   it('deduplicates ordinary same-size resizes but holds an actual redraw transition', async () => {
     vi.useFakeTimers();
-    const manager = testAccess<ResizeAccess>(new TerminalPanelManager());
+    const manager = testAccess<ResizeAccess>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal({ outputBuffer: '' });
     manager.terminals.set(terminal.panelId, terminal);
 
@@ -245,7 +245,7 @@ describe('TerminalPanelManager shell prompt scheduling', () => {
 
   it('waits for the shell to settle after detecting its prompt', async () => {
     vi.useFakeTimers();
-    const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager());
+    const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager(panelManager));
     const promptPty = createPromptPty();
     const callback = vi.fn();
 
@@ -262,7 +262,7 @@ describe('TerminalPanelManager shell prompt scheduling', () => {
 
   it('invokes once when repeated prompts race the fallback', async () => {
     vi.useFakeTimers();
-    const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager());
+    const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager(panelManager));
     const promptPty = createPromptPty();
     const callback = vi.fn();
 
@@ -277,7 +277,7 @@ describe('TerminalPanelManager shell prompt scheduling', () => {
 
   it('falls back after five seconds when no prompt is detected', async () => {
     vi.useFakeTimers();
-    const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager());
+    const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager(panelManager));
     const promptPty = createPromptPty();
     const callback = vi.fn();
 
@@ -322,7 +322,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       getWebviewContextMap: () => new Map(),
     });
 
-    const manager = new TerminalPanelManager();
+    const manager = new TerminalPanelManager(panelManager);
     const terminal = createTerminal();
 
     testAccess<FlushOutputBufferAccess>(manager).flushOutputBuffer(terminal);
@@ -347,7 +347,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       getWebviewContextMap: () => new Map(),
     });
 
-    const manager = new TerminalPanelManager();
+    const manager = new TerminalPanelManager(panelManager);
     const terminal = createTerminal({ isVisible: false });
 
     testAccess<FlushOutputBufferAccess>(manager).flushOutputBuffer(terminal);
@@ -372,7 +372,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       getWebviewContextMap: () => new Map(),
     });
 
-    const manager = testAccess<VisibilityAccess>(new TerminalPanelManager());
+    const manager = testAccess<VisibilityAccess>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal({
       isVisible: false,
       outputBuffer: 'hidden output',
@@ -404,7 +404,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       getWebviewContextMap: () => new Map(),
     });
 
-    const manager = testAccess<VisibilityAccess>(new TerminalPanelManager());
+    const manager = testAccess<VisibilityAccess>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal({
       isVisible: true,
       outputBuffer: 'visible output',
@@ -436,7 +436,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       getWebviewContextMap: () => new Map(),
     });
 
-    const manager = testAccess<VisibilityAccess>(new TerminalPanelManager());
+    const manager = testAccess<VisibilityAccess>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal({
       isVisible: false,
       outputBuffer: '',
@@ -456,7 +456,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('clears remote viewer visibility by prefix on disconnect', () => {
-    const manager = testAccess<VisibilityAccess>(new TerminalPanelManager());
+    const manager = testAccess<VisibilityAccess>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal({
       isVisible: false,
       outputBuffer: '',
@@ -476,7 +476,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('returns emulated live screen and restore state for daemon and renderer reads', async () => {
-    const manager = testAccess<SnapshotAccess>(new TerminalPanelManager());
+    const manager = testAccess<SnapshotAccess>(new TerminalPanelManager(inProcessEmulatorHost, panelManager));
     const screenEmulator = inProcessEmulatorHost().createEmulator(40, 5);
     screenEmulator.write('\x1b[?1049h\x1b[Hagent screen');
     await screenEmulator.refresh();
@@ -535,7 +535,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('serves normal-buffer restore content from the rendered emulator, not the raw append log', async () => {
-    const manager = testAccess<SnapshotAccess>(new TerminalPanelManager());
+    const manager = testAccess<SnapshotAccess>(new TerminalPanelManager(inProcessEmulatorHost, panelManager));
     const screenEmulator = inProcessEmulatorHost().createEmulator(40, 5);
     const frame = 'PR #363 state unchanged';
     // Live stream: the frame prints once, then forced-redraw repaints re-emit it
@@ -565,7 +565,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
 
   it('submits Codex initial input through the composer sequence', async () => {
     vi.useFakeTimers();
-    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
+    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal();
     manager.terminals.set(terminal.panelId, terminal);
     const panel = {
@@ -611,7 +611,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('does not treat input writes as output freshness', () => {
-    const manager = testAccess<InitialInputAccess & TerminalPanelManager>(new TerminalPanelManager());
+    const manager = testAccess<InitialInputAccess & TerminalPanelManager>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal();
     manager.terminals.set(terminal.panelId, terminal);
 
@@ -625,7 +625,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
 
   it('delivers pending ready initial input with the panel submit strategy', async () => {
     vi.useFakeTimers();
-    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
+    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager(inProcessEmulatorHost, panelManager));
     const terminal = createTerminal({ screenEmulator: inProcessEmulatorHost().createEmulator(40, 5) });
     manager.terminals.set(terminal.panelId, terminal);
     manager.registerAgentStatusPanel(terminal);
@@ -665,7 +665,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('delivers after a premark clear when the cliReady path already skipped', async () => {
-    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
+    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager(inProcessEmulatorHost, panelManager));
     const terminal = createTerminal({ screenEmulator: inProcessEmulatorHost().createEmulator(40, 5) });
     manager.terminals.set(terminal.panelId, terminal);
     manager.registerAgentStatusPanel(terminal);
@@ -707,7 +707,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('delivers initial input exactly once when cliReady and explicit triggers race', async () => {
-    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
+    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal();
     manager.terminals.set(terminal.panelId, terminal);
     const panel = {
@@ -742,7 +742,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('passes fresh Codex initial input as a startup prompt argument', () => {
-    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager(panelManager));
 
     const result = manager.resolveCliLaunchCommand('panel-1', 'codex --yolo', {
       agentType: 'codex',
@@ -764,7 +764,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('escapes shell-sensitive startup prompt arguments without changing ordinary prompts', () => {
-    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager(panelManager));
     const unsafeCommandSubstitution = manager.resolveCliLaunchCommand('panel-1', 'codex --yolo', {
       agentType: 'codex',
       initialInputMode: 'argument',
@@ -788,7 +788,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('passes fresh Claude slash input as a quoted startup argument', () => {
-    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager(panelManager));
 
     const result = manager.resolveCliLaunchCommand(
       '11111111-1111-4111-8111-111111111111',
@@ -811,7 +811,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('preserves multiline Claude input in the quoted startup argument', () => {
-    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager(panelManager));
     const input = 'First line\nSecond line with $value';
 
     const result = manager.resolveCliLaunchCommand(
@@ -987,7 +987,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('keeps resumed Claude input composer-bound', () => {
-    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager(panelManager));
 
     const result = manager.resolveCliLaunchCommand(
       '11111111-1111-4111-8111-111111111111',
@@ -1008,7 +1008,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('launches a fresh Cursor panel through the create-chat compound', () => {
-    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager(panelManager));
 
     const result = manager.resolveCliLaunchCommand('panel-1', 'cursor-agent --force --trust', {
       agentType: 'cursor',
@@ -1030,7 +1030,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('passes fresh Cursor initial input as a startup prompt argument on both compound branches', () => {
-    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager(panelManager));
 
     const result = manager.resolveCliLaunchCommand('panel-1', 'cursor-agent --force --trust', {
       agentType: 'cursor',
@@ -1049,7 +1049,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('uses fish-compatible syntax for a fresh Cursor launch in fish', () => {
-    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager(panelManager));
 
     const result = manager.resolveCliLaunchCommand('panel-1', 'cursor-agent --force --trust', {
       agentType: 'cursor',
@@ -1064,7 +1064,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('resumes an interrupted Cursor panel with its captured chat id', () => {
-    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager(panelManager));
 
     const result = manager.resolveCliLaunchCommand('panel-1', 'cursor-agent --force --trust', {
       agentType: 'cursor',
@@ -1083,7 +1083,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('continues the latest Cursor chat when an interrupted panel has no captured id', () => {
-    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager(panelManager));
 
     const result = manager.resolveCliLaunchCommand('panel-1', 'cursor-agent --force --trust', {
       agentType: 'cursor',
@@ -1128,7 +1128,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('keeps Enter as the default initial input submit strategy', async () => {
-    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
+    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal();
     manager.terminals.set(terminal.panelId, terminal);
     vi.mocked(panelManager.getPanel).mockReturnValue({
@@ -1185,7 +1185,7 @@ describe('TerminalPanelManager agent session capture', () => {
   };
 
   it('persists the Cursor chat id scraped from the marker line', () => {
-    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager());
+    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal({ agentType: 'cursor' });
     mockPanel('cursor', 'cursor-agent --force --trust');
 
@@ -1243,7 +1243,7 @@ describe('TerminalPanelManager agent session capture', () => {
   });
 
   it('still captures Codex resume ids from screen output', () => {
-    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager());
+    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal({ agentType: 'codex' });
     mockPanel('codex', 'codex --yolo');
 
@@ -1259,7 +1259,7 @@ describe('TerminalPanelManager agent session capture', () => {
   });
 
   it('ignores marker lines when the panel is not a cursor panel', () => {
-    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager());
+    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal({ agentType: 'codex' });
     mockPanel('codex', 'codex --yolo');
 
@@ -1271,7 +1271,7 @@ describe('TerminalPanelManager agent session capture', () => {
   });
 
   it('persists the captured session id for the terminal agent on state save', async () => {
-    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager());
+    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager(panelManager));
     const terminal = createTerminal({ agentType: 'cursor', capturedAgentSessionId: CURSOR_CHAT_ID });
     manager.terminals.set(terminal.panelId, terminal);
     mockPanel('cursor', 'cursor-agent --force --trust');
@@ -1295,7 +1295,7 @@ describe('TerminalPanelManager destroyAllTerminals', () => {
 
   it('kills every PTY even when one terminal fails to flush', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const manager = testAccess<DestroyAllAccess>(new TerminalPanelManager());
+    const manager = testAccess<DestroyAllAccess>(new TerminalPanelManager(panelManager));
     const doomed = createTerminal({ panelId: 'panel-throws' });
     const healthy = createTerminal({ panelId: 'panel-ok' });
     manager.terminals.set(doomed.panelId, doomed);

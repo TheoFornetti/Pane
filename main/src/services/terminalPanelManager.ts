@@ -1,7 +1,7 @@
 import { withRunpaneOnPath } from './runpaneShim';
 import { validateCustomCommandResume, customResumeAgentType } from '../../../shared/types/customCommandResume';
-import { codexResumeBase } from './agents/agentIdentity';
-import { findClaudeSessionTranscript } from './claudeSessionTranscript';
+import { codexResumeBase, hasClaudeResumeFlag } from './agents/agentIdentity';
+import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeSessionTranscript';
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
 import { filterSyncBlockClears } from './syncBlockClearFilter';
@@ -280,14 +280,18 @@ export class TerminalPanelManager extends EventEmitter {
     initialCommand: string,
     customState: TerminalPanelState,
     shellType?: string,
+    isWSL = false,
   ): CliLaunchResolution {
     if (customState.customResume) {
       const config = validateCustomCommandResume(customState.customResume);
       const allocated = config.mode === 'claude' || config.mode === 'generated';
       const sessionId = customState.agentSessionId || (allocated ? randomUUID() : undefined);
       const hasConversation = Boolean(customState.agentSessionId && (customState.customResumeStarted || customState.wasInterrupted));
-      const transcript = config.mode === 'claude' && sessionId ? findClaudeSessionTranscript(sessionId) : undefined;
-      const shouldResume = hasConversation && (config.mode !== 'claude' || Boolean(transcript));
+      // Claude resumes only an ID that has a transcript. When Pane can't see
+      // the transcripts, trust the recorded conversation like other modes.
+      const checkTranscript = config.mode === 'claude' && !isWSL && canReadClaudeTranscripts();
+      const transcript = checkTranscript && sessionId ? findClaudeSessionTranscript(sessionId) : undefined;
+      const shouldResume = hasConversation && (!checkTranscript || Boolean(transcript));
       const template = shouldResume ? config.resumeTemplate : config.initialTemplate || '{command}';
       if (template.includes('{sessionId}') && !sessionId) throw new Error('No session ID is available for this launch template');
       const commandToRun = template.replace(/\{command\}|\{sessionId\}/g, token =>
@@ -299,9 +303,6 @@ export class TerminalPanelManager extends EventEmitter {
       } };
     }
     const agentType = customState.agentType ?? resolveAgentTypeFromCommand(initialCommand);
-    if (customState.preserveLaunchCommand) {
-      return { commandToRun: initialCommand, customState, isCliCommand: Boolean(agentType) };
-    }
     if (!agentType) {
       return { commandToRun: initialCommand, customState, isCliCommand: false };
     }
@@ -332,7 +333,7 @@ export class TerminalPanelManager extends EventEmitter {
   ): CliLaunchResolution | undefined {
     if (
       !initialCommand.includes('--session-id') &&
-      !/(?:^|\s)(?:--resume|--continue|-r|-c)(?:\s|=|$)/.test(initialCommand)
+      !hasClaudeResumeFlag(initialCommand)
     ) {
       const existingClaudeSessionId = customState.hasClaudeSessionId && customState.agentSessionId
         ? customState.agentSessionId
@@ -935,15 +936,6 @@ export class TerminalPanelManager extends EventEmitter {
       return;
     }
 
-    const sessionState = terminalCustomState(panel.state);
-    if (sessionState.customResume === undefined && sessionState.initialCommand) {
-      const saved = getRuntimeConfigManager().getConfig().customCommands?.find(item => item.command === sessionState.initialCommand);
-      if (saved?.resume) {
-        sessionState.customResume = validateCustomCommandResume(saved.resume);
-        panel.state.customState = sessionState;
-      }
-    }
-
     // Wait for a spawn slot (caps concurrent PTY spawns to prevent CPU spikes)
     await this.acquireSpawnSlot(priority);
 
@@ -1156,8 +1148,19 @@ export class TerminalPanelManager extends EventEmitter {
 
     // Wait for the shell prompt before sending an initial command.
     let commandToRun: string | undefined;
+    let launchResolution: CliLaunchResolution | undefined;
     if (initialCommand) {
-      const launchResolution = this.resolveCliLaunchCommand(panel.id, initialCommand, existingState || {}, shellType);
+      try {
+        launchResolution = this.resolveCliLaunchCommand(panel.id, initialCommand, existingState || {}, shellType, terminalProcess.isWSL);
+      } catch (error) {
+        // Leave the shell usable and say why the command did not start.
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`[TerminalPanelManager] Could not launch ${initialCommand} in panel ${panel.id}:`, error);
+        terminalProcess.outputBuffer += `\r\n\x1b[31mPane could not start "${initialCommand}": ${reason}\x1b[0m\r\n`;
+        this.flushOutputBuffer(terminalProcess);
+      }
+    }
+    if (initialCommand && launchResolution) {
       commandToRun = launchResolution.commandToRun;
       const isCliCommand = launchResolution.isCliCommand;
 

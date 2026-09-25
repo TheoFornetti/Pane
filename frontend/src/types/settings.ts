@@ -38,6 +38,7 @@ export type SettingsSettingId =
   | 'mcp-toolsets'
   | 'agent-skill'
   | 'agent-context'
+  | 'session-defaults'
   | 'claude-executable'
   | 'commit-footer'
   | 'git-attribution'
@@ -63,6 +64,7 @@ export type SettingsSettingId =
   | 'verbose-logging'
   | 'developer-mode'
   | 'journey-timings'
+  | 'session-progress'
   | 'pty-host'
   | 'additional-paths';
 

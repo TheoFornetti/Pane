@@ -1,7 +1,11 @@
 import { withRunpaneOnPath } from './runpaneShim';
 import { validateCustomCommandResume, customResumeAgentType } from '../../../shared/types/customCommandResume';
+import { prepareSessionWorkspace } from './sessionWorkspace';
+import { OrchestrationSessionStore } from './orchestrationSessionStore';
+import { getAppDirectory } from '../utils/appDirectory';
 import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag } from './agents/agentIdentity';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeSessionTranscript';
+import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
 import { filterSyncBlockClears } from './syncBlockClearFilter';
@@ -397,6 +401,9 @@ export class TerminalPanelManager extends EventEmitter {
 
     const commandAgentType = resolveAgentTypeFromCommand(initialCommand);
     const agentType = customState.agentType ?? commandAgentType;
+    if (customState.preserveLaunchCommand) {
+      return { commandToRun: initialCommand, customState, isCliCommand: Boolean(agentType) };
+    }
     if (!agentType) {
       return { commandToRun: initialCommand, customState, isCliCommand: false };
     }
@@ -439,7 +446,13 @@ export class TerminalPanelManager extends EventEmitter {
             ? panelId
             : undefined;
       const claudeSessionId = existingClaudeSessionId ?? randomUUID();
-      const canResumeClaudeSession = customState.hasClaudeSessionId === true && Boolean(existingClaudeSessionId);
+      // An idle launch allocates an ID without creating a transcript. Also
+      // resolve old project locations explicitly for pre-cross-project CLIs.
+      const transcript = customState.orchestrationSessionId && existingClaudeSessionId
+        ? findClaudeSessionTranscript(existingClaudeSessionId)
+        : undefined;
+      const canResumeClaudeSession = customState.hasClaudeSessionId === true && Boolean(existingClaudeSessionId)
+        && (!customState.orchestrationSessionId || Boolean(transcript));
       const initialPromptArg = customState.initialInputMode === 'argument' && customState.initialInput?.trim()
         ? ` ${this.initialPromptWord(customState)}`
         : '';
@@ -454,7 +467,7 @@ export class TerminalPanelManager extends EventEmitter {
 
       return {
         commandToRun: canResumeClaudeSession
-          ? `${claudeResumeBase(initialCommand)} --resume ${this.quoteCommandArgument(claudeSessionId)}`
+          ? `${claudeResumeBase(initialCommand)} --resume ${this.quoteCommandArgument(transcript ?? claudeSessionId)}`
           : `${initialCommand} --session-id ${claudeSessionId}${initialPromptArg}`,
         customState: nextState,
         isCliCommand: true,
@@ -478,9 +491,13 @@ export class TerminalPanelManager extends EventEmitter {
     const resumeBase = codexResumeBase(initialCommand);
     if ((customState.wasInterrupted || customState.agentSessionId) && resumeBase !== undefined) {
       nextState.wasInterrupted = undefined;
+      if (customState.orchestrationSessionId && !customState.agentSessionId) return { commandToRun: initialCommand, customState: nextState, isCliCommand: true };
+      const directoryArg = customState.orchestrationWorkspace && !/(?:^|\s)(?:--cd|-C)(?:=|\s)/.test(initialCommand)
+        ? ` --cd ${this.quoteCommandArgument(customState.orchestrationWorkspace)}`
+        : '';
       const commandToRun = customState.agentSessionId
-        ? `${resumeBase} resume ${this.quoteCommandArgument(customState.agentSessionId)}`
-        : `${resumeBase} resume`;
+        ? `${resumeBase} resume ${this.quoteCommandArgument(customState.agentSessionId)}${directoryArg}`
+        : `${resumeBase} resume${directoryArg}`;
 
       if (customState.agentSessionId) {
         console.log(`[TerminalPanelManager] Resolved interrupted Codex panel ${panelId} to direct resume`);
@@ -519,7 +536,7 @@ export class TerminalPanelManager extends EventEmitter {
     nextState: TerminalPanelState,
     shellType?: string,
   ): CliLaunchResolution | undefined {
-    if (customState.wasInterrupted || customState.agentSessionId) {
+    if ((customState.wasInterrupted || customState.agentSessionId) && (!customState.orchestrationSessionId || customState.agentSessionId)) {
       nextState.wasInterrupted = undefined;
       // Older adopted panels stored an already-expanded resume command.
       if (/--resume\b|--continue\b/.test(initialCommand)) {
@@ -1064,6 +1081,19 @@ export class TerminalPanelManager extends EventEmitter {
       return;
     }
 
+    const sessionState = terminalCustomState(panel.state);
+    if (sessionState.orchestrationSessionId || isOrchestrationInternalSessionId(panel.sessionId)) {
+      // Also cover supervisor restoration before the Session manager refreshes
+      // old launch records. Never deliver historical bootstrap input again.
+      panel.state.customState = { ...sessionState, initialInput: undefined };
+    }
+    cwd = sessionState.orchestrationWorkspace ?? cwd;
+    if (sessionState.orchestrationSessionId) {
+      const record = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json'))
+        .read().sessions.find(item => item.id === sessionState.orchestrationSessionId);
+      cwd = prepareSessionWorkspace(sessionState.orchestrationSessionId, record?.profile ?? sessionState.orchestrationProfile, record, getRuntimeConfigManager().getConfig().experimentalSessionProgress !== false);
+    }
+
     // Wait for a spawn slot (caps concurrent PTY spawns to prevent CPU spikes)
     await this.acquireSpawnSlot(priority);
 
@@ -1141,8 +1171,11 @@ export class TerminalPanelManager extends EventEmitter {
 
     // The ptyHost RPC DTO requires `Record<string, string>`, so both the legacy
     // `pty.spawn` path and the ptyHost path get the same undefined-free shape.
+    const inheritedEnv = interactiveTerminalEnv();
+    // A Pane launched from an orchestrator must not inherit the parent's role.
+    delete inheritedEnv.PANE_ORCHESTRATION_SESSION_ID;
     const baseSpawnEnv = {
-      ...interactiveTerminalEnv(),
+      ...inheritedEnv,
       ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
       PATH: enhancedPath,
       TERM: 'xterm-256color',
@@ -2072,6 +2105,43 @@ export class TerminalPanelManager extends EventEmitter {
     // Watchers ignored this panel's earlier transitions; restate where it is now.
     const state = this.agentStatusMonitor.getState(terminal.panelId);
     if (state) this.emitAgentStatus(terminal, state, 'agent_detected');
+  }
+
+  /** Finish saving and confirm process exit before a conversation changes owner. */
+  async stopForPromotion(panelId: string): Promise<void> {
+    const terminal = this.terminals.get(panelId);
+    if (!terminal) return;
+    if (terminal.screenEmulator) await terminal.screenEmulator.refresh();
+    if (!this.isIdleForPromotion(terminal)) throw new Error('Wait for the agent to finish before moving this chat');
+    await this.saveTerminalState(panelId);
+    if (terminal.screenEmulator) await terminal.screenEmulator.refresh();
+    if (!this.isIdleForPromotion(terminal)) throw new Error('The agent started working; try again when idle');
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { subscription.dispose(); reject(new Error('Agent did not stop; the chat has not been moved')); }, 5000);
+      const subscription = terminal.pty.onExit(() => { clearTimeout(timer); subscription.dispose(); resolve(); });
+      try { terminal.pty.kill(); }
+      catch (error) { clearTimeout(timer); subscription.dispose(); reject(error); }
+    });
+    if (terminal.outputFlushTimer) clearTimeout(terminal.outputFlushTimer);
+    disposeFlowControlRecord(terminal.flowControl);
+    this.serializedBuffers.delete(panelId);
+  }
+
+  private isIdleForPromotion(terminal: TerminalProcess): boolean {
+    const emulator = terminal.screenEmulator;
+    if (emulator) {
+      const { screenText, oscTitle, oscProgress } = emulator.state;
+      const detection = detectAgentState(getManifestForAgent(terminal.agentType), {
+        screen: screenText,
+        oscTitle,
+        oscProgress,
+      });
+      if (detection.visibleWorking || detection.visibleBlocker || detection.skipStateUpdate) return false;
+      // The sidebar deliberately holds "working" after output. A live input
+      // prompt is stronger evidence for this explicit user-requested move.
+      if (detection.visibleIdle) return true;
+    }
+    return this.getAgentStatus(terminal.panelId) === 'idle';
   }
 
   destroyTerminal(panelId: string, options: { saveState?: boolean } = {}): Promise<void> {

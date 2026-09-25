@@ -1038,11 +1038,11 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
         if parsed.concurrency is not None:
             payload["concurrency"] = parsed.concurrency
         pinned_override = resolve_pinned_override(parsed)
-        if pinned_override is not None:
-            payload["panes"] = [
-                {**item, "pinned": pinned_override} if isinstance(item, dict) else item
-                for item in payload.get("panes", [])
-            ]
+        payload["panes"] = [
+            {**item, "pinned": pinned_override if pinned_override is not None else item.get("pinned", not bool(os.environ.get("PANE_ORCHESTRATION_SESSION_ID")))}
+            if isinstance(item, dict) else item
+            for item in payload.get("panes", [])
+        ]
         apply_pane_focus_options(parsed, payload)
         if parsed.no_associate:
             payload.pop("associateSession", None)
@@ -1058,7 +1058,7 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
         raise ValueError("Use either --focus or --no-focus, not both.")
 
     pinned_override = resolve_pinned_override(parsed)
-    pinned = True if pinned_override is None else pinned_override
+    pinned = not bool(os.environ.get("PANE_ORCHESTRATION_SESSION_ID")) if pinned_override is None else pinned_override
 
     return {
         "repo": parsed.repo,

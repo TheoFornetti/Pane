@@ -1,3 +1,4 @@
+import { customCommandResumeSchema, type CustomCommandResume } from '../../../shared/types/customCommandResume';
 /**
  * Session management for Pane.
  * Note: "Sessions" are called "Panes" in the UI. Internally they remain
@@ -95,6 +96,7 @@ function getMessageContent(message: GenericMessageData['message']): string | Mes
 }
 
 const terminalResumeStateSchema = boundary.object({
+  customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
   wasInterrupted: boundary.optional(boundary.boolean),
   initialCommand: boundary.optional(boundary.string),
   agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
@@ -103,6 +105,7 @@ const terminalResumeStateSchema = boundary.object({
 });
 
 function parseTerminalResumeState(value: ToolPanelState['customState']): {
+  customResume?: CustomCommandResume | null;
   wasInterrupted?: boolean;
   initialCommand?: string;
   agentType?: 'claude' | 'codex' | 'cursor';
@@ -1484,7 +1487,7 @@ export class SessionManager extends EventEmitter {
             const customState = { ...(state.customState ?? {}), ...termState };
             const agentType = customState.agentType ?? resolveAgentTypeFromCommand(customState.initialCommand);
 
-            if (!isCliAgentType(agentType)) {
+            if (!isCliAgentType(agentType) && !customState.customResume) {
               continue;
             }
             customState.agentType = agentType;

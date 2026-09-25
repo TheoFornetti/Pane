@@ -60,6 +60,9 @@ export interface AppConfig {
   defaultModel?: string;
   // Default agent used by the global Pane Chat orchestrator terminal
   defaultOrchestratorAgent?: PaneChatAgent;
+  defaultSessionCommand?: string;
+  defaultSessionResume?: CustomCommandResume | null;
+  defaultSessionProfile?: string;
   // Auto-check for updates
   autoCheckUpdates?: boolean;
   // Start Pane automatically when the user logs in
@@ -146,6 +149,7 @@ export interface AppConfig {
   };
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
+  experimentalSessionProgress?: boolean;
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
@@ -181,6 +185,9 @@ export interface UpdateConfigRequest {
   defaultPermissionMode?: 'approve' | 'ignore';
   defaultModel?: string;
   defaultOrchestratorAgent?: PaneChatAgent;
+  defaultSessionCommand?: string;
+  defaultSessionResume?: CustomCommandResume | null;
+  defaultSessionProfile?: string;
   autoCheckUpdates?: boolean;
   autoStartOnBoot?: boolean;
   keepAwakeWhileSessionsActive?: boolean;
@@ -225,6 +232,7 @@ export interface UpdateConfigRequest {
   analytics?: AppConfig['analytics'];
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
+  experimentalSessionProgress?: boolean;
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts

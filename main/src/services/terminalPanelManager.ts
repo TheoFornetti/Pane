@@ -1,6 +1,6 @@
 import { withRunpaneOnPath } from './runpaneShim';
 import { validateCustomCommandResume, customResumeAgentType } from '../../../shared/types/customCommandResume';
-import { prepareSessionWorkspace } from './sessionWorkspace';
+import { prepareSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { getAppDirectory } from '../utils/appDirectory';
 import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag } from './agents/agentIdentity';
@@ -323,7 +323,7 @@ export class TerminalPanelManager extends EventEmitter {
     };
 
     const resolution = agentType === 'claude'
-      ? this.resolveClaudeLaunch(panelId, initialCommand, customState, nextState)
+      ? this.resolveClaudeLaunch(panelId, initialCommand, customState, nextState, isWSL)
       : agentType === 'codex'
         ? this.resolveCodexLaunch(panelId, initialCommand, customState, nextState)
         : agentType === 'cursor'
@@ -338,6 +338,7 @@ export class TerminalPanelManager extends EventEmitter {
     initialCommand: string,
     customState: TerminalPanelState,
     nextState: TerminalPanelState,
+    isWSL = false,
   ): CliLaunchResolution | undefined {
     if (
       !initialCommand.includes('--session-id') &&
@@ -353,11 +354,14 @@ export class TerminalPanelManager extends EventEmitter {
       const claudeSessionId = existingClaudeSessionId ?? randomUUID();
       // An idle launch allocates an ID without creating a transcript. Also
       // resolve old project locations explicitly for pre-cross-project CLIs.
-      const transcript = customState.orchestrationSessionId && existingClaudeSessionId
+      // When Pane cannot see the transcripts (WSL, or a config dir set only in
+      // the shell), trust the recorded conversation.
+      const checkTranscript = Boolean(customState.orchestrationSessionId) && !isWSL && canReadClaudeTranscripts();
+      const transcript = checkTranscript && existingClaudeSessionId
         ? findClaudeSessionTranscript(existingClaudeSessionId)
         : undefined;
       const canResumeClaudeSession = customState.hasClaudeSessionId === true && Boolean(existingClaudeSessionId)
-        && (!customState.orchestrationSessionId || Boolean(transcript));
+        && (!checkTranscript || Boolean(transcript));
       const initialPromptArg = customState.initialInputMode === 'argument' && customState.initialInput?.trim()
         ? ` ${this.quoteCommandArgument(customState.initialInput)}`
         : '';
@@ -1062,7 +1066,7 @@ export class TerminalPanelManager extends EventEmitter {
       ...wslEnvVars,
     } satisfies Record<string, string>;
     const roleEnv: Record<string, string> = panelCustomState.orchestrationSessionId
-      ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId }
+      ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId, GIT_CEILING_DIRECTORIES: sessionGitCeiling() }
       : baseSpawnEnv;
     // Pane's own runpane goes first on PATH (see runpaneShim.ts). WSL shells
     // cannot run the Windows Electron binary, so they keep their own PATH.

@@ -89,6 +89,23 @@ Auto-update reads `latest-mac.yml`, `latest-linux.yml`,
 `latest-linux-arm64.yml` and `latest.yml` from the release, so a published
 release reaches existing installs without any further step.
 
+## Package-manager distribution
+
+The tag build pushes the Homebrew cask to `greenfield-inc/homebrew-tap` and
+uploads winget manifests in the `packaging-vX.Y.Z` artifact. Verify Homebrew
+with `brew info --cask greenfield-inc/tap/pane`. Submit the artifact's `winget/`
+folder manually to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs),
+for example with `wingetcreate submit <folder>`.
+
+`scripts/render-packaging.sh` fills the templates in `packaging/` with the
+version and installer checksums. A manual `Build & Release` run with `publish`
+unchecked builds, renders and audits the cask, uploads the packaging artifact,
+and publishes nothing. `HOMEBREW_TAP_TOKEN` permits the cask push; without it,
+the Homebrew job logs a notice and skips. npm publishes with `--provenance`.
+
+`CI result` is the check branch protection requires. It fails if another
+`Code Quality` job fails or is cancelled.
+
 ## Recovery and rollback
 
 - **Never retag a version.** To undo a bad release, fix `main` and cut a new

@@ -42,6 +42,8 @@ To try the `runpane` CLI against your dev build, build it with
 `pnpm --filter runpane build` and run `node packages/runpane/dist/cli.js doctor --json`
 with the same `PANE_DIR`.
 
+Keep the TypeScript and Python CLIs' `--json` output byte-identical: the TypeScript client rebuilds each daemon result in its `boundary.object` schema's field order (`packages/runpane/src/boundaryDecoder.ts`), while the Python client prints the daemon's result as received, so list schema fields in the daemon's insertion order (`generation` last, as `withRunpaneAction` appends it) and print non-ASCII the same way (`ensure_ascii=False` in Python).
+
 Development runs write renderer and main-process output to `frontend-debug.log`
 and `backend-debug.log` in the repository root. Both are reset at startup.
 
@@ -239,3 +241,12 @@ Feel free to:
 By contributing, you agree that your contributions will be licensed under the AGPL-3.0 License.
 
 Thank you for contributing to Pane! 🎉
+
+### Native rebuild scope
+
+`pnpm electron:rebuild` uses `--only better-sqlite3-multiple-ciphers` to avoid
+rebuilding unrelated transitive modules such as `msgpackr-extract`.
+`@lydell/node-pty` uses prebuilt N-API binaries and needs no Electron rebuild.
+The rebuild targets the host architecture. Use `npm rebuild
+better-sqlite3-multiple-ciphers` for Node tests, then `pnpm electron:rebuild`
+before running Electron again; only one ABI can be installed at a time.

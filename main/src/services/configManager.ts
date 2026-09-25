@@ -52,6 +52,7 @@ export class ConfigManager extends EventEmitter {
       gitRepoPath: defaultGitPath || '',
       usePtyHost: process.platform === 'win32',
       verbose: false,
+      experimentalSessionProgress: true,
       anthropicApiKey: undefined,
       falApiKey: undefined,
       openRouterApiKey: undefined,
@@ -364,6 +365,7 @@ export class ConfigManager extends EventEmitter {
   }
 
   async updateConfig(updates: Partial<AppConfig>): Promise<AppConfig> {
+    if (updates.defaultSessionResume) validateCustomCommandResume(updates.defaultSessionResume);
     for (const command of updates.customCommands ?? []) {
       if (command.resume) validateCustomCommandResume(command.resume);
     }
@@ -392,6 +394,9 @@ export class ConfigManager extends EventEmitter {
           : this.config.remoteDaemon,
       };
 
+      if ('experimentalSessionProgress' in updates) {
+        decodeBoundary(updates.experimentalSessionProgress, boundary.boolean);
+      }
       this.validateAppearanceUpdate(updates, next);
       await this.writeConfigToDisk(next);
       this.config = next;

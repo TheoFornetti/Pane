@@ -876,6 +876,8 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
     codex: boundary.nonEmptyString,
     cursor: boundary.nonEmptyString,
   }),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
   goal: boundary.string,
   context: boundary.string,
   decisions: boundary.array(boundary.string),
@@ -1501,6 +1503,8 @@ function parseSessionCreatePayload(value: JsonValue): SessionCreatePayload {
   return decodeBoundary(value, boundary.object({
     name: boundary.nonEmptyString,
     agent: boundary.optional(boundary.enumeration('codex', 'claude', 'cursor')),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
     goal: boundary.optional(boundary.string),
     context: boundary.optional(boundary.string),
     decisions: boundary.optional(boundary.array(boundary.string)),
@@ -1517,6 +1521,8 @@ function parseSessionUpdatePayload(value: JsonValue): SessionUpdatePayload {
     archived: boundary.optional(boundary.boolean),
     isPinned: boundary.optional(boundary.boolean),
     agent: boundary.optional(boundary.enumeration('codex', 'claude', 'cursor')),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
     goal: boundary.optional(boundary.string),
     context: boundary.optional(boundary.string),
     decisions: boundary.optional(boundary.array(boundary.string)),
@@ -1727,6 +1733,7 @@ export async function runPanesAdopt(parsed: ParsedArgs): Promise<number> {
       ...decoded,
       panes: decoded.panes.map((pane, index) => ({
         ...pane,
+        pinned: resolvePinnedOverride(parsed) ?? pane.pinned ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
         tool: parsePaneToolSpecPayload(pane.tool, index),
       })),
       associateSession: parsed.noAssociate ? undefined : resolveAssociateSession(parsed) ?? decoded.associateSession,
@@ -1743,7 +1750,7 @@ export async function runPanesAdopt(parsed: ParsedArgs): Promise<number> {
       name: parsed.name,
       baseBranch: parsed.baseBranch,
       folder: parsed.folder,
-      pinned: resolvePinnedOverride(parsed) ?? true,
+      pinned: resolvePinnedOverride(parsed) ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
       tool,
       resume: parsed.resume,
       launch: parsed.launch || undefined,
@@ -2173,9 +2180,9 @@ export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCr
       request.concurrency = parsed.concurrency;
     }
     const pinnedOverride = resolvePinnedOverride(parsed);
-    if (pinnedOverride !== undefined) {
-      request.panes = request.panes.map(item => ({ ...item, pinned: pinnedOverride }));
-    }
+    request.panes = request.panes.map(item => ({
+      ...item, pinned: pinnedOverride ?? item.pinned ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
+    }));
     applyPaneFocusOptions(parsed, request);
     request.associateSession = parsed.noAssociate ? undefined : resolveAssociateSession(parsed) ?? request.associateSession;
     return request;
@@ -2199,7 +2206,7 @@ export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCr
       name: parsed.name,
       worktreeName: parsed.worktreeName,
       baseBranch: parsed.baseBranch,
-      pinned: resolvePinnedOverride(parsed) ?? true,
+      pinned: resolvePinnedOverride(parsed) ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
       tool,
     }],
     dryRun: parsed.dryRun || undefined,

@@ -97,8 +97,6 @@ export interface TerminalPanelState {
   agentReport?: TerminalAgentReport;
   /** Stable orchestration identity for resumed Session terminals. */
   orchestrationSessionId?: string;
-  /** Wrapper/custom commands own their flags and resume behavior. */
-  preserveLaunchCommand?: boolean;
   customResume?: CustomCommandResume | null;
   customResumeStarted?: boolean;
 

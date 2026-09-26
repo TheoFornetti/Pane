@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { Globe, ArrowLeft, ArrowRight, RotateCw, Loader2 } from 'lucide-react';
 import type { ToolPanel, BrowserPanelState } from '../../../../../shared/types/panels';
 import { cn } from '../../../utils/cn';
@@ -62,7 +62,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     return () => { cancelled = true; };
   }, [panel.id, isFileUrl, isHostFileUrl]);
   const panelRef = useRef(panel);
-  panelRef.current = panel;
+  useLayoutEffect(() => {
+    panelRef.current = panel;
+  }, [panel]);
 
   // Track the page webContentsId for DevTools IPC calls
   const pageWcIdRef = useRef<number | null>(null);

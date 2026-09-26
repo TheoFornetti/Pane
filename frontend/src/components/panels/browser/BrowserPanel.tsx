@@ -34,7 +34,6 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
   const persistTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const panelIdRef = useRef(panel.id);
   const remoteFileRef = useRef<boolean | null>(null);
   const lastNavigationUrlRef = useRef(currentUrlFromPanelState);
   const sourceUrlRef = useRef('');
@@ -62,6 +61,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     );
     return () => { cancelled = true; };
   }, [panel.id, isFileUrl, isHostFileUrl]);
+  const panelRef = useRef(panel);
+  panelRef.current = panel;
 
   // Track the page webContentsId for DevTools IPC calls
   const pageWcIdRef = useRef<number | null>(null);
@@ -122,9 +123,15 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     // the access boundary instead of replacing it with a link/directory URL.
     if (remoteFileRef.current !== false) return;
     persistTimeoutRef.current = setTimeout(() => {
-      window.electron?.invoke('panels:update', panelIdRef.current, {
-        state: { customState: { currentUrl: newUrl } }
-      });
+      const currentPanel = panelRef.current;
+      // The panel:updated echo records the guest's location; it must not set
+      // webview.src again and reload an in-page navigation or redirect.
+      void panelApi.updatePanel(currentPanel.id, {
+        state: {
+          ...currentPanel.state,
+          customState: { ...currentPanel.state.customState, currentUrl: newUrl }
+        }
+      }).catch(error => console.error('[BrowserPanel] Failed to persist URL:', error));
     }, 2000);
   }, []);
 

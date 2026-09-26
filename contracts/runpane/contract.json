@@ -81,7 +81,7 @@
     "enter": "\r",
     "escape": "\u001b",
     "tab": "\t",
-    "backspace": "\u007f",
+    "backspace": "",
     "space": " ",
     "up": "\u001b[A",
     "down": "\u001b[B",
@@ -96,7 +96,8 @@
       "summary": "Show help for runpane or a specific command.",
       "usage": [
         "runpane help [command]"
-      ]
+      ],
+      "localControl": false
     },
     {
       "name": "setup",
@@ -104,7 +105,8 @@
       "usage": [
         "runpane setup"
       ],
-      "interactiveEntrypoint": true
+      "interactiveEntrypoint": true,
+      "localControl": false
     },
     {
       "name": "install",
@@ -117,7 +119,8 @@
         "client",
         "daemon"
       ],
-      "unknownDaemonFlagsForwarded": true
+      "unknownDaemonFlagsForwarded": true,
+      "localControl": false
     },
     {
       "name": "update",
@@ -125,7 +128,8 @@
       "usage": [
         "runpane update [options]"
       ],
-      "target": "client"
+      "target": "client",
+      "localControl": false
     },
     {
       "name": "version",
@@ -133,7 +137,8 @@
       "usage": [
         "runpane version [--pane-dir <path>]",
         "runpane --version"
-      ]
+      ],
+      "localControl": false
     },
     {
       "name": "doctor",
@@ -149,7 +154,8 @@
       ],
       "jsonSchemas": [
         "doctorResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "daemon repair",
@@ -163,7 +169,8 @@
       ],
       "jsonSchemas": [
         "daemonRepairResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "agents doctor",
@@ -176,7 +183,8 @@
       ],
       "jsonSchemas": [
         "agentDoctorResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "agent-context",
@@ -192,7 +200,8 @@
       "jsonSchemas": [
         "agentContextBriefResult",
         "agentContextCommandResult"
-      ]
+      ],
+      "localControl": false
     },
     {
       "name": "mcp",
@@ -202,7 +211,8 @@
       ],
       "wrappers": [
         "npm"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "repos list",
@@ -216,7 +226,8 @@
       ],
       "jsonSchemas": [
         "repoListResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "repos add",
@@ -234,7 +245,8 @@
       "jsonSchemas": [
         "repoAddRequest",
         "repoAddResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes list",
@@ -248,7 +260,8 @@
       ],
       "jsonSchemas": [
         "paneListResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes cost",
@@ -262,7 +275,8 @@
       "jsonSchemas": [
         "paneCostRequest",
         "paneCostResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "workspace state",
@@ -276,7 +290,8 @@
       ],
       "jsonSchemas": [
         "workspaceStateResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "watch",
@@ -290,7 +305,8 @@
       "jsonSchemas": [
         "workspaceWaitRequest",
         "workspaceWaitResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes create",
@@ -308,7 +324,8 @@
       "jsonSchemas": [
         "paneCreateRequest",
         "paneCreateResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes adopt",
@@ -324,7 +341,8 @@
       ],
       "jsonSchemas": [
         "paneCreateResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes archive",
@@ -343,7 +361,8 @@
         "paneArchiveBulkRequest",
         "paneArchiveResult",
         "paneArchiveBulkResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes pin",
@@ -359,7 +378,8 @@
       "jsonSchemas": [
         "panePinRequest",
         "panePinResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes unpin",
@@ -375,7 +395,8 @@
       "jsonSchemas": [
         "panePinRequest",
         "panePinResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes rename",
@@ -391,7 +412,8 @@
       "jsonSchemas": [
         "paneRenameRequest",
         "paneRenameResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes focus",
@@ -408,7 +430,8 @@
       "jsonSchemas": [
         "paneFocusRequest",
         "paneFocusResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels create",
@@ -425,7 +448,8 @@
       "jsonSchemas": [
         "panelCreateRequest",
         "panelCreateResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels open",
@@ -437,7 +461,8 @@
       "jsonSchemas": [
         "panelOpenRequest",
         "panelOpenResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels list",
@@ -450,7 +475,8 @@
       ],
       "jsonSchemas": [
         "panelListResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels output",
@@ -463,7 +489,8 @@
       ],
       "jsonSchemas": [
         "panelOutputResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels screen",
@@ -476,7 +503,8 @@
       ],
       "jsonSchemas": [
         "panelScreenResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels input",
@@ -492,7 +520,8 @@
       "jsonSchemas": [
         "panelInputRequest",
         "panelInputResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels submit",
@@ -507,7 +536,8 @@
       "jsonSchemas": [
         "panelSubmitRequest",
         "panelSubmitResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels submit-composer",
@@ -522,7 +552,8 @@
       "jsonSchemas": [
         "panelSubmitComposerRequest",
         "panelSubmitComposerResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels wait",
@@ -535,7 +566,8 @@
       ],
       "jsonSchemas": [
         "panelWaitResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels last-message",
@@ -549,7 +581,8 @@
       ],
       "jsonSchemas": [
         "panelLastMessageResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes git-status",
@@ -569,7 +602,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes commit",
@@ -591,7 +625,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes push",
@@ -614,7 +649,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes pull",
@@ -635,7 +671,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes rebase-main",
@@ -655,7 +692,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes restore",
@@ -678,7 +716,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes squash-rebase",
@@ -699,7 +738,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes stash",
@@ -719,7 +759,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes stash-pop",
@@ -739,7 +780,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes soft-reset",
@@ -759,7 +801,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes fetch",
@@ -782,7 +825,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes run-script",
@@ -803,7 +847,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes stop-script",
@@ -824,7 +869,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes move",
@@ -846,7 +892,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "folders list",
@@ -865,7 +912,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "folders create",
@@ -887,7 +935,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "links create",
@@ -903,7 +952,8 @@
       ],
       "jsonSchemas": [
         "linkCreateResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "links open",
@@ -925,7 +975,8 @@
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "docs search",
@@ -942,7 +993,8 @@
       ],
       "jsonSchemas": [
         "docsSearchResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "docs read",
@@ -959,7 +1011,8 @@
       ],
       "jsonSchemas": [
         "docsReadResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "agents start",
@@ -978,7 +1031,8 @@
       ],
       "jsonSchemas": [
         "agentTaskResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "agents status",
@@ -995,7 +1049,8 @@
       ],
       "jsonSchemas": [
         "agentStatusResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "agents send",
@@ -1013,7 +1068,8 @@
       ],
       "jsonSchemas": [
         "agentSendResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "report",
@@ -1029,7 +1085,8 @@
       ],
       "jsonSchemas": [
         "reportResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions list",
@@ -1042,7 +1099,8 @@
       ],
       "jsonSchemas": [
         "sessionListResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions create",
@@ -1057,7 +1115,8 @@
       ],
       "jsonSchemas": [
         "sessionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions get",
@@ -1070,7 +1129,8 @@
       ],
       "jsonSchemas": [
         "sessionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions update",
@@ -1085,7 +1145,8 @@
       ],
       "jsonSchemas": [
         "sessionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions set-agent",
@@ -1100,7 +1161,8 @@
       ],
       "jsonSchemas": [
         "sessionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions associate",
@@ -1116,7 +1178,8 @@
       ],
       "jsonSchemas": [
         "sessionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions detach",
@@ -1131,7 +1194,8 @@
       ],
       "jsonSchemas": [
         "sessionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions overview",
@@ -1144,7 +1208,8 @@
       ],
       "jsonSchemas": [
         "sessionOverviewResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "lock acquire",
@@ -1161,7 +1226,8 @@
       "jsonSchemas": [
         "lockAcquireRequest",
         "lockAcquireResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "lock release",
@@ -1176,7 +1242,8 @@
       ],
       "jsonSchemas": [
         "lockReleaseResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "lock list",
@@ -1189,7 +1256,8 @@
       ],
       "jsonSchemas": [
         "lockListResult"
-      ]
+      ],
+      "localControl": true
     }
   ],
   "flags": {
@@ -5284,15 +5352,37 @@
         },
         "watchDefaults": {
           "type": "object",
-          "required": ["heartbeatSeconds", "idleAfterMs", "settleMs", "blockedSettleMs", "minIntervalMs", "idleBackoff", "kinds"],
+          "required": [
+            "heartbeatSeconds",
+            "idleAfterMs",
+            "settleMs",
+            "blockedSettleMs",
+            "minIntervalMs",
+            "idleBackoff",
+            "kinds"
+          ],
           "properties": {
-            "heartbeatSeconds": { "type": "number" },
-            "idleAfterMs": { "type": "number" },
-            "settleMs": { "type": "number" },
-            "blockedSettleMs": { "type": "number" },
-            "minIntervalMs": { "type": "number" },
-            "idleBackoff": { "type": "boolean" },
-            "kinds": { "const": "all" }
+            "heartbeatSeconds": {
+              "type": "number"
+            },
+            "idleAfterMs": {
+              "type": "number"
+            },
+            "settleMs": {
+              "type": "number"
+            },
+            "blockedSettleMs": {
+              "type": "number"
+            },
+            "minIntervalMs": {
+              "type": "number"
+            },
+            "idleBackoff": {
+              "type": "boolean"
+            },
+            "kinds": {
+              "const": "all"
+            }
           },
           "additionalProperties": false
         },
@@ -7729,7 +7819,10 @@
           "type": "number"
         },
         "enter": {
-          "enum": ["cr", "tab"]
+          "enum": [
+            "cr",
+            "tab"
+          ]
         },
         "sequenceName": {
           "enum": [

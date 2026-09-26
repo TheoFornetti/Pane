@@ -4062,6 +4062,11 @@ async function runChecks() {
   await checkNodeReleaseTimeout();
   checkNoArgsAndSetupFallback();
   checkDoctorReportSafety();
+  childProcess.execFileSync(process.execPath, ['--test', path.join(__dirname, 'test-runpane-dispatch.js')], {
+    cwd: rootDir,
+    env: { ...process.env, PYTHON: findPython() },
+    stdio: 'inherit',
+  });
   console.log('runpane CLI contract checks passed');
 }
 

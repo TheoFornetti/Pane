@@ -305,7 +305,8 @@
       "required": [
         "name",
         "summary",
-        "usage"
+        "usage",
+        "localControl"
       ],
       "properties": {
         "name": {
@@ -383,6 +384,10 @@
         },
         "jsonSchemas": {
           "$ref": "#/$defs/stringList"
+        },
+        "localControl": {
+          "type": "boolean",
+          "description": "Whether the command accepts the shared local-control flags."
         }
       },
       "additionalProperties": false

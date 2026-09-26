@@ -98,7 +98,8 @@ export const RUNPANE_CONTRACT = {
       "summary": "Show help for runpane or a specific command.",
       "usage": [
         "runpane help [command]"
-      ]
+      ],
+      "localControl": false
     },
     {
       "name": "setup",
@@ -106,7 +107,8 @@ export const RUNPANE_CONTRACT = {
       "usage": [
         "runpane setup"
       ],
-      "interactiveEntrypoint": true
+      "interactiveEntrypoint": true,
+      "localControl": false
     },
     {
       "name": "install",
@@ -119,7 +121,8 @@ export const RUNPANE_CONTRACT = {
         "client",
         "daemon"
       ],
-      "unknownDaemonFlagsForwarded": true
+      "unknownDaemonFlagsForwarded": true,
+      "localControl": false
     },
     {
       "name": "update",
@@ -127,7 +130,8 @@ export const RUNPANE_CONTRACT = {
       "usage": [
         "runpane update [options]"
       ],
-      "target": "client"
+      "target": "client",
+      "localControl": false
     },
     {
       "name": "version",
@@ -135,7 +139,8 @@ export const RUNPANE_CONTRACT = {
       "usage": [
         "runpane version [--pane-dir <path>]",
         "runpane --version"
-      ]
+      ],
+      "localControl": false
     },
     {
       "name": "doctor",
@@ -151,7 +156,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "doctorResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "daemon repair",
@@ -165,7 +171,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonRepairResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "agents doctor",
@@ -178,7 +185,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "agentDoctorResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "agent-context",
@@ -194,7 +202,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "agentContextBriefResult",
         "agentContextCommandResult"
-      ]
+      ],
+      "localControl": false
     },
     {
       "name": "mcp",
@@ -204,7 +213,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "wrappers": [
         "npm"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "repos list",
@@ -218,7 +228,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "repoListResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "repos add",
@@ -236,7 +247,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "repoAddRequest",
         "repoAddResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes list",
@@ -250,7 +262,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "paneListResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes cost",
@@ -264,7 +277,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "paneCostRequest",
         "paneCostResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "workspace state",
@@ -278,7 +292,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "workspaceStateResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "watch",
@@ -292,7 +307,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "workspaceWaitRequest",
         "workspaceWaitResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes create",
@@ -310,7 +326,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "paneCreateRequest",
         "paneCreateResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes adopt",
@@ -326,7 +343,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "paneCreateResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes archive",
@@ -345,7 +363,8 @@ export const RUNPANE_CONTRACT = {
         "paneArchiveBulkRequest",
         "paneArchiveResult",
         "paneArchiveBulkResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes pin",
@@ -361,7 +380,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "panePinRequest",
         "panePinResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes unpin",
@@ -377,7 +397,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "panePinRequest",
         "panePinResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes rename",
@@ -393,7 +414,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "paneRenameRequest",
         "paneRenameResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes focus",
@@ -410,7 +432,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "paneFocusRequest",
         "paneFocusResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels create",
@@ -427,7 +450,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "panelCreateRequest",
         "panelCreateResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels open",
@@ -439,7 +463,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "panelOpenRequest",
         "panelOpenResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels list",
@@ -452,7 +477,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "panelListResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels output",
@@ -465,7 +491,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "panelOutputResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels screen",
@@ -478,7 +505,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "panelScreenResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels input",
@@ -494,7 +522,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "panelInputRequest",
         "panelInputResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels submit",
@@ -509,7 +538,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "panelSubmitRequest",
         "panelSubmitResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels submit-composer",
@@ -524,7 +554,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "panelSubmitComposerRequest",
         "panelSubmitComposerResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels wait",
@@ -537,7 +568,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "panelWaitResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panels last-message",
@@ -551,7 +583,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "panelLastMessageResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes git-status",
@@ -571,7 +604,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes commit",
@@ -593,7 +627,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes push",
@@ -616,7 +651,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes pull",
@@ -637,7 +673,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes rebase-main",
@@ -657,7 +694,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes restore",
@@ -680,7 +718,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes squash-rebase",
@@ -701,7 +740,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes stash",
@@ -721,7 +761,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes stash-pop",
@@ -741,7 +782,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes soft-reset",
@@ -761,7 +803,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes fetch",
@@ -784,7 +827,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes run-script",
@@ -805,7 +849,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes stop-script",
@@ -826,7 +871,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "panes move",
@@ -848,7 +894,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "folders list",
@@ -867,7 +914,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "folders create",
@@ -889,7 +937,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "links create",
@@ -905,7 +954,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "linkCreateResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "links open",
@@ -927,7 +977,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "daemonActionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "docs search",
@@ -944,7 +995,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "docsSearchResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "docs read",
@@ -961,7 +1013,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "docsReadResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "agents start",
@@ -980,7 +1033,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "agentTaskResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "agents status",
@@ -997,7 +1051,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "agentStatusResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "agents send",
@@ -1015,7 +1070,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "agentSendResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "report",
@@ -1031,7 +1087,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "reportResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions list",
@@ -1044,7 +1101,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "sessionListResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions create",
@@ -1059,7 +1117,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "sessionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions get",
@@ -1072,7 +1131,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "sessionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions update",
@@ -1087,7 +1147,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "sessionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions set-agent",
@@ -1102,7 +1163,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "sessionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions associate",
@@ -1118,7 +1180,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "sessionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions detach",
@@ -1133,7 +1196,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "sessionResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "sessions overview",
@@ -1146,7 +1210,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "sessionOverviewResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "lock acquire",
@@ -1163,7 +1228,8 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "lockAcquireRequest",
         "lockAcquireResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "lock release",
@@ -1178,7 +1244,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "lockReleaseResult"
-      ]
+      ],
+      "localControl": true
     },
     {
       "name": "lock list",
@@ -1191,7 +1258,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "lockListResult"
-      ]
+      ],
+      "localControl": true
     }
   ],
   "flags": {

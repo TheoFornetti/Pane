@@ -26,7 +26,7 @@ import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
 import { consumeNativePushRoute, getNativePushStatus, installNativePushRouting, revokeNativePush, setupNativePush, updateNativePushControls, type NativePushRoute } from './runtime/nativePush';
 import { findFirstSessionId, useRemoteSessionStore } from './stores/remoteSessionStore';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-import { remoteDeletedSessionSchema, remoteSessionSchema } from './runtime/remoteSessionSchemas';
+import { remoteDeletedSessionSchema, remoteSessionSchema } from './runtime/remote-session-schemas';
 import { ErrorDialog } from '../components/ErrorDialog';
 
 const EMPTY_AFFORDANCES: RemotePwaAffordances = {
@@ -680,7 +680,7 @@ export function RemotePwaApp() {
           void loadArchivedIfShown(adapter);
         case 'session:updated': {
           const session = decodeBoundary(event.args[0], remoteSessionSchema);
-          if (session.archived) removeSession(session.id);
+          if (session.archived || session.isHidden || session.isMainRepo) removeSession(session.id);
           else upsertSession(session);
           break;
         }

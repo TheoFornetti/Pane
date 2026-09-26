@@ -757,223 +757,49 @@ function spawnWatchCli(runtime, args) {
     });
 }
 
+// Python materializes optional defaults while TypeScript leaves them absent.
+// Only these known false/empty defaults may differ in representation. Null and
+// undefined both mean an unset optional value; all populated fields are compared.
+const PARSER_DEFAULT_DIFFERENCES = {
+  waitReady: false, noFocus: false, focus: false, pinned: false, noPinned: false,
+  force: false, follow: false, agentsOnly: false, ackNow: false,
+  includeHeldInput: false, idleBackoff: false, allManaged: false,
+  includeShells: false, noHeldInput: false, selfTest: false, report: false,
+  watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [],
+  asFilePointer: false, noAssociate: false, removeWorktree: false, merged: false,
+  quiet: false, readOnly: false, launch: false,
+};
+
+function normalizeParsedArgs(value) {
+  if (Array.isArray(value)) return value.map(normalizeParsedArgs);
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Test-only serialization of parser snapshots from both languages, including nested JSON values.
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([, item]) => item !== null && item !== undefined)
+    .map(([key, item]) => [key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()), normalizeParsedArgs(item)]));
+}
+
 function compareParserParity() {
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
-  const nodeOutput = parserSamples.map((args) => {
-    const parsed = parseRunpaneArgs(args);
-    return {
-      command: parsed.command,
-      helpTopic: parsed.helpTopic ?? null,
-      target: parsed.target,
-      paneVersion: parsed.paneVersion,
-      channel: parsed.channel,
-      format: parsed.format,
-      downloadDir: parsed.downloadDir ?? null,
-      panePath: parsed.panePath ?? null,
-      dryRun: parsed.dryRun,
-      yes: parsed.yes,
-      verbose: parsed.verbose,
-      json: parsed.json,
-      contextCommand: parsed.contextCommand ?? null,
-      paneDir: parsed.paneDir ?? null,
-      repo: parsed.repo ?? null,
-      paneId: parsed.paneId ?? null,
-      panelId: parsed.panelId ?? null,
-      repoPath: parsed.repoPath ?? null,
-      name: parsed.name ?? null,
-      worktreeName: parsed.worktreeName ?? null,
-      branch: parsed.branch ?? null,
-      baseBranch: parsed.baseBranch ?? null,
-      agent: parsed.agent ?? null,
-      toolCommand: parsed.toolCommand ?? null,
-      title: parsed.title ?? null,
-      url: parsed.url ?? null,
-      file: parsed.file ?? null,
-      placement: parsed.placement ?? null,
-      initialInput: parsed.initialInput ?? null,
-      initialInputFile: parsed.initialInputFile ?? null,
-      asFilePointer: parsed.asFilePointer ?? false,
-      panelInput: parsed.panelInput ?? null,
-      panelInputFile: parsed.panelInputFile ?? null,
-      fromJson: parsed.fromJson ?? null,
-      timeoutMs: parsed.timeoutMs ?? null,
-      waitReady: parsed.waitReady ?? false,
-      readyTimeoutMs: parsed.readyTimeoutMs ?? null,
-      concurrency: parsed.concurrency ?? null,
-      limit: parsed.limit ?? null,
-      waitCondition: parsed.waitCondition ?? null,
-      contains: parsed.contains ?? null,
-      intervalMs: parsed.intervalMs ?? null,
-      source: parsed.source ?? null,
-      noFocus: parsed.noFocus ?? false,
-      focus: parsed.focus ?? false,
-      pinned: parsed.pinned ?? false,
-      noPinned: parsed.noPinned ?? false,
-      noAssociate: parsed.noAssociate ?? false,
-      composerStrategy: parsed.composerStrategy ?? null,
-      sessionId: parsed.sessionId ?? null,
-      force: parsed.force ?? false,
-      removeWorktree: parsed.removeWorktree ?? false,
-      merged: parsed.merged ?? false,
-      watchAs: parsed.watchAs ?? null,
-      watchSince: parsed.watchSince ?? null,
-      watchFrom: parsed.watchFrom ?? null,
-      watchKinds: parsed.watchKinds ?? [],
-      watchPaneIds: parsed.watchPaneIds ?? [],
-      sessionId: parsed.sessionId ?? null,
-      watchExcludePaneIds: parsed.watchExcludePaneIds ?? [],
-      nameContains: parsed.nameContains ?? null,
-      follow: parsed.follow ?? false,
-      agentsOnly: parsed.agentsOnly ?? false,
-      ackNow: parsed.ackNow ?? false,
-      includeHeldInput: parsed.includeHeldInput ?? false,
-      watchFormat: parsed.watchFormat ?? null,
-      heartbeatSeconds: parsed.heartbeatSeconds ?? null,
-      idleAfterMs: parsed.idleAfterMs ?? null,
-      settleMs: parsed.settleMs ?? null,
-      blockedSettleMs: parsed.blockedSettleMs ?? null,
-      minIntervalMs: parsed.minIntervalMs ?? null,
-      idleBackoff: parsed.idleBackoff ?? false,
-      allManaged: parsed.allManaged ?? false,
-      includeShells: parsed.includeShells ?? false,
-      noHeldInput: parsed.noHeldInput ?? false,
-      selfTest: parsed.selfTest ?? false,
-      quiet: parsed.quiet ?? false,
-      report: parsed.report ?? false,
-      bodyFile: parsed.bodyFile ?? null,
-      message: parsed.message ?? null,
-      query: parsed.query ?? null,
-      doc: parsed.doc ?? null,
-      url: parsed.url ?? null,
-      folder: parsed.folder ?? null,
-      keys: parsed.keys ?? null,
-      toolsets: parsed.toolsets ?? null,
-      readOnly: parsed.readOnly ?? false,
-      reportState: parsed.reportState ?? null,
-      reportPr: parsed.reportPr ?? null,
-      reportHead: parsed.reportHead ?? null,
-      summary: parsed.summary ?? null,
-      summaryFile: parsed.summaryFile ?? null,
-      question: parsed.question ?? null,
-      lockTtlMs: parsed.lockTtlMs ?? null,
-      lockWaitMs: parsed.lockWaitMs ?? null,
-      note: parsed.note ?? null,
-      remoteSetupArgs: parsed.remoteSetupArgs
-    };
-  });
-
-  const pythonOutput = runPythonSnippet(`
+  const nodeOutput = parserSamples.map((args) => normalizeParsedArgs({
+    ...PARSER_DEFAULT_DIFFERENCES,
+    ...parseRunpaneArgs(args),
+  }));
+  const pythonOutput = JSON.parse(runPythonSnippet(`
+from dataclasses import asdict
 import json
 import sys
 from runpane.cli import parse_args
 
-samples = json.loads(sys.stdin.read())
-normalized = []
-for args in samples:
-    parsed = parse_args(args)
-    normalized.append({
-        "command": parsed.command,
-        "helpTopic": parsed.help_topic,
-        "target": parsed.target,
-        "paneVersion": parsed.pane_version,
-        "channel": parsed.channel,
-        "format": parsed.format,
-        "downloadDir": parsed.download_dir,
-        "panePath": parsed.pane_path,
-        "dryRun": parsed.dry_run,
-        "yes": parsed.yes,
-        "verbose": parsed.verbose,
-        "json": parsed.json,
-        "contextCommand": parsed.context_command,
-        "paneDir": parsed.pane_dir,
-        "repo": parsed.repo,
-        "paneId": parsed.pane_id,
-        "panelId": parsed.panel_id,
-        "repoPath": parsed.repo_path,
-        "name": parsed.name,
-        "worktreeName": parsed.worktree_name,
-        "branch": parsed.branch,
-        "baseBranch": parsed.base_branch,
-        "agent": parsed.agent,
-        "toolCommand": parsed.tool_command,
-        "title": parsed.title,
-        "url": parsed.url,
-        "file": parsed.file,
-        "placement": parsed.placement,
-        "initialInput": parsed.initial_input,
-        "initialInputFile": parsed.initial_input_file,
-        "asFilePointer": parsed.as_file_pointer,
-        "panelInput": parsed.panel_input,
-        "panelInputFile": parsed.panel_input_file,
-        "fromJson": parsed.from_json,
-        "timeoutMs": parsed.timeout_ms,
-        "waitReady": parsed.wait_ready,
-        "readyTimeoutMs": parsed.ready_timeout_ms,
-        "concurrency": parsed.concurrency,
-        "limit": parsed.limit,
-        "waitCondition": parsed.wait_condition,
-        "contains": parsed.contains,
-        "intervalMs": parsed.interval_ms,
-        "source": parsed.source,
-        "noFocus": parsed.no_focus,
-        "focus": parsed.focus,
-        "pinned": parsed.pinned,
-        "noPinned": parsed.no_pinned,
-        "noAssociate": parsed.no_associate,
-        "composerStrategy": parsed.composer_strategy,
-        "sessionId": parsed.session_id,
-        "force": parsed.force,
-        "removeWorktree": parsed.remove_worktree,
-        "merged": parsed.merged,
-        "watchAs": parsed.watch_as,
-        "watchSince": parsed.watch_since,
-        "watchFrom": parsed.watch_from,
-        "watchKinds": parsed.watch_kinds,
-        "watchPaneIds": parsed.watch_pane_ids,
-        "sessionId": parsed.session_id,
-        "watchExcludePaneIds": parsed.watch_exclude_pane_ids,
-        "nameContains": parsed.name_contains,
-        "follow": parsed.follow,
-        "agentsOnly": parsed.agents_only,
-        "ackNow": parsed.ack_now,
-        "includeHeldInput": parsed.include_held_input,
-        "watchFormat": parsed.watch_format,
-        "heartbeatSeconds": parsed.heartbeat_seconds,
-        "idleAfterMs": parsed.idle_after_ms,
-        "settleMs": parsed.settle_ms,
-        "blockedSettleMs": parsed.blocked_settle_ms,
-        "minIntervalMs": parsed.min_interval_ms,
-        "idleBackoff": parsed.idle_backoff,
-        "allManaged": parsed.all_managed,
-        "includeShells": parsed.include_shells,
-        "noHeldInput": parsed.no_held_input,
-        "selfTest": parsed.self_test,
-        "quiet": parsed.quiet,
-        "report": parsed.report,
-        "bodyFile": parsed.body_file,
-        "message": parsed.message,
-        "query": parsed.query,
-        "doc": parsed.doc,
-        "url": parsed.url,
-        "folder": parsed.folder,
-        "keys": parsed.keys,
-        "toolsets": parsed.toolsets,
-        "readOnly": parsed.read_only,
-        "reportState": parsed.report_state,
-        "reportPr": parsed.report_pr,
-        "reportHead": parsed.report_head,
-        "summary": parsed.summary,
-        "summaryFile": parsed.summary_file,
-        "question": parsed.question,
-        "lockTtlMs": parsed.lock_ttl_ms,
-        "lockWaitMs": parsed.lock_wait_ms,
-        "note": parsed.note,
-        "remoteSetupArgs": parsed.remote_setup_args,
-    })
-print(json.dumps(normalized))
-`, JSON.stringify(parserSamples));
+print(json.dumps([asdict(parse_args(args)) for args in json.loads(sys.stdin.read())]))
+`, JSON.stringify(parserSamples))).map(parsed => ({
+    ...PARSER_DEFAULT_DIFFERENCES,
+    ...normalizeParsedArgs(parsed),
+  }));
 
-  assert.deepStrictEqual(JSON.parse(pythonOutput), nodeOutput);
+  parserSamples.forEach((args, index) => {
+    assert.deepStrictEqual(pythonOutput[index], nodeOutput[index], `Parser parity: ${args.join(' ')}`);
+  });
 }
 
 function compareLegacyRemoteDaemonHealthParity() {

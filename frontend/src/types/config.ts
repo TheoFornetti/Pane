@@ -148,7 +148,6 @@ export interface AppConfig {
   analytics?: AnalyticsConfig;
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
-  experimentalSessionProgress?: boolean;
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
@@ -210,7 +209,6 @@ export interface UpdateConfigRequest {
   usePtyHost?: boolean;
   analytics?: AnalyticsConfig;
   customCommands?: CustomCommand[];
-  experimentalSessionProgress?: boolean;
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;

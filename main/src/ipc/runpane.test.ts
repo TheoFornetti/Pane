@@ -21,7 +21,7 @@ import { ArchiveProgressManager } from '../services/archiveProgressManager';
 import { removeWorktreeViaTrash, waitForPendingWorktreeTrash } from '../services/worktreeTrash';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
-import { createWorkspaceJournal } from '../services/createWorkspaceJournal';
+import { createWorkspaceJournal } from '../services/create-workspace-journal';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';

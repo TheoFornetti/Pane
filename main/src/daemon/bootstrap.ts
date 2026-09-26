@@ -46,7 +46,7 @@ import { terminalPanelManager } from '../services/terminalPanelManager';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
 import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
-import { createWorkspaceJournal } from '../services/createWorkspaceJournal';
+import { createWorkspaceJournal } from '../services/create-workspace-journal';
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 

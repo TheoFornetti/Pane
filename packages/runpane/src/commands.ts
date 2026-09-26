@@ -915,7 +915,8 @@ function splitInlineValues(rawArgs: string[]): SplitArgs {
 function readValue(args: string[], index: number, flag: string, literalValues: Set<number>): string {
   const value = args[index];
   if (literalValues.has(index)) return value;
-  if (!value || (value.startsWith('-') && value !== '-')) {
+  const freeText = ['--text', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
+  if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }
   return value;

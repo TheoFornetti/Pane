@@ -296,7 +296,11 @@ interface PaneCreateSuccessItem {
   name?: string;
   pinned: boolean;
   sessionId?: string;
+  paneId?: string;
   panelId?: string;
+  tool?: { title: string; command: string; agent?: RunpaneAgent };
+  active?: boolean;
+  focused?: boolean;
   worktreePath?: string;
   nextCommand?: string;
   readiness?: PanelReadiness;
@@ -1357,7 +1361,15 @@ export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary
       name: boundary.optional(boundary.string),
       pinned: boundary.boolean,
       sessionId: boundary.optional(boundary.string),
+      paneId: boundary.optional(boundary.string),
       panelId: boundary.optional(boundary.string),
+      tool: boundary.optional(boundary.object({
+        title: boundary.string,
+        command: boundary.string,
+        agent: boundary.optional(agentSchema),
+      })),
+      active: boundary.optional(boundary.boolean),
+      focused: boundary.optional(boundary.boolean),
       worktreePath: boundary.optional(boundary.string),
       nextCommand: boundary.optional(boundary.string),
       readiness: boundary.optional(panelReadinessSchema),
@@ -2259,7 +2271,7 @@ export async function runPanesCreate(parsed: ParsedArgs): Promise<number> {
   if (parsed.json) {
     printJson(result);
   } else {
-    printPaneCreateResult(result);
+    printPaneCreateResult(result, request.dryRun);
   }
 
   return result.ok ? 0 : 1;
@@ -2316,7 +2328,7 @@ export async function runPanesAdopt(parsed: ParsedArgs): Promise<number> {
     timeoutMs: 120_000 + (request.waitReady ? (request.readyTimeoutMs ?? 30_000) : 0),
   });
   if (parsed.json) printJson(result);
-  else printPaneCreateResult(result);
+  else printPaneCreateResult(result, request.dryRun, 'adopt');
   return result.ok ? 0 : 1;
 }
 
@@ -2397,7 +2409,7 @@ export async function runPanesPin(parsed: ParsedArgs, pinned: boolean): Promise<
   if (parsed.json) {
     printJson(result);
   } else {
-    console.log(`${result.pinned ? 'Pinned' : 'Unpinned'} ${result.paneId}`);
+    console.log(`${result.dryRun ? (result.pinned ? 'Would pin' : 'Would unpin') : (result.pinned ? 'Pinned' : 'Unpinned')} ${result.paneId}`);
   }
 
   return 0;
@@ -3392,10 +3404,14 @@ function printPaneCostModels(models: UsageByModelResult[]): void {
   }
 }
 
-function printPaneCreateResult(result: PaneCreateResult): void {
+function printPaneCreateResult(result: PaneCreateResult, dryRun = false, action: 'create' | 'adopt' = 'create'): void {
   for (const item of result.items) {
     if (!('error' in item)) {
       const worktree = item.worktreePath ? ` at ${item.worktreePath}` : '';
+      if (dryRun) {
+        console.log(`Would ${action} ${item.name ?? `pane ${item.index}`}${worktree}`);
+        continue;
+      }
       console.log(`Created ${item.name ?? `pane ${item.index}`}: session ${item.sessionId ?? 'unknown'} panel ${item.panelId ?? 'unknown'}${worktree}`);
       if (item.readiness) {
         console.log(`  Ready: ${item.readiness.ok ? 'yes' : item.readiness.timedOut ? 'timed out' : 'blocked'} after ${item.readiness.elapsedMs}ms`);

@@ -86,7 +86,9 @@ export function RemotePwaApp() {
   const [pushControls, setPushControls] = useState(DEFAULT_PUSH_CONTROLS);
   const [{ adapter, activeProfile, connectionStatus, connectionError, actionError, connectionErrorKind, lastSeenAt }, updateConnection] = useReducer(connectionReducer, INITIAL_CONNECTION);
   const setActionError = useCallback((error: string | null) => updateConnection({ actionError: error }), []);
-  const lastError = actionError ?? connectionError;
+  const lastError = connectionStatus === 'connected'
+    ? actionError ?? connectionError
+    : connectionError ?? actionError;
   const [loading, setLoading] = useState(false);
   const [creatingTerminal, setCreatingTerminal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -261,7 +263,6 @@ export function RemotePwaApp() {
       if (!hasSelectedSession) {
         selectSession(findFirstSessionId(nextProjects));
       }
-      setActionError(null);
       return nextProjects;
     } catch (error) {
       if (runtime === activeRuntimeRef.current) setActionError(error instanceof Error ? error.message : 'Failed to load remote panes');
@@ -290,8 +291,6 @@ export function RemotePwaApp() {
       setSelectedPanel(routeMatches ? routedPanel.panelId : keptPanelId ?? activePanel?.id ?? panels[0]?.id ?? null);
       if (routedPanel?.sessionId === sessionId && !routeMatches) {
         setActionError('The notified panel is no longer available on this Pane host.');
-      } else {
-        setActionError(null);
       }
     } catch (error) {
       if (runtime === activeRuntimeRef.current && request === panelLoadRequestRef.current) setActionError(error instanceof Error ? error.message : 'Failed to load remote panels');
@@ -497,6 +496,7 @@ export function RemotePwaApp() {
   const createTerminal = useCallback(async (options?: RemoteTerminalCreateOptions) => {
     if (!adapter || !selectedSessionId) return;
     setCreatingTerminal(true);
+    setActionError(null);
     try {
       const panel = await adapter.createTerminalPanel(selectedSessionId, options);
       upsertPanel(panel);

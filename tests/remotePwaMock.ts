@@ -249,6 +249,13 @@ export async function openConnectedRemotePwa(
 
     Object.defineProperty(window, 'EventSource', { configurable: true, value: MockEventSource });
 
+    Object.defineProperty(window, '__paneRemoteEvent', {
+      configurable: true,
+      value: (channel: string) => live?.dispatchEvent(new MessageEvent('daemon-event', {
+        data: JSON.stringify({ channel, args: [], timestamp: new Date().toISOString() }),
+      })),
+    });
+
     Object.defineProperty(window, '__paneRemoteHeartbeat', {
       configurable: true,
       value: (timestamp: string) => live?.dispatchEvent(new MessageEvent('heartbeat', {
@@ -316,6 +323,7 @@ declare global {
     /** Installed by `openConnectedRemotePwa`; see `dropRemoteConnection`. */
     __paneRemoteDropConnection?: () => void;
     __paneRemoteHeartbeat?: (timestamp: string) => void;
+    __paneRemoteEvent?: (channel: string) => void;
     /** Installed by `openConnectedRemotePwa`; see `restoreRemoteConnection`. */
     __paneRemoteRestoreConnection?: () => void;
   }

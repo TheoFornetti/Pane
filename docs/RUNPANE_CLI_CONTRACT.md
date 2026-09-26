@@ -183,6 +183,8 @@ For `panes create --wait-ready`, `initialInput.delivery` says where the prompt w
 
 `runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.
 
+`runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. HTML files render in a browser tab and other files open in an editor tab; an existing tab showing the same target is reused. It activates the tab inside the Pane but never raises or focuses the Pane window.
+
 `runpane panels list` lists tool panels inside one Pane session.
 
 `runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.
@@ -270,6 +272,7 @@ Brief tools:
 - `panes rename`: Rename a Pane without changing its worktree, branch, panels, or focus.
 - `panes focus`: Raise the Pane window and select a Pane (and optionally a panel) on explicit user request.
 - `panels create`: Create reviewer/helper terminal tabs inside an existing Pane; they share that Pane's worktree.
+- `panels open`: Show the user an HTML page, plan, report, dev server URL, or file as a tab in split view beside the agent.
 - `panels list`: List tool panels inside a Pane session.
 - `panels output`: Read recent terminal output from a panel.
 - `panels screen`: Read a compact current-screen view from a terminal panel.
@@ -326,6 +329,8 @@ These flags are consumed by local daemon-control commands:
 --agent <codex|claude|cursor>
 --tool-command <command>
 --title <title>
+--url <url>
+--file <path>
 --initial-input <text> (aliases: --prompt)
 --initial-input-file <path|-> (aliases: --prompt-file)
 --from-json <path|->
@@ -360,7 +365,6 @@ These flags are consumed by local daemon-control commands:
 --message <message>
 --query <text>
 --doc <path>
---url <pane-url>
 --toolsets <name,...>
 --keys <name,...>
 --state <ready|blocked|failed|done>
@@ -373,6 +377,8 @@ These flags are consumed by local daemon-control commands:
 --wait-ready
 --no-focus
 --focus
+--split
+--tab
 --pinned
 --no-pinned
 --no-associate

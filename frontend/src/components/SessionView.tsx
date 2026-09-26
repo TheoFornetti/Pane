@@ -253,7 +253,8 @@ export const SessionView = memo(() => {
         setPanels(sid, inFlight.length > 0 ? [...loadedPanels, ...inFlight] : loadedPanels);
 
         // Inspector selection is independent of the active stage panel.
-        const fallback = loadedPanels.find(panel => !isInspectorPanelType(panel.type));
+        const pinned = loadedPanels.find(panel => panel.type === 'terminal');
+        const fallback = loadedPanels.find(panel => panel.id !== pinned?.id && !isInspectorPanelType(panel.type));
 
         const activePanelResult = await panelApi.getActivePanel(sid);
         const effectiveActivePanel = activePanelResult ?? fallback;
@@ -270,7 +271,6 @@ export const SessionView = memo(() => {
         // The pinned terminal (first terminal) is excluded from the layout tree
         // and so are the inspector panels (Explorer / Review), which never
         // sit on the stage — otherwise a close could hand the group to one.
-        const pinned = getDockTerminalPanel(loadedPanels);
         const livePanels = loadedPanels.filter(p => p.id !== pinned?.id && !isInspectorPanelType(p.type));
 
         const sortedLive = sortTabBarPanels(livePanels);
@@ -461,8 +461,8 @@ export const SessionView = memo(() => {
     if (!focusedGroup) return sortedSessionPanels;
     const panelMap = new Map(tabBarPanels.map(p => [p.id, p]));
     const groupPanels = focusedGroup.panelIds.map(id => panelMap.get(id)).filter((p): p is ToolPanel => !!p);
-    return sessionLayout?.root.type === 'group' ? sortTabBarPanels(groupPanels) : groupPanels;
-  }, [focusedGroup, tabBarPanels, sortedSessionPanels, sessionLayout]);
+    return groupPanels;
+  }, [focusedGroup, tabBarPanels, sortedSessionPanels]);
   /** Primary group panels (for PanelTabBar tab strip). */
   const primaryGroupNode = useMemo(
     () => sessionLayout ? primaryGroup(sessionLayout.root) : null,
@@ -1483,10 +1483,12 @@ export const SessionView = memo(() => {
   // Auto-create terminal panel for existing sessions that don't have one
   // Unless the user has explicitly closed it previously
   const lastTerminalAttemptSessionId = useRef<string | null>(null);
+  const pendingTerminalSessions = useRef(new Set<string>());
   useEffect(() => {
     const sessionId = activeSession?.id;
-    if (!sessionId || !activeSessionPanelsLoaded || sessionPanels.some(p => p.type === 'terminal') || lastTerminalAttemptSessionId.current === sessionId) return;
+    if (!sessionId || !activeSessionPanelsLoaded || sessionPanels.some(p => p.type === 'terminal') || lastTerminalAttemptSessionId.current === sessionId || pendingTerminalSessions.current.has(sessionId)) return;
     lastTerminalAttemptSessionId.current = sessionId;
+    pendingTerminalSessions.current.add(sessionId);
 
     const ensureTerminal = async () => {
       try {
@@ -1496,6 +1498,8 @@ export const SessionView = memo(() => {
         addPanel(panel);
       } catch (error) {
         console.error('[SessionView] Failed to auto-create terminal panel:', error);
+      } finally {
+        pendingTerminalSessions.current.delete(sessionId);
       }
     };
     void ensureTerminal();

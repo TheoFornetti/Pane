@@ -1619,6 +1619,7 @@ def print_pane_create_result(result: Dict[str, Any], dry_run: bool = False, acti
                     print(f"  Not associated with Session {association.get('sessionId')}: {association.get('error', 'unknown error')}")
             print_delivery((item.get("initialInput") or {}).get("delivery"), "  ")
             print_prompt_notes(item, "  ")
+            print_initial_input_delivery(item.get("initialInput"), "  ")
             if item.get("nextCommand"):
                 print(f"  Next: {item.get('nextCommand')}")
         else:
@@ -1709,8 +1710,30 @@ def print_panel_create_result(result: Dict[str, Any]) -> None:
         if blocked:
             print(f"Blocked: {blocked.get('message')}")
     print_prompt_notes(result)
+    print_initial_input_delivery(result.get("initialInput"))
     if result.get("nextCommand"):
         print(f"Next: {result.get('nextCommand')}")
+
+
+def print_initial_input_delivery(initial_input: Optional[Dict[str, Any]], prefix: str = "") -> None:
+    if initial_input is None:
+        return
+    if "delivery" in initial_input and not any(key in initial_input for key in ("submitted", "delivered")):
+        return
+    status = "submitted" if initial_input.get("submitted") else "delivered but not verified submitted" if initial_input.get("delivered") else "not delivered"
+    strategy = f" via {initial_input['sequenceName']}" if initial_input.get("sequenceName") else ""
+    attempts = ""
+    if "attempts" in initial_input:
+        count = initial_input["attempts"]
+        attempts = f" after {count} attempt{'s' if count != 1 else ''}"
+    staged = ""
+    if "staged" in initial_input:
+        staged = f"; staged: {'yes' if initial_input['staged'] else 'no'}"
+    print(f"{prefix}Initial input: {status}{strategy}{attempts}{staged}")
+    if initial_input.get("blocked"):
+        print(f"{prefix}Initial input blocked: {initial_input['blocked']['message']}")
+    if initial_input.get("error"):
+        print(f"{prefix}Initial input error: {initial_input['error']['message']}")
 
 
 def print_panel_wait_result(result: Dict[str, Any]) -> None:

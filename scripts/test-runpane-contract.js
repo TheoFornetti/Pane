@@ -4025,6 +4025,11 @@ async function runChecks() {
     env: { ...process.env, PYTHON: findPython() },
     stdio: 'inherit',
   });
+  childProcess.execFileSync(process.execPath, ['--test', path.join(__dirname, 'test-runpane-python-parity.js')], {
+    cwd: rootDir,
+    env: { ...process.env, PYTHON: findPython() },
+    stdio: 'inherit',
+  });
   console.log('runpane CLI contract checks passed');
 }
 

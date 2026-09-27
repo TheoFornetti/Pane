@@ -13,11 +13,12 @@ import { databaseService as panelDatabase } from '../services/database';
 import type { PanelBuffers } from '../database/panelBuffers';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
 import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
-import { assessComposerEvidence, isSlashCommandInput } from './runpaneComposerEvidence';
+import { assessComposerEvidence, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
 import { projectWorkspaceEntry } from '../services/workspaceJournal';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
 import { getManifestForAgent } from '../services/agentStatus/manifests';
-import { detectAgentComposer, detectAgentFromScreen } from '../services/agents/agentScreenSignature';
+import { detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from '../services/agents/agentScreenSignature';
+import { agentTranscripts, type TranscriptLocator } from '../services/agentTranscript';
 import { resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
 import {
   bracketedPaste,
@@ -78,6 +79,7 @@ import type {
   RunpanePaneAgentState,
   RunpaneAgentDetection,
   RunpanePanelBlockedState,
+  RunpaneDelivery,
   RunpanePanelCreateRequest,
   RunpanePanelCreateResult,
   RunpanePanelInputRequest,
@@ -184,6 +186,11 @@ const DEFAULT_PANEL_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_PANEL_WAIT_INTERVAL_MS = 500;
 const DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS = 3_000;
 const DEFAULT_COMPOSER_VERIFY_INTERVAL_MS = 100;
+// The transcript settles a delivery the screen leaves open: polled this often, for this long after Enter.
+const TRANSCRIPT_POLL_INTERVAL_MS = 200;
+const TRANSCRIPT_DELIVERY_TIMEOUT_MS = 10_000;
+// Once the composer has emptied, how long the transcript gets to say taken or queued.
+const TRANSCRIPT_CONFIRM_MS = 2_000;
 const CODEX_SUBMIT_STAGE_DELAY_MS = 500;
 const CLAUDE_INPUT_WAIT_TIMEOUT_MS = 15_000;
 const CLAUDE_UI_QUIET_MS = 3_000;
@@ -1075,7 +1082,10 @@ export function registerRunpaneHandlers(
         // Claude takes a separately written Enter while it works (it queues
         // the message), so staging never waits for it to be idle.
         const staged = await stageComposerText(panel, agentType, stagedInput);
-        const submission = await submitComposerForPanel(panel, 'auto');
+        const submission = await submitComposerForPanel(panel, 'auto', {
+          cwd: sessionManager.getSession(panel.sessionId)?.worktreePath,
+          text: stagedInput,
+        });
         return {
           ok: submission.ok,
           panelId: panel.id,
@@ -1085,6 +1095,7 @@ export function registerRunpaneHandlers(
           sequenceName: submission.sequenceName,
           verifiedSubmitted: submission.verifiedSubmitted,
           verification: submission.verification,
+          delivery: submission.delivery,
           sentAt: submission.sentAt,
           blocked: submission.blocked,
           promptFile,
@@ -1117,7 +1128,17 @@ export function registerRunpaneHandlers(
 
       // An agent's CRs inside the text would each be an Enter; a shell keeps its bytes.
       const input = ensureSubmitEnter(agentType === 'claude' || agentType === 'codex' ? stagedInput : submittedText);
+      // A busy Codex takes text and Enter in one write and holds the message
+      // for its next turn; its transcript or queue hint says where it went.
+      const probeBase = agentType === 'codex' && beforeScreen.composer.isPresent && stagedInput.length > 0
+        ? composerDeliveryProbe(panel, sessionManager.getSession(panel.sessionId)?.worktreePath, agentType, stagedInput)
+        : undefined;
+      const probe = probeBase ? { ...probeBase, sentAtMs: Date.now() } : undefined;
+      const outputGenerationBeforeWrite = terminalPanelManager.getOutputGeneration(panel.id);
       terminalPanelManager.writeToTerminal(panel.id, input);
+      const verification = probe
+        ? await verifyComposerSubmitted(panel, beforeScreen, outputGenerationBeforeWrite, probe)
+        : undefined;
 
       return {
         ok: true,
@@ -1126,7 +1147,8 @@ export function registerRunpaneHandlers(
         inputBytes: Buffer.byteLength(input, 'utf8'),
         enter: 'cr',
         sequenceName: 'enter-cr',
-        verifiedSubmitted: false,
+        verifiedSubmitted: verification?.verifiedSubmitted ?? false,
+        delivery: verification?.delivery,
         sentAt: new Date().toISOString(),
         promptFile,
         warnings,
@@ -1147,7 +1169,9 @@ export function registerRunpaneHandlers(
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
       }
 
-      return submitComposerForPanel(panel, normalized.strategy);
+      return submitComposerForPanel(panel, normalized.strategy, {
+        cwd: sessionManager.getSession(panel.sessionId)?.worktreePath,
+      });
     }, result => ({
       paneId: result.paneId,
       panelId: result.panelId,
@@ -1620,7 +1644,7 @@ async function createTerminalPanelForSession(
     }))
     : undefined;
 
-  const initialInput = readiness ? await submitCreateInitialInput(panel, tool, useArgumentDelivery, readiness) : undefined;
+  const initialInput = readiness ? await submitCreateInitialInput(panel, tool, useArgumentDelivery, readiness, session.worktreePath) : undefined;
 
   return { panel, readiness, initialInput, promptFile, warnings };
 }
@@ -1629,7 +1653,8 @@ async function submitCreateInitialInput(
   panel: ToolPanel,
   tool: RunpaneResolvedTool,
   useArgumentDelivery: boolean,
-  readiness?: RunpanePaneReadiness,
+  readiness: RunpanePaneReadiness | undefined,
+  cwd: string | undefined,
 ): Promise<RunpaneInitialInputDeliveryResult | undefined> {
   if (!tool.initialInput) {
     return undefined;
@@ -1650,6 +1675,9 @@ async function submitCreateInitialInput(
       strategy: 'argument',
       sequenceName: 'argument',
       verifiedSubmitted: delivered,
+      delivery: delivered
+        ? await argumentDelivery(panel, tool, cwd, sentAt)
+        : { state: 'unknown', evidence: 'argv' },
       sentAt,
       nextCommand: readiness?.nextCommand ?? panelWaitCommand(panel.id),
     };
@@ -1683,7 +1711,27 @@ async function submitCreateInitialInput(
     return submitCreateComposerInput(panel, tool, tool.initialInput);
   }
   const staged = await stageComposerText(panel, tool.agent, tool.initialInput);
-  return submitCreateComposerInput(panel, tool, staged.evidenceText);
+  return submitCreateComposerInput(panel, tool, staged.evidenceText, composerDeliveryProbe(panel, cwd, tool.agent, tool.initialInput));
+}
+
+/**
+ * A launch-argument prompt reached the agent with its launch (`argv`); the
+ * transcript upgrades that to `transcript` evidence once the agent has
+ * recorded the turn. One read, no waiting: create has already waited for ready.
+ */
+async function argumentDelivery(
+  panel: ToolPanel,
+  tool: RunpaneResolvedTool,
+  cwd: string | undefined,
+  sentAt: string | undefined,
+): Promise<RunpaneDelivery> {
+  const probe = composerDeliveryProbe(panel, cwd, tool.agent, tool.initialInput);
+  const sentAtMs = sentAt ? Date.parse(sentAt) : Number.NaN;
+  if (probe && !Number.isNaN(sentAtMs)) {
+    const check = await checkTranscriptDelivery({ ...probe, sentAtMs });
+    if (check.delivery) return check.delivery;
+  }
+  return { state: 'taken', evidence: 'argv' };
 }
 
 async function clearInitialInputSentPremark(panel: ToolPanel): Promise<void> {
@@ -1717,18 +1765,37 @@ function shouldUseArgumentDelivery(tool: RunpaneResolvedTool): boolean {
 
 /**
  * Submit create input already staged in the composer. `evidenceText` is what
- * the composer shows for it: the text, or the agent's paste marker.
+ * the composer shows for it: the text, or the agent's paste marker. A retry
+ * Enter goes only on stable staged-text evidence, and never once the
+ * transcript or the agent's queue hint shows the prompt taken or queued.
  */
 async function submitCreateComposerInput(
   panel: ToolPanel,
   tool: RunpaneResolvedTool,
   evidenceText: string,
+  probeBase?: Omit<DeliveryProbe, 'sentAtMs'>,
 ): Promise<RunpaneInitialInputDeliveryResult> {
   const input = tool.initialInput ?? '';
   const submit = resolveComposerSubmit('auto', tool.agent);
   const nextCommand = panelScreenCommand(panel.id);
+  const probe = probeBase ? { ...probeBase, sentAtMs: Date.now() } : undefined;
   let lastVerdict: ReturnType<typeof assessComposerEvidence> = 'unknown';
   let attempts = 0;
+  let transcriptLocated = false;
+  const submitted = (delivery: RunpaneDelivery | undefined): RunpaneInitialInputDeliveryResult => ({
+    delivered: true,
+    submitted: true,
+    inputBytes: Buffer.byteLength(input, 'utf8'),
+    strategy: submit.strategy,
+    sequenceName: submit.sequenceName,
+    verifiedSubmitted: true,
+    verification: 'observed' as const,
+    delivery,
+    staged: false,
+    attempts,
+    sentAt: new Date().toISOString(),
+    nextCommand,
+  });
 
   for (let attempt = 1; attempt <= MAX_CREATE_SUBMIT_ATTEMPTS; attempt += 1) {
     attempts = attempt;
@@ -1741,6 +1808,14 @@ async function submitCreateComposerInput(
     while (Date.now() - attemptStartedAt <= DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS) {
       await sleep(DEFAULT_COMPOSER_VERIFY_INTERVAL_MS);
       const afterScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+      if (probe) {
+        const check = await checkTranscriptDelivery(probe);
+        transcriptLocated ||= check.located;
+        if (check.delivery) return submitted(check.delivery);
+        if (screenShowsQueuedMessage(afterScreen.text, probe.agentType, input)) {
+          return submitted({ state: 'queued', evidence: 'screen' });
+        }
+      }
       lastVerdict = assessComposerEvidence({
         beforeText: beforeScreen.text,
         afterText: afterScreen.text,
@@ -1748,19 +1823,7 @@ async function submitCreateComposerInput(
       });
 
       if (lastVerdict === 'cleared' && panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit)) {
-        return {
-          delivered: true,
-          submitted: true,
-          inputBytes: Buffer.byteLength(input, 'utf8'),
-          strategy: submit.strategy,
-          sequenceName: submit.sequenceName,
-          verifiedSubmitted: true,
-          verification: 'observed' as const,
-          staged: false,
-          attempts,
-          sentAt: new Date().toISOString(),
-          nextCommand,
-        };
+        return submitted(probe ? { state: 'taken', evidence: 'screen' } : undefined);
       }
 
       if (lastVerdict !== 'staged') {
@@ -1799,6 +1862,12 @@ async function submitCreateComposerInput(
     }
   }
 
+  // Nothing on screen settled it; the transcript gets the rest of the delivery window.
+  if (probe && transcriptLocated && lastVerdict !== 'staged') {
+    const late = await waitForTranscriptDelivery(probe, TRANSCRIPT_DELIVERY_TIMEOUT_MS - (Date.now() - probe.sentAtMs));
+    if (late) return submitted(late);
+  }
+
   return {
     delivered: true,
     submitted: false,
@@ -1806,6 +1875,7 @@ async function submitCreateComposerInput(
     strategy: submit.strategy,
     sequenceName: submit.sequenceName,
     verifiedSubmitted: false,
+    delivery: probe ? { state: lastVerdict === 'staged' ? 'in-composer' : 'unknown', evidence: 'screen' } : undefined,
     staged: lastVerdict === 'staged',
     attempts,
     sentAt: new Date().toISOString(),
@@ -1966,10 +2036,13 @@ async function buildPanelScreenResult(panel: ToolPanel, limit: number): Promise<
   const bounded = boundSanitizedLines(rawText, limit);
   // A wrapper agent Pane has not confirmed yet is still read by its screen signature.
   const composerAgentType = state.agentType ?? detectAgentFromScreen(bounded.text);
-  const composerText = composerAgentType === 'claude' && liveSnapshot
-    ? terminalPanelManager.getInputScreenText(panel.id) ?? bounded.text
-    : bounded.text;
-  const composer = detectAgentComposer(composerText, composerAgentType);
+  // The live viewport split into typed and ghost (placeholder, suggestion) cells.
+  const composer = detectAgentComposer(bounded.text, composerAgentType, liveSnapshot
+    ? {
+      typedText: terminalPanelManager.getInputScreenText(panel.id),
+      ghostText: terminalPanelManager.getGhostScreenText(panel.id),
+    }
+    : {});
 
   return {
     ok: true,
@@ -2233,16 +2306,26 @@ function resolveComposerSubmit(
   };
 }
 
+/**
+ * Press the composer's submit sequence and report where the prompt went.
+ * `delivery` names the submitted text for the transcript check; without it,
+ * any turn the agent takes after Enter counts (submit-composer does not know
+ * what the composer holds).
+ */
 async function submitComposerForPanel(
   panel: ToolPanel,
   strategy: RunpanePanelSubmitComposerStrategy | undefined,
+  delivery: { cwd: string | undefined; text?: string },
 ): Promise<RunpanePanelSubmitComposerResult> {
   const beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
-  const submit = resolveComposerSubmit(strategy, screenAgentType(beforeScreen));
+  const agentType = screenAgentType(beforeScreen);
+  const submit = resolveComposerSubmit(strategy, agentType);
+  const probeBase = composerDeliveryProbe(panel, delivery.cwd, agentType, delivery.text);
+  const probe = probeBase ? { ...probeBase, sentAtMs: Date.now() } : undefined;
   const outputGenerationBeforeSubmit = terminalPanelManager.getOutputGeneration(panel.id);
   terminalPanelManager.writeToTerminal(panel.id, submit.input);
   let inputBytes = Buffer.byteLength(submit.input, 'utf8');
-  let verification = await verifyComposerSubmitted(panel, beforeScreen, outputGenerationBeforeSubmit);
+  let verification = await verifyComposerSubmitted(panel, beforeScreen, outputGenerationBeforeSubmit, probe);
 
   // The staged text still sitting in the composer proves the first submit was
   // not taken (an agent mid-paste or busy can drop it), so one plain Enter
@@ -2251,7 +2334,7 @@ async function submitComposerForPanel(
     const outputGenerationBeforeRetry = terminalPanelManager.getOutputGeneration(panel.id);
     terminalPanelManager.writeToTerminal(panel.id, '\r');
     inputBytes += 1;
-    verification = await verifyComposerSubmitted(panel, verification.latestScreen, outputGenerationBeforeRetry);
+    verification = await verifyComposerSubmitted(panel, verification.latestScreen, outputGenerationBeforeRetry, probe);
   }
 
   return {
@@ -2263,6 +2346,7 @@ async function submitComposerForPanel(
     sequenceName: submit.sequenceName,
     verifiedSubmitted: verification.verifiedSubmitted,
     verification: verification.verification,
+    delivery: verification.delivery,
     sentAt: new Date().toISOString(),
     blocked: verification.blocked,
     nextCommand: verification.blocked?.suggestedCommand ?? panelWaitCommand(panel.id),
@@ -2336,33 +2420,130 @@ async function waitForPanelOutputQuiet(panelId: string): Promise<void> {
   }
 }
 
+/**
+ * What a composer submit is checked against: the agent's transcript (when
+ * Pane can find it) and its queued-message hint on screen.
+ */
+interface DeliveryProbe {
+  agentType: 'claude' | 'codex';
+  locator?: TranscriptLocator;
+  /** The submitted text; undefined when Pane could not read it, and any turn taken since `sentAtMs` counts. */
+  text?: string;
+  /** When Pane pressed Enter. */
+  sentAtMs: number;
+}
+
+interface TranscriptCheck {
+  delivery?: RunpaneDelivery;
+  /** Whether the panel's transcript exists, so waiting on it can pay off. */
+  located: boolean;
+}
+
+async function checkTranscriptDelivery(probe: DeliveryProbe): Promise<TranscriptCheck> {
+  if (!probe.locator) return { located: false };
+  try {
+    const lookup = await agentTranscripts.findUserTurnSince(probe.locator, probe.sentAtMs, probe.text);
+    return {
+      delivery: lookup.state ? { state: lookup.state, evidence: 'transcript' } : undefined,
+      located: lookup.file !== undefined,
+    };
+  } catch {
+    return { located: false };
+  }
+}
+
+/** Poll the transcript until it shows the turn taken or queued, or `timeoutMs` passes. */
+async function waitForTranscriptDelivery(probe: DeliveryProbe, timeoutMs: number): Promise<RunpaneDelivery | undefined> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    await sleep(TRANSCRIPT_POLL_INTERVAL_MS);
+    const check = await checkTranscriptDelivery(probe);
+    if (check.delivery) return check.delivery;
+  }
+  return undefined;
+}
+
+/** Where the panel's agent writes its transcript; undefined for other panels or a Pane with no worktree. */
+function panelTranscriptLocator(
+  panel: ToolPanel,
+  cwd: string | undefined,
+  agentType: RunpaneAgentId | undefined,
+): TranscriptLocator | undefined {
+  if (!cwd || (agentType !== 'claude' && agentType !== 'codex')) return undefined;
+  const current = panelManager.getPanel(panel.id) ?? panel;
+  const customState = isRecord(current.state?.customState) ? current.state.customState : {};
+  const createdAt = Date.parse(panel.metadata?.createdAt ?? '');
+  return {
+    agent: agentType,
+    cwd,
+    sessionId: optionalString(customState.agentSessionId),
+    notBeforeMs: Number.isNaN(createdAt) ? undefined : createdAt,
+  };
+}
+
+/** A delivery probe for a Claude or Codex composer; other panels have none. */
+function composerDeliveryProbe(
+  panel: ToolPanel,
+  cwd: string | undefined,
+  agentType: RunpaneAgentId | undefined,
+  text: string | undefined,
+): Omit<DeliveryProbe, 'sentAtMs'> | undefined {
+  if (agentType !== 'claude' && agentType !== 'codex') return undefined;
+  return { agentType, locator: panelTranscriptLocator(panel, cwd, agentType), text };
+}
+
+/**
+ * After Enter, learn where the prompt went. The transcript is read on every
+ * poll and settles it (taken or queued); so does the agent's queued-message
+ * hint on screen. Otherwise the screen decides: a steadily empty composer is
+ * `taken`, text still in it is `in-composer`, and anything else waits on the
+ * transcript for the rest of TRANSCRIPT_DELIVERY_TIMEOUT_MS before `unknown`.
+ */
 async function verifyComposerSubmitted(
   panel: ToolPanel,
   beforeScreen: RunpanePanelScreenResult,
   outputGenerationBeforeSubmit: number,
+  probe?: DeliveryProbe,
 ): Promise<ComposerVerification> {
   const beforeHadComposerPrompt = beforeScreen.composer.hasUndeliveredText || looksLikePendingComposer(beforeScreen.text);
-  if (!beforeHadComposerPrompt && !beforeScreen.text.trim()) {
+  if (!beforeHadComposerPrompt && !beforeScreen.text.trim() && !probe) {
     return { ok: true, verifiedSubmitted: false, latestScreen: beforeScreen, stagedTextVisible: false };
   }
   const agentType = screenAgentType(beforeScreen);
   const stagedText = composerEvidenceText(beforeScreen.text);
   let latestScreen = beforeScreen;
   let previousPollShowedEmptyComposer = false;
+  let transcriptLocated = false;
+  let clearedOnScreen = false;
   const startedAt = Date.now();
+  const delivered = (delivery: RunpaneDelivery): ComposerVerification => ({
+    ok: true,
+    verifiedSubmitted: true,
+    verification: 'observed',
+    latestScreen,
+    stagedTextVisible: false,
+    delivery,
+  });
 
-  while (Date.now() - startedAt <= DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS) {
+  while (!clearedOnScreen && Date.now() - startedAt <= DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS) {
     await sleep(DEFAULT_COMPOSER_VERIFY_INTERVAL_MS);
     latestScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
 
+    if (probe) {
+      const check = await checkTranscriptDelivery(probe);
+      transcriptLocated ||= check.located;
+      if (check.delivery) return delivered(check.delivery);
+      if (probe.text && screenShowsQueuedMessage(latestScreen.text, probe.agentType, probe.text)) {
+        return delivered({ state: 'queued', evidence: 'screen' });
+      }
+    }
+
     // Claude always draws its composer box, and repaints (at startup, say)
     // briefly show neither the box nor the prompt; only a steady empty box
-    // proves the prompt was taken.
+    // proves the prompt left it.
     if (agentType === 'claude') {
       const showsEmptyComposer = latestScreen.composer.isPresent && !latestScreen.composer.hasUndeliveredText;
-      if (beforeHadComposerPrompt && showsEmptyComposer && previousPollShowedEmptyComposer) {
-        return { ok: true, verifiedSubmitted: true, verification: 'observed', latestScreen, stagedTextVisible: false };
-      }
+      clearedOnScreen = beforeHadComposerPrompt && showsEmptyComposer && previousPollShowedEmptyComposer;
       previousPollShowedEmptyComposer = showsEmptyComposer;
       continue;
     }
@@ -2372,16 +2553,16 @@ async function verifyComposerSubmitted(
       afterText: latestScreen.text,
       stagedText,
     });
-    const hasFreshOutput = panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit);
+    clearedOnScreen = (verdict === 'cleared' && panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit)) ||
+      (beforeHadComposerPrompt && !latestScreen.composer.hasUndeliveredText && !looksLikePendingComposer(latestScreen.text));
+  }
 
-    if (verdict === 'cleared' && hasFreshOutput) {
-      return { ok: true, verifiedSubmitted: true, verification: 'observed', latestScreen, stagedTextVisible: false };
-    }
-
-    if (beforeHadComposerPrompt && !latestScreen.composer.hasUndeliveredText && !looksLikePendingComposer(latestScreen.text)) {
-      return { ok: true, verifiedSubmitted: true, verification: 'observed', latestScreen, stagedTextVisible: false };
-    }
-
+  if (clearedOnScreen) {
+    // The composer emptied; the transcript, once written, says whether the agent took the turn or queued it.
+    const confirmed = probe && transcriptLocated
+      ? await waitForTranscriptDelivery(probe, TRANSCRIPT_CONFIRM_MS)
+      : undefined;
+    return delivered(confirmed ?? { state: 'taken', evidence: 'screen' });
   }
 
   if (beforeHadComposerPrompt && (latestScreen.composer.hasUndeliveredText || looksLikePendingComposer(latestScreen.text))) {
@@ -2396,24 +2577,33 @@ async function verifyComposerSubmitted(
       },
       latestScreen,
       stagedTextVisible: latestScreen.composer.hasUndeliveredText,
+      delivery: probe ? { state: 'in-composer', evidence: 'screen' } : undefined,
     };
   }
 
+  if (probe && transcriptLocated) {
+    const late = await waitForTranscriptDelivery(probe, TRANSCRIPT_DELIVERY_TIMEOUT_MS - (Date.now() - startedAt));
+    if (late) return delivered(late);
+  }
+  const unknown: RunpaneDelivery | undefined = probe ? { state: 'unknown', evidence: 'screen' } : undefined;
   if (panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit)) {
-    return { ok: true, verifiedSubmitted: false, verification: 'unverifiable', latestScreen, stagedTextVisible: false };
+    return { ok: true, verifiedSubmitted: false, verification: 'unverifiable', latestScreen, stagedTextVisible: false, delivery: unknown };
   }
 
-  return { ok: true, verifiedSubmitted: false, latestScreen, stagedTextVisible: false };
+  return { ok: true, verifiedSubmitted: false, latestScreen, stagedTextVisible: false, delivery: unknown };
 }
 
 interface ComposerVerification {
   ok: boolean;
+  /** The agent took or queued the prompt. */
   verifiedSubmitted: boolean;
   verification?: 'observed' | 'unverifiable';
   blocked?: RunpanePanelBlockedState;
   latestScreen: RunpanePanelScreenResult;
   /** The composer still shows held text, so the submit was not taken. */
   stagedTextVisible: boolean;
+  /** Present when the submit had a delivery probe (a Claude or Codex composer). */
+  delivery?: RunpaneDelivery;
 }
 
 /** The panel's agent, or the agent its screen shows before Pane has confirmed it. */
@@ -2448,11 +2638,6 @@ function composerEvidenceText(text: string): string {
   }
   const pasted = text.match(/\[Pasted (?:Content|text)[^\]]*\]/iu);
   return pasted?.[0] ?? '';
-}
-
-function looksLikePendingComposer(text: string): boolean {
-  return /\[Pasted (?:Content|text)[^\]]*\]/i.test(text) ||
-    /(?:press\s+)?(?:ctrl|control)\+enter\s+to\s+submit/i.test(text);
 }
 
 // GUI-launched Electron PATHs typically miss ~/.local/bin, cursor-agent's install target.

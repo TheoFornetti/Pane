@@ -318,6 +318,7 @@ export interface RunpaneInitialInputDeliveryResult {
   sequenceName?: 'codex-ctrl-enter-cr' | 'enter-cr' | 'argument';
   verifiedSubmitted?: boolean;
   verification?: RunpanePanelVerification;
+  delivery?: RunpaneDelivery;
   staged?: boolean;
   attempts?: number;
   sentAt?: string;
@@ -645,6 +646,8 @@ export interface RunpanePanelScreenResult {
   composer: {
     isPresent: boolean;
     hasUndeliveredText: boolean;
+    /** Placeholder or suggestion text shown in the composer; it is not input. */
+    ghostText?: string;
   };
   nextCommand?: string;
 }
@@ -673,6 +676,18 @@ export interface RunpanePanelSubmitRequest {
 
 export type RunpanePanelVerification = 'observed' | 'unverifiable';
 
+/**
+ * Where a prompt sent to a Claude or Codex composer went. `taken`: the agent
+ * started a turn with it; `queued`: the agent holds it until its current turn
+ * ends; `in-composer`: it is still in the composer; `unknown`: Pane saw
+ * neither. `evidence` says what Pane read: the agent's transcript, the
+ * screen, or (for a launch prompt) the launch arguments.
+ */
+export interface RunpaneDelivery {
+  state: 'taken' | 'queued' | 'in-composer' | 'unknown';
+  evidence: 'transcript' | 'screen' | 'argv';
+}
+
 export interface RunpanePanelSubmitResult {
   ok: boolean;
   generation?: number;
@@ -683,6 +698,8 @@ export interface RunpanePanelSubmitResult {
   sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr';
   verifiedSubmitted: boolean;
   verification?: RunpanePanelVerification;
+  /** Present for Claude and Codex composers; `verifiedSubmitted` is true when it is `taken` or `queued`. */
+  delivery?: RunpaneDelivery;
   sentAt: string;
   blocked?: RunpanePanelBlockedState;
   /** The prompt file Pane wrote for `asFilePointer`. */
@@ -708,6 +725,8 @@ export interface RunpanePanelSubmitComposerResult {
   sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr';
   verifiedSubmitted: boolean;
   verification?: RunpanePanelVerification;
+  /** Present for Claude and Codex composers; `verifiedSubmitted` is true when it is `taken` or `queued`. */
+  delivery?: RunpaneDelivery;
   sentAt: string;
   blocked?: RunpanePanelBlockedState;
   nextCommand?: string;

@@ -21,7 +21,11 @@ import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { usageManager } from '../services/usage/usageManager';
 import { CommandRunner } from '../utils/commandRunner';
 import { PathResolver } from '../utils/pathResolver';
+import { agentTranscripts } from '../services/agentTranscript';
 import { registerRunpaneHandlers } from './runpane';
+
+// Transcript reads are real file I/O; these tests script what the transcript says.
+const findUserTurnSince = vi.spyOn(agentTranscripts, 'findUserTurnSince');
 
 vi.spyOn(panelManager, 'createPanel');
 vi.spyOn(panelManager, 'getPanel');
@@ -39,6 +43,7 @@ vi.spyOn(terminalPanelManager, 'writeToTerminal');
 vi.spyOn(terminalPanelManager, 'getLastOutputAt');
 vi.spyOn(terminalPanelManager, 'getOutputGeneration');
 vi.spyOn(terminalPanelManager, 'getInputScreenText');
+vi.spyOn(terminalPanelManager, 'getGhostScreenText');
 vi.spyOn(terminalPanelManager, 'deliverPendingInitialInput');
 vi.spyOn(terminalPanelManager, 'getAgentStatus');
 vi.spyOn(terminalPanelManager, 'getForegroundProcess');
@@ -307,6 +312,7 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.getLastOutputAt).mockReset();
     vi.mocked(terminalPanelManager.getOutputGeneration).mockReset();
     vi.mocked(terminalPanelManager.getInputScreenText).mockReset();
+    vi.mocked(terminalPanelManager.getGhostScreenText).mockReset();
     vi.mocked(terminalPanelManager.deliverPendingInitialInput).mockReset();
     vi.mocked(terminalPanelManager.getAgentStatus).mockReset();
     vi.mocked(terminalPanelManager.getForegroundProcess).mockReset().mockReturnValue(undefined);
@@ -314,6 +320,7 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.launchShellReadsPromptFile).mockReset().mockReturnValue(true);
     vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValue(0);
     vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('idle');
+    findUserTurnSince.mockReset().mockResolvedValue({ state: null });
     vi.mocked(usageManager.getPaneCosts).mockReturnValue({
       fromMs: Date.parse('2025-12-01T00:00:00.000Z'),
       toMs: Date.parse('2026-01-03T00:00:00.000Z'),
@@ -3288,9 +3295,25 @@ describe('runpane IPC handlers', () => {
           strategy: 'argument',
           sequenceName: 'argument',
           verifiedSubmitted: true,
+          delivery: { state: 'taken', evidence: 'argv' },
         },
       }],
     });
+
+    // Once Claude has recorded the turn, the transcript is the evidence.
+    findUserTurnSince.mockResolvedValue({ state: 'taken', file: '/t.jsonl' });
+    const recorded = await registry.invoke('runpane:panes:create', [{
+      repo: { id: project.id },
+      waitReady: true,
+      readyTimeoutMs: 100,
+      panes: [{ name: 'issue-303', tool: { agent: 'claude', initialInput: 'Please start issue 302' } }],
+    }]);
+    expect(recorded).toMatchObject({ items: [{ initialInput: { delivery: { state: 'taken', evidence: 'transcript' } } }] });
+    expect(findUserTurnSince).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: 'claude', cwd: session.worktreePath }),
+      Date.parse('2026-01-01T00:02:00.000Z'),
+      'Please start issue 302',
+    );
   });
 
   it('marks pane creation unsuccessful when Claude argument delivery is unverified', async () => {
@@ -3347,6 +3370,7 @@ describe('runpane IPC handlers', () => {
           strategy: 'argument',
           sequenceName: 'argument',
           verifiedSubmitted: false,
+          delivery: { state: 'unknown', evidence: 'argv' },
         },
       }],
     });
@@ -4070,6 +4094,183 @@ describe('runpane IPC handlers', () => {
         ok: true,
         items: [{ ok: true, initialInput: { submitted: true, verifiedSubmitted: true } }],
       });
+    });
+  });
+
+  describe('delivery state', () => {
+    const rule = '─'.repeat(40);
+    const claudeComposer = (content: string) => `${rule}\n❯ ${content}\n${rule}\n`;
+    const claudePanel: ToolPanel = {
+      ...terminalPanel,
+      title: 'Claude',
+      state: { isActive: true, customState: { agentType: 'claude', isCliPanel: true, agentSessionId: '11111111-2222-4333-8444-555555555504' } },
+    };
+
+    beforeEach(() => {
+      vi.mocked(panelManager.getPanel).mockReturnValue(claudePanel);
+    });
+
+    /** Script the screen by the writes seen so far: staged text, then Enters. */
+    function scriptScreens(screen: (state: { staged: boolean; enters: number }) => string, agentType: 'claude' | 'codex' = 'claude', activity: 'active' | 'idle' = 'active') {
+      const state = { staged: false, enters: 0 };
+      vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, data) => {
+        if (data === '\r' || data === '\x1b[13;5u\r') state.enters += 1;
+        else state.staged = true;
+      });
+      vi.mocked(terminalPanelManager.getOutputGeneration).mockImplementation(() => (state.staged ? state.enters + 1 : 0));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => terminalSnapshot(screen(state), activity, agentType));
+      return state;
+    }
+
+    it('reports a Claude turn the transcript shows taken, with the panel\'s transcript locator and text', async () => {
+      vi.useFakeTimers();
+      scriptScreens(({ staged, enters }) => claudeComposer(staged && enters === 0 ? 'Read and follow brief.md' : ''));
+      findUserTurnSince.mockResolvedValue({ state: 'taken', file: '/t.jsonl', timestamp: '2026-01-01T00:03:00.000Z' });
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Read and follow brief.md' }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await pending;
+
+      expect(result).toMatchObject({ ok: true, verifiedSubmitted: true, delivery: { state: 'taken', evidence: 'transcript' } });
+      expect(result).toMatchObject({ blocked: undefined });
+      expect(findUserTurnSince).toHaveBeenCalledWith(
+        {
+          agent: 'claude',
+          cwd: session.worktreePath,
+          sessionId: '11111111-2222-4333-8444-555555555504',
+          notBeforeMs: Date.parse('2026-01-01T00:00:00.000Z'),
+        },
+        expect.any(Number),
+        'Read and follow brief.md',
+      );
+    });
+
+    it('takes the transcript\'s word when Claude\'s screen never settles, and sends no second Enter', async () => {
+      vi.useFakeTimers();
+      // Claude is busy redrawing: the composer box keeps vanishing, so the
+      // screen alone never shows it steadily empty (the old false "not delivered").
+      let polls = 0;
+      const state = scriptScreens(({ staged, enters }) => {
+        if (!staged || enters === 0) return claudeComposer(staged ? 'Also check the tests' : '');
+        polls += 1;
+        return polls % 2 === 0 ? `✻ Running 3 subagents…\n${claudeComposer('')}` : '✻ Running 3 subagents…\n';
+      });
+      findUserTurnSince.mockImplementation(async () => (
+        polls > 12 ? { state: 'taken', file: '/t.jsonl' } : { state: null, file: '/t.jsonl' }
+      ));
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Also check the tests' }]);
+      await vi.advanceTimersByTimeAsync(15_000);
+      const result = await pending;
+
+      expect(state.enters).toBe(1);
+      expect(result).toMatchObject({ ok: true, verifiedSubmitted: true, delivery: { state: 'taken', evidence: 'transcript' } });
+    });
+
+    it('reports a message Claude queued while busy, from the transcript\'s queue entry', async () => {
+      vi.useFakeTimers();
+      scriptScreens(({ staged, enters }) => `✻ Working…\n${claudeComposer(staged && enters === 0 ? 'Reply with QUEUED' : '')}`);
+      findUserTurnSince.mockResolvedValue({ state: 'queued', file: '/t.jsonl' });
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Reply with QUEUED' }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await pending;
+
+      expect(result).toMatchObject({ ok: true, verifiedSubmitted: true, delivery: { state: 'queued', evidence: 'transcript' } });
+    });
+
+    it('reports a message Claude queued from its queue hint when there is no transcript', async () => {
+      vi.useFakeTimers();
+      // Claude 2.1.283: the queued message sits above the box, the composer shows a (dim) hint.
+      scriptScreens(({ staged, enters }) => (staged && enters > 0
+        ? `✻ Working…\n❯ Reply with QUEUED\n  ctrl+x ctrl+s to send now\n${claudeComposer('Press up to edit queued messages')}`
+        : `✻ Working…\n${claudeComposer(staged ? 'Reply with QUEUED' : '')}`));
+      vi.mocked(terminalPanelManager.getInputScreenText).mockImplementation(() => undefined);
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Reply with QUEUED' }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await pending;
+
+      expect(result).toMatchObject({ ok: true, verifiedSubmitted: true, delivery: { state: 'queued', evidence: 'screen' } });
+    });
+
+    it('reports text still in the composer as in-composer, the only case with the composer hint', async () => {
+      vi.useFakeTimers();
+      scriptScreens(({ staged }) => claudeComposer(staged ? 'Read and follow brief.md' : ''), 'claude', 'idle');
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Read and follow brief.md' }]);
+      await vi.advanceTimersByTimeAsync(15_000);
+      const result = await pending;
+
+      expect(result).toMatchObject({
+        ok: false,
+        verifiedSubmitted: false,
+        delivery: { state: 'in-composer', evidence: 'screen' },
+        blocked: { kind: 'agent-prompt' },
+      });
+    });
+
+    it('reports taken from the screen when the composer empties and no transcript is found', async () => {
+      vi.useFakeTimers();
+      scriptScreens(({ staged, enters }) => (enters > 0 ? `✻ Working\n${claudeComposer('')}` : claudeComposer(staged ? 'Ship it' : '')));
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Ship it' }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await pending;
+
+      expect(result).toMatchObject({ ok: true, verifiedSubmitted: true, delivery: { state: 'taken', evidence: 'screen' } });
+    });
+
+    it('does not read an earlier pasted turn above an emptied Codex composer as held text', async () => {
+      vi.useFakeTimers();
+      vi.mocked(panelManager.getPanel).mockReturnValue(terminalPanel);
+      scriptScreens(({ enters }) => (enters === 0
+        ? '› [Pasted Content 1200 chars] earlier\n• Done\n\n› run tests'
+        : '› [Pasted Content 1200 chars] earlier\n• Done\n\n› run tests\n• Working (1s)\n\n› Ask Codex to do anything'), 'codex', 'idle');
+
+      const pending = createRegistry().invoke('runpane:panels:submit-composer', [{ panelId: terminalPanel.id }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await pending;
+
+      expect(result).toMatchObject({ ok: true, verifiedSubmitted: true, delivery: { state: 'taken', evidence: 'screen' } });
+      expect(result).toMatchObject({ blocked: undefined });
+      // submit-composer does not know the composer's text, so any turn since Enter counts.
+      expect(findUserTurnSince).toHaveBeenCalledWith(expect.objectContaining({ agent: 'codex', cwd: session.worktreePath }), expect.any(Number), undefined);
+    });
+
+    it('reports a message a busy Codex holds for its next turn as queued', async () => {
+      vi.useFakeTimers();
+      vi.mocked(panelManager.getPanel).mockReturnValue(terminalPanel);
+      // Codex 0.157: text and Enter in one write; the message waits under the running turn.
+      const state = { sent: false };
+      vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation(() => {
+        state.sent = true;
+      });
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => terminalSnapshot(
+        state.sent
+          ? '• Working (12s • esc to interrupt)\n• Messages to be submitted after next tool call (press esc to interrupt and send immediately)\n  ↳ Also run the linter\n\n› Ask Codex to do anything'
+          : '• Working (10s • esc to interrupt)\n\n› Ask Codex to do anything',
+        'active',
+        'codex',
+      ));
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Also run the linter' }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await pending;
+
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, 'Also run the linter\r');
+      expect(result).toMatchObject({ ok: true, verifiedSubmitted: true, delivery: { state: 'queued', evidence: 'screen' } });
+    });
+
+    it('reports the composer\'s ghost text without counting it as held input', async () => {
+      const screen = `${rule}\n❯ merge it\n${rule}\n  ? for shortcuts`;
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(screen, 'idle', 'claude'));
+      vi.mocked(terminalPanelManager.getInputScreenText).mockReturnValue(`${rule}\n❯\n${rule}\n  ? for shortcuts`);
+      vi.mocked(terminalPanelManager.getGhostScreenText).mockReturnValue('\n  merge it\n\n');
+
+      const result = await createRegistry().invoke('runpane:panels:screen', [{ panelId: terminalPanel.id }]);
+
+      expect(result).toMatchObject({ text: screen, composer: { isPresent: true, hasUndeliveredText: false, ghostText: 'merge it' } });
     });
   });
 

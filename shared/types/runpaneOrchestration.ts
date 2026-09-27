@@ -208,6 +208,8 @@ export interface RunpaneAgentToolSpec {
 
 export interface RunpaneCommandToolSpec {
   command: string;
+  /** The agent this command runs (a wrapper such as `agent-farm run`); set by `--agent` with `--tool-command`. */
+  agentType?: RunpaneAgentId;
   title?: string;
   initialInput?: string;
 }
@@ -264,12 +266,16 @@ export interface RunpaneErrorPayload {
 }
 
 export type RunpanePanelActivityStatus = 'active' | 'idle';
+/** Rolled-up agent state for a Pane: the most urgent state of its live agent panels. */
+export type RunpanePaneAgentState = 'ready' | 'working' | 'blocked' | 'none';
+export type RunpaneAgentDetection = 'declared' | 'command' | 'process' | 'screen';
 export type RunpanePanelScreenSource = 'alternateScreen' | 'scrollback' | 'persistedOutput' | 'empty';
 export type RunpanePanelWaitCondition = 'initialized' | 'ready' | 'idle' | 'text';
 export type RunpanePanelBlockerKind =
   | 'codex-update'
   | 'agent-prompt'
   | 'submission_unverified'
+  | 'composer-unknown'
   | 'unknown';
 
 export interface RunpanePanelStateSummary {
@@ -362,8 +368,10 @@ export interface RunpanePaneSummary {
   id: string;
   paneId: string;
   name: string;
+  /** `running` while any terminal panel is live; otherwise the stored lifecycle status. */
   status: string;
   agentStatus: RunpanePanelActivityStatus;
+  agentState: RunpanePaneAgentState;
   worktreePath: string;
   repoId: number;
   repoName?: string;
@@ -526,6 +534,8 @@ export interface RunpanePanelSummary {
   active: boolean;
   initialized?: boolean;
   agentType?: RunpaneAgentId;
+  agentDetection?: RunpaneAgentDetection;
+  launchCommand?: string;
   isCliPanel?: boolean;
   position?: number;
   createdAt?: string;
@@ -726,5 +736,7 @@ export interface RunpaneResolvedTool {
   title: string;
   command: string;
   agent?: RunpaneAgentId;
+  /** `wrapped` when `command` is a wrapper that runs `agent`; Pane launches it unchanged. */
+  launchMode?: 'wrapped';
   initialInput?: string;
 }

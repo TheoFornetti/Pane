@@ -1516,9 +1516,14 @@ export class TerminalPanelManager extends EventEmitter {
     return this.terminals.get(panelId)?.lastOutputAt?.toISOString();
   }
 
-  /** Viewport text with dim cells blanked, so placeholder hints do not read as typed input. */
+  /** Viewport text with ghost cells (dim or placeholder grey) blanked, so placeholder hints do not read as typed input. */
   getInputScreenText(panelId: string): string | undefined {
     return this.terminals.get(panelId)?.screenEmulator?.state.inputScreenText;
+  }
+
+  /** Only the viewport's ghost cells, row for row with getInputScreenText. */
+  getGhostScreenText(panelId: string): string | undefined {
+    return this.terminals.get(panelId)?.screenEmulator?.state.ghostScreenText;
   }
 
   getOutputGeneration(panelId: string): number {

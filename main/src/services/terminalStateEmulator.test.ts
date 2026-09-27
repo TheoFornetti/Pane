@@ -92,7 +92,39 @@ describe('TerminalStateEmulator', () => {
     await emulator.waitForIdle();
 
     expect(emulator.getScreenText()).toBe('❯ Try "fix the tests"\ntyped hint kept');
-    expect(emulator.getScreenText({ omitDim: true })).toBe('❯\ntyped      kept');
+    expect(emulator.getScreenText({ cells: 'typed' })).toBe('❯\ntyped      kept');
+    expect(emulator.getScreenText({ cells: 'ghost' })).toBe('  Try "fix the tests"\n      hint');
+    emulator.dispose();
+  });
+
+  it('treats placeholder-grey text as ghost text but keeps grey frame glyphs and typed text', async () => {
+    const emulator = new TerminalStateEmulator(60, 8);
+    const rule = '─'.repeat(10);
+    // Captured from Claude Code 2.1.283 (dark theme): rules in #888888, a busy
+    // composer's `❯` and hints in #999999, a queued message above the box.
+    emulator.write([
+      `\x1b[38;2;80;80;80m❯\x1b[39m \x1b[38;2;153;153;153mReply with QUEUED\x1b[39m`,
+      `\x1b[38;2;136;136;136m${rule}\x1b[39m`,
+      `\x1b[38;2;153;153;153m❯ merge it\x1b[39m`,
+      `\x1b[38;2;136;136;136m${rule}\x1b[39m`,
+      `❯ typed \x1b[38;5;246msuggested\x1b[39m \x1b[90mgrey16\x1b[39m \x1b[38;2;255;255;255mwhite\x1b[39m \x1b[38;2;215;119;87mcoral\x1b[39m`,
+    ].join('\r\n'));
+    await emulator.waitForIdle();
+
+    expect(emulator.getScreenText({ cells: 'typed' })).toBe([
+      '❯',
+      rule,
+      '❯',
+      rule,
+      '❯ typed                  white coral',
+    ].join('\n'));
+    expect(emulator.getScreenText({ cells: 'ghost' })).toBe([
+      '  Reply with QUEUED',
+      '',
+      '  merge it',
+      '',
+      '        suggested grey16',
+    ].join('\n'));
     emulator.dispose();
   });
 

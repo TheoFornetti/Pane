@@ -11,6 +11,41 @@ const HEADLESS_SCROLLBACK_LINES = 2500;
 const RESTORE_CACHE_LIMIT = 4;
 const restoreCache = new Map<TerminalStateEmulator, { includeScrollback: boolean; serialized: string }>();
 
+/** Which cells a screen read keeps: all of them, typed (non-ghost) cells, or only ghost cells. */
+type ScreenTextCells = 'all' | 'typed' | 'ghost';
+
+type BufferCell = ReturnType<Terminal['buffer']['active']['getNullCell']>;
+
+// Frame and prompt glyphs agents draw in grey (Claude's composer rules, and
+// its `❯` while it works) are structure, not placeholder text.
+const STRUCTURAL_GLYPH = /^[─-╿❯›>▌]$/u;
+
+/**
+ * A cell agent TUIs draw as placeholder or suggestion text rather than input:
+ * dim (SGR 2), or a mid-grey foreground. Claude Code 2.1.283 draws its
+ * composer placeholder and prompt suggestions dim, and hints, queued messages
+ * and its busy `❯` in theme grey (#999999 dark; #666666 light, 241-246 on 256
+ * colours, bright black on 16); Codex draws its placeholders dim. Typed input
+ * uses the default foreground.
+ */
+function isGhostCell(cell: BufferCell): boolean {
+  if (cell.isDim()) return true;
+  return isGreyForeground(cell) && !STRUCTURAL_GLYPH.test(cell.getChars());
+}
+
+function isGreyForeground(cell: BufferCell): boolean {
+  if (cell.isFgDefault()) return false;
+  const color = cell.getFgColor();
+  if (cell.isFgPalette()) return color === 8 || (color >= 240 && color <= 250);
+  if (!cell.isFgRGB()) return false;
+  const red = (color >> 16) & 0xff;
+  const green = (color >> 8) & 0xff;
+  const blue = color & 0xff;
+  const spread = Math.max(red, green, blue) - Math.min(red, green, blue);
+  const level = (red + green + blue) / 3;
+  return spread <= 24 && level >= 0x60 && level <= 0xb8;
+}
+
 /**
  * Maintains an xterm-compatible terminal model for state restoration and
  * local-control screen reads. PTY output parsing is asynchronous, so callers
@@ -140,11 +175,13 @@ export class TerminalStateEmulator {
   }
 
   /**
-   * Return plain text for the currently visible viewport. omitDim blanks dim
-   * cells, which agent TUIs use for placeholder suggestions in their composer.
+   * Return plain text for the currently visible viewport. `cells: 'typed'`
+   * blanks ghost cells (dim or placeholder grey, see isGhostCell), which agent
+   * TUIs use for placeholder hints and suggestions in their composer;
+   * `cells: 'ghost'` keeps only those cells, row for row.
    */
-  getScreenText({ omitDim = false }: { omitDim?: boolean } = {}): string {
-    if (this.disposed) return this.finalScreenText;
+  getScreenText({ cells = 'all' }: { cells?: ScreenTextCells } = {}): string {
+    if (this.disposed) return cells === 'ghost' ? '' : this.finalScreenText;
 
     const buffer = this.terminal.buffer.active;
     const lines: string[] = [];
@@ -153,7 +190,7 @@ export class TerminalStateEmulator {
 
     for (let index = buffer.viewportY; index < end; index += 1) {
       const line = buffer.getLine(index);
-      if (!line || !omitDim) {
+      if (!line || cells === 'all') {
         lines.push(line?.translateToString(true) ?? '');
         continue;
       }
@@ -161,7 +198,8 @@ export class TerminalStateEmulator {
       for (let column = 0; column < line.length; column += 1) {
         line.getCell(column, cell);
         if (cell.getWidth() === 0) continue;
-        text += cell.isDim() ? ' '.repeat(cell.getWidth()) : cell.getChars() || ' ';
+        const keep = isGhostCell(cell) === (cells === 'ghost');
+        text += keep ? cell.getChars() || ' ' : ' '.repeat(cell.getWidth());
       }
       lines.push(text.trimEnd());
     }

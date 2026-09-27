@@ -273,6 +273,19 @@ workers too.
 - **Docs:** replace the "one `--pane` each, re-arm after associate" text (`skillCacheManager.ts:573-583`,
   `docs/SESSIONS.md:183-192`) with one command that uses `--session --follow --quiet --json`.
 
+**PR4 status: implemented** on `runpane/session-watch` (stacked on PR1). Plan deltas:
+- The Session manager's existing `changed` event now carries `paneIds` and `sessionName` for
+  associate/detach; the journal reads it and appends `pane.associated`/`pane.detached` (lines:
+  `JOINED`/`LEFT <pane> pane <id> session <session-id>`). Re-associating a member emits nothing.
+- The new kinds reach a watcher only under `--session` or when `--kinds` lists them, so older CLIs
+  (whose decoders reject unknown kinds) never receive them.
+- The wait result echoes `session: { id, name }`; the CLI fails the watch when a daemon ignores
+  `session`, instead of silently watching every Pane.
+- An association limited to `panelIds` reports only those panels (as `sessions overview` does), and
+  a held cadence line for a Pane detached before it flushed is dropped.
+- `--session` also conflicts with `--all-managed`. A name gives the cursor `session-<name>`
+  (hash-shortened when not portable), since the CLI resolves nothing itself.
+
 ### PR5a: Intact delivery (M)
 
 - **Bracketed paste**

@@ -584,18 +584,19 @@ The daemon owns liveness. Never write or run an ad-hoc watcher.
 Arm at session start:
 
     runpane watch --self-test
-    runpane watch --as session-<uuid> --follow --quiet --pane <pane-id> --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff --json
+    runpane watch --session "$PANE_ORCHESTRATION_SESSION_ID" --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
 
-\`<uuid>\` is the UUID inside the Session ID: for the Session
-\`__orchestration_session_<uuid>__\`, the cursor is \`session-<uuid>\`.
+Its named cursor defaults to \`session-<uuid>\`, where \`<uuid>\` is the UUID
+inside the Session ID: for the Session \`__orchestration_session_<uuid>__\`,
+the cursor is \`session-<uuid>\`.
 
-Scope the watcher to the Session's Panes:
+One watcher covers the whole Session:
 
-- Arm the follow command only when the Session has an associated Pane, with
-  one \`--pane\` for each. A discussion-only Session does not run a follow
-  watcher.
-- After associate or detach, refresh the Session overview and re-arm this
-  same named cursor with the current Pane set.
+- The daemon re-reads this Session's Panes on every read. A Pane you
+  associate later is included, a detached or archived Pane drops out, and
+  your own panel never appears. Never re-arm after associate or detach.
+- Arm the follow command once the Session has an associated Pane.
+  A discussion-only Session does not run a follow watcher.
 - Keep the \`session-<uuid>\` cursor across restarts, and capture a fresh
   output baseline before reading notifications.
 
@@ -636,8 +637,13 @@ unattended, then user present):
 - BUSY is not requested and carries no action.
 - HEARTBEAT (\`_heartbeat\`) arrives every 60 seconds and only proves
   liveness; \`--quiet\` drops it.
+- JOINED (\`pane.associated\`) and LEFT (\`pane.detached\`): a Pane joined or
+  left this Session. They confirm the change; the watcher already follows it.
 - RESET (\`_reset\`) and DROPPED (\`_dropped\`): the journal restarted or
   lost entries. Refresh the Session overview before acting on later lines.
+- Replay: after a RESET, entries with \`replay: true\` restate current state.
+  A replayed \`agent.ready\` is never READY; re-read \`runpane sessions
+  overview\` instead of acting on it.
 - Other lines arrive together, at most one batch every 10 minutes (2
   minutes).
 

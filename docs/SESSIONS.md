@@ -177,29 +177,51 @@ stale.
 
 ## Session watcher
 
-Use one durable, named watcher per Session, scoped to every associated Pane:
+Use one durable, named watcher per Session. `--session` takes the Session ID
+or exact name, and the daemon follows every Pane associated with it:
 
 ```text
-runpane watch --as session-<uuid> --follow --quiet --pane <pane-id> \
-  --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone \
+runpane watch --session <session-id> --follow --quiet --json \
+  --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached \
   --settle 180000 --blocked-settle 30000 --min-interval 600000 \
-  --idle-backoff --json
+  --idle-backoff
 ```
 
-`<uuid>` is the UUID inside the Session ID: the Session
-`__orchestration_session_<uuid>__` uses the cursor `session-<uuid>`. Cursor
-names may be up to 128 characters (64 before this release); when runpane
-derives a name itself, such as the `PANE_PANEL_ID` default, it shortens one
-longer than 64 characters to `panel-<first 12 hex characters of its sha256>`.
+The daemon resolves the Session once per request and re-reads its
+associations on every journal read. A Pane associated after the watcher
+starts is included; a detached or archived Pane drops out, together with any
+line still held for it by `--settle` or `--min-interval`. The Session's own
+hidden owner and orchestrator panels never appear, and an association limited
+to specific panels reports only those panels. There is no re-arm after
+`sessions associate` or `sessions detach`. `--session` cannot be combined with
+`--pane` or `--all-managed`, an unknown Session fails the watch, and a daemon
+that predates `--session` fails it with `WATCH ERROR` instead of watching every
+Pane.
 
-Repeat `--pane` for each associated Pane. A discussion-only Session has no
-follow watcher; never omit `--pane` to watch all Panes. `watch --session` is
-not supported yet and fails rather than watching everything. After an
-associate or detach mutation, refresh `sessions overview` and re-arm the same
-cursor with the current Pane set. On restart, retain the `session-<uuid>`
-cursor and capture a fresh output baseline before interpreting notifications.
-Return blocked and decision findings to the Session conversation. Terminal
-idle or exit remains activity evidence only.
+Membership changes are journal entries: `pane.associated` (`JOINED <pane-name>
+pane <pane-id> session <session-id>`) and `pane.detached` (`LEFT ...`). The
+Session manager emits them from `sessions associate` (only when the Pane was
+not already a member) and `sessions detach`. A watch without `--session`
+receives them only when `--kinds` lists them, so older clients never see an
+unknown kind. Cadence state is keyed by the Session rather than its current
+Panes, so held lines survive membership changes.
+
+The cursor defaults to `session-<uuid>`, where `<uuid>` is the UUID inside the
+Session ID: the Session `__orchestration_session_<uuid>__` uses
+`session-<uuid>`. Passing the name instead gives `session-<name>`. Cursor names
+may be up to 128 characters (64 before this release); when runpane derives a
+name itself, such as this default or the `PANE_PANEL_ID` fallback, it shortens
+one longer than 64 characters (or one with other characters) to
+`<prefix>-<first 12 hex characters of its sha256>`.
+
+A discussion-only Session has no follow watcher. On restart, retain the
+`session-<uuid>` cursor and capture a fresh output baseline before
+interpreting notifications. After a reset (`_reset`), the baseline restates
+current state: those JSON entries carry `replay: true` (and
+`changedWhileAway: true` after a daemon restart). A replayed `agent.ready` is
+never READY; re-read `sessions overview` instead of acting on it. Lines mode
+prints only `CHANGED` for them. Return blocked and decision findings to the
+Session conversation. Terminal idle or exit remains activity evidence only.
 
 `--quiet` (alias `--no-control-lines`) drops the control lines that only prove
 liveness: `_ok`, `_heartbeat`, and `_reconnected` (`WATCH OK`, `HEARTBEAT`,

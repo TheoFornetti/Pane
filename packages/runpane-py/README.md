@@ -125,6 +125,19 @@ When someone is waiting on the result, use the user-present profile instead:
 `--settle 60000 --blocked-settle 15000 --min-interval 120000` with no
 `--idle-backoff`, so `READY` arrives within about 3 minutes rather than 13.
 
+A Session orchestrator watches its whole Session with one command instead of
+one `--pane` per Pane. The daemon re-reads the Session's Panes on every read,
+so `sessions associate` and `sessions detach` need no re-arm, and `JOINED` and
+`LEFT` (`pane.associated`, `pane.detached`) report the change. The cursor
+defaults to `session-<uuid>`:
+
+```bash
+runpane watch --session <session-id> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
+```
+
+After a `RESET`, JSON baseline entries carry `replay: true`. They restate
+current state, so a replayed `agent.ready` is never `READY`.
+
 - `--kinds` drops `agent.busy`; `BUSY` carries no action.
 - `--settle <ms>` emits `READY` only after the panel stays idle that long. A
   `BUSY` inside the window cancels it silently, which removes the idle/working

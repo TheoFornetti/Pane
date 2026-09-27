@@ -7,6 +7,7 @@ import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 
 import { TerminalPanelManager } from './terminalPanelManager';
+import { ShellDetector } from '../utils/shellDetector';
 import { panelManager } from '../test/setup';
 
 vi.spyOn(panelManager, 'emitPanelEvent');
@@ -49,6 +50,7 @@ type TerminalUnderTest = {
   agentSessionScrapeBuffer: string;
   capturedAgentSessionId?: string;
   agentProbe?: unknown;
+  bracketedPasteMode?: boolean;
 };
 
 type FlushOutputBufferAccess = {
@@ -88,6 +90,11 @@ type InitialInputAccess = {
   getOutputGeneration(panelId: string): number;
 };
 
+type HandlerAccess = {
+  terminals: Map<string, TerminalUnderTest>;
+  setupTerminalHandlers(terminal: TerminalUnderTest): void;
+};
+
 type LaunchCommandAccess = {
   resolveCliLaunchCommand(panelId: string, initialCommand: string, customState: TerminalPanelState, shellType?: string): {
     commandToRun: string;
@@ -124,6 +131,15 @@ function partialMock<Contract>(implementation: Partial<Contract>): Contract {
   // SAFETY: Each test stub implements every ConfigManager member reached by
   // the scenario; an unexpected call fails immediately instead of escaping.
   return implementation as Contract;
+}
+
+/** The agent echoes every staged write, as a TUI redraws its composer. */
+function echoStagedWrites(terminal: TerminalUnderTest): void {
+  terminal.pty.write.mockImplementation((data: string) => {
+    if (data === '\r' || data === '\x1b[13;5u\r') return;
+    terminal.outputGeneration += 1;
+    terminal.lastOutputAt = new Date();
+  });
 }
 
 function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnderTest {
@@ -569,6 +585,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       },
     };
     vi.mocked(panelManager.getPanel).mockReturnValue(panel);
+    echoStagedWrites(terminal);
 
     manager.sendInitialInputOnce(terminal.panelId);
     await flushPromises();
@@ -629,6 +646,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       },
     });
 
+    echoStagedWrites(terminal);
     manager.deliverPendingInitialInput(terminal.panelId);
     manager.pollAgentStatus();
     await flushPromises();
@@ -1159,9 +1177,13 @@ describe('TerminalPanelManager agent status poll', () => {
     screenEmulator.write(`\x1b[2J\x1b[H${rule}\r\n❯ \r\n${rule}`);
     await screenEmulator.refresh();
     vi.setSystemTime(Date.now() + 3_000); // past the monitor's startup grace
+    echoStagedWrites(terminal);
     manager.pollAgentStatus();
     await flushPromises();
-    expect(terminal.pty.write).toHaveBeenCalledWith('/review\r');
+    // The text goes first; Enter follows on its own once Claude has echoed it and gone quiet.
+    expect(terminal.pty.write.mock.calls).toEqual([['/review']]);
+    vi.setSystemTime(Date.now() + 400);
+    await vi.waitFor(() => expect(terminal.pty.write.mock.calls).toEqual([['/review'], ['\r']]));
 
     manager.destroyTerminal(terminal.panelId);
     vi.useRealTimers();
@@ -1359,5 +1381,157 @@ describe('TerminalPanelManager wrapper agent detection', () => {
 
     expect(manager.getForegroundProcess(terminal.panelId)).toBeUndefined();
     manager.destroyTerminal(terminal.panelId);
+  });
+});
+
+describe('TerminalPanelManager long prompt delivery', () => {
+  const promptFile = "/home/me/.pane/prompts/session-1/it's.md";
+  const promptWord = `"$(cat '/home/me/.pane/prompts/session-1/it'\\''s.md')"`;
+  const longPrompt = 'First line with ! and $HOME\nSecond line';
+
+  afterEach(() => {
+    resetPaneRuntimeForTests();
+    vi.mocked(panelManager.getPanel).mockReset();
+    vi.mocked(panelManager.updatePanel).mockReset();
+    vi.useRealTimers();
+  });
+
+  it.each([
+    ['claude', 'claude --dangerously-skip-permissions', `claude --dangerously-skip-permissions --session-id 11111111-1111-4111-8111-111111111111 ${promptWord}`],
+    ['codex', 'codex --yolo', `codex --yolo ${promptWord}`],
+  ] as const)('launches %s with the prompt read from its file, never typed into the shell', (agentType, command, expected) => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('11111111-1111-4111-8111-111111111111', command, {
+      agentType,
+      initialInputMode: 'argument',
+      initialInput: longPrompt,
+      initialInputFile: promptFile,
+    }, 'zsh');
+
+    expect(result.commandToRun).toBe(expected);
+    expect(result.commandToRun).not.toContain('First line');
+    expect(result.customState.initialInputSentAt).toEqual(expect.any(String));
+  });
+
+  it('launches Cursor with the prompt read from its file', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'cursor-agent --force', {
+      agentType: 'cursor',
+      initialInputMode: 'argument',
+      initialInput: longPrompt,
+      initialInputFile: promptFile,
+    }, 'bash');
+
+    expect(result.commandToRun).toContain(`--resume "$__PANE_CURSOR_CHAT" ${promptWord}; else cursor-agent --force ${promptWord}; fi`);
+    expect(result.commandToRun).not.toContain('First line');
+  });
+
+  it('keeps a short prompt as a quoted argument', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'codex --yolo', {
+      agentType: 'codex',
+      initialInputMode: 'argument',
+      initialInput: 'Plan issue 42',
+    }, 'zsh');
+
+    expect(result.commandToRun).toBe('codex --yolo "Plan issue 42"');
+  });
+
+  it.each([
+    ['zsh', true],
+    ['bash', true],
+    ['sh', true],
+    ['fish', false],
+    ['pwsh', false],
+    ['powershell', false],
+    ['cmd', false],
+  ])('reads long prompts from a file only in POSIX shells (%s)', (shellName, expected) => {
+    setPaneRuntime({
+      eventSink: { send: vi.fn() },
+      daemonEventSink: { send: vi.fn() },
+      getConfigManager: () => partialMock<ConfigManager>({ getPreferredShell: () => 'auto' }),
+      getPtyHostRuntime: () => null,
+      getWebviewContextMap: () => new Map(),
+    });
+    const defaultShell = vi.spyOn(ShellDetector, 'getDefaultShell')
+      .mockReturnValue({ path: `/bin/${shellName}`, name: shellName, args: [] });
+
+    try {
+      expect(new TerminalPanelManager().launchShellReadsPromptFile(null)).toBe(expected && process.platform !== 'win32');
+    } finally {
+      defaultShell.mockRestore();
+    }
+  });
+
+  it.each([
+    [true, '\x1b[200~First line\nSecond line\nThird line\x1b[201~'],
+    [false, 'First line\nSecond line\nThird line'],
+  ])('stages long held input for an agent as one paste when it asked for bracketed paste (%s), then sends Enter alone', async (bracketedPasteMode, staged) => {
+    vi.useFakeTimers();
+    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({ agentType: 'claude', bracketedPasteMode });
+    manager.terminals.set(terminal.panelId, terminal);
+    vi.mocked(panelManager.getPanel).mockReturnValue({
+      id: terminal.panelId,
+      sessionId: terminal.sessionId,
+      type: 'terminal',
+      title: 'Claude',
+      state: {
+        isActive: true,
+        customState: { agentType: 'claude', launchMode: 'wrapped', initialInput: 'First line\r\nSecond line\rThird line\r\n' },
+      },
+      metadata: { createdAt: '2026-01-01T00:00:00.000Z', lastActiveAt: '2026-01-01T00:01:00.000Z', position: 0 },
+    });
+    echoStagedWrites(terminal);
+
+    manager.sendInitialInputOnce(terminal.panelId);
+    await flushPromises();
+    expect(terminal.pty.write.mock.calls).toEqual([[staged]]);
+
+    // Still drawing the paste: no Enter yet.
+    terminal.lastOutputAt = new Date();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(terminal.pty.write).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(terminal.pty.write.mock.calls).toEqual([[staged], ['\r']]);
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('tracks whether the program in the panel asked for bracketed paste', () => {
+    vi.useFakeTimers();
+    setPaneRuntime({
+      eventSink: { send: vi.fn() },
+      daemonEventSink: { send: vi.fn() },
+      getConfigManager: () => createConfigManagerStub(),
+      getPtyHostRuntime: () => null,
+      getWebviewContextMap: () => new Map(),
+    });
+    const manager = testAccess<HandlerAccess & TerminalPanelManager>(new TerminalPanelManager());
+    let emit: (data: string) => void = () => {};
+    const terminal = createTerminal({ outputBuffer: '' });
+    const pty = Object.assign(terminal.pty, {
+      onData: vi.fn((listener: (data: string) => void) => {
+        emit = listener;
+        return { dispose: vi.fn() };
+      }),
+      onExit: vi.fn(() => ({ dispose: vi.fn() })),
+    });
+    manager.terminals.set(terminal.panelId, { ...terminal, pty });
+    const live = manager.terminals.get(terminal.panelId);
+    if (!live) throw new Error('terminal missing');
+    manager.setupTerminalHandlers(live);
+
+    expect(manager.isBracketedPasteEnabled(terminal.panelId)).toBe(false);
+    emit('\x1b[?1049h\x1b[?2004hClaude Code');
+    expect(manager.isBracketedPasteEnabled(terminal.panelId)).toBe(true);
+    emit('frame without mode changes');
+    expect(manager.isBracketedPasteEnabled(terminal.panelId)).toBe(true);
+    emit('\x1b[?2004h\x1b[?2004l$ ');
+    expect(manager.isBracketedPasteEnabled(terminal.panelId)).toBe(false);
+    disposeFlowControlRecord(terminal.flowControl);
   });
 });

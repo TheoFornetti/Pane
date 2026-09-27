@@ -52,6 +52,14 @@ const FORCED_REDRAW_TRANSITION_MS = 50;
 const FORCED_REDRAW_SETTLE_MS = 80;
 const SHELL_PROMPT_SETTLE_MS = 300;
 const SHELL_PROMPT_FALLBACK_MS = 5000;
+// Held initial input for an agent is staged, then submitted with its own
+// Enter once the agent has echoed it and gone quiet for a moment.
+const INPUT_SETTLE_POLL_MS = 50;
+const INPUT_SETTLE_QUIET_MS = 300;
+const INPUT_SETTLE_MAX_MS = 3000;
+const CLAUDE_INPUT_SETTLE_MIN_MS = 150;
+const CODEX_INPUT_SETTLE_MIN_MS = 500;
+const CODEX_SUBMIT_SEQUENCE = '\x1b[13;5u\r';
 // Formal ceiling for the restore/getState replay payload (now the emulator
 // serialization for normal buffers, raw ANSI log otherwise). Peer consensus:
 // Orca (TERMINAL_SCROLLBACK_REPLAY_BYTE_LIMIT) and Superset (MAX_HISTORY_SCROLLBACK_BYTES) both use
@@ -71,6 +79,14 @@ import {
 import { detectAgentFromScreen } from './agents/agentScreenSignature';
 import { readForegroundExecutablePath } from '../utils/foregroundProcess';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
+import {
+  bracketedPaste,
+  canLaunchWithPromptFile,
+  isLongPrompt,
+  normalizePromptNewlines,
+  promptFileShellWord,
+  stripTrailingNewlines,
+} from './agents/promptDelivery';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -247,6 +263,8 @@ interface TerminalProcess {
   lastStatusScan?: { screen: ScreenState; detection: AgentDetectionResult };
   /** The CLI came up with typed initial input still to send; the status poll sends it. */
   initialInputHeld?: boolean;
+  /** The program asked for bracketed paste (`CSI ?2004h`), so a paste reaches it as one. */
+  bracketedPasteMode?: boolean;
   // DEC Mode 2026 synchronized-output block tracking — persists across chunks
   inSyncBlock: boolean;
   /** Alt-screen state as seen by filterSyncBlockClears (stream-ordered, may
@@ -306,6 +324,23 @@ export class TerminalPanelManager extends EventEmitter {
 
   private quoteCommandArgument(value: string): string {
     return `"${value.replace(/([\\"$`])/g, '\\$1')}"`;
+  }
+
+  /** An argument-mode prompt as one shell word: its prompt file read by the shell, or the quoted text. */
+  private initialPromptWord(customState: TerminalPanelState): string {
+    const fileWord = customState.initialInputFile ? promptFileShellWord(customState.initialInputFile) : undefined;
+    return fileWord ?? this.quoteCommandArgument(customState.initialInput ?? '');
+  }
+
+  /**
+   * Whether an agent launched in a new terminal for this context can read a
+   * long prompt with `"$(cat '<file>')"`: a POSIX shell, not WSL, PowerShell
+   * or cmd. Mirrors the shell choice in `initializeTerminal`.
+   */
+  launchShellReadsPromptFile(wslContext?: WSLContext | null): boolean {
+    if (wslContext && process.platform === 'win32') return false;
+    const shell = ShellDetector.getDefaultShell(getRuntimeConfigManager().getPreferredShell());
+    return canLaunchWithPromptFile(shell.name, false);
   }
 
   private resolveCliLaunchCommand(
@@ -379,7 +414,7 @@ export class TerminalPanelManager extends EventEmitter {
       const claudeSessionId = existingClaudeSessionId ?? randomUUID();
       const canResumeClaudeSession = customState.hasClaudeSessionId === true && Boolean(existingClaudeSessionId);
       const initialPromptArg = customState.initialInputMode === 'argument' && customState.initialInput?.trim()
-        ? ` ${this.quoteCommandArgument(customState.initialInput)}`
+        ? ` ${this.initialPromptWord(customState)}`
         : '';
 
       nextState.hasClaudeSessionId = true;
@@ -443,7 +478,7 @@ export class TerminalPanelManager extends EventEmitter {
       nextState.initialInputSentAt = new Date().toISOString();
       nextState.initialInputError = undefined;
       return {
-        commandToRun: `${initialCommand} ${this.quoteCommandArgument(customState.initialInput)}`,
+        commandToRun: `${initialCommand} ${this.initialPromptWord(customState)}`,
         customState: nextState,
         isCliCommand: true,
       };
@@ -487,8 +522,9 @@ export class TerminalPanelManager extends EventEmitter {
         nextState.initialInputSentAt = new Date().toISOString();
         nextState.initialInputError = undefined;
       }
+      const promptWord = promptArgument && customState.initialInputFile ? this.initialPromptWord(customState) : undefined;
       return {
-        commandToRun: buildCursorLaunchCommand({ baseCommand: initialCommand, promptArgument, shellType }),
+        commandToRun: buildCursorLaunchCommand({ baseCommand: initialCommand, promptArgument, promptWord, shellType }),
         customState: nextState,
         isCliCommand: true,
       };
@@ -590,16 +626,47 @@ export class TerminalPanelManager extends EventEmitter {
   ): void {
     const terminal = this.terminals.get(panelId);
     if (!terminal || terminal.destroying) return;
-    if (submitStrategy === 'codex-ctrl-enter') {
-      this.writeToTerminal(panelId, input);
-      setTimeout(() => {
-        if (this.terminals.get(panelId) !== terminal || terminal.destroying) return;
-        this.writeToTerminal(panelId, '\x1b[13;5u\r');
-      }, 500);
+    // An agent reads text and Enter arriving together as a paste and keeps
+    // the Enter as a newline, so agents get the Enter as its own write.
+    if (submitStrategy === 'codex-ctrl-enter' || terminal.agentType) {
+      void this.stageAndSubmitInitialInput(terminal, input, submitStrategy);
       return;
     }
 
     this.writeToTerminal(panelId, input.endsWith('\r') ? input : `${input}\r`);
+  }
+
+  /**
+   * Stage initial input in an agent's composer, as a bracketed paste when it
+   * is long or multi-line, then send the submit key once the agent has
+   * echoed it and gone quiet (bounded).
+   */
+  private async stageAndSubmitInitialInput(
+    terminal: TerminalProcess,
+    input: string,
+    submitStrategy: NonNullable<TerminalPanelState['initialInputSubmitStrategy']>,
+  ): Promise<void> {
+    const text = stripTrailingNewlines(normalizePromptNewlines(input));
+    const generation = terminal.outputGeneration;
+    this.writeToTerminal(terminal.panelId, isLongPrompt(text) && terminal.bracketedPasteMode ? bracketedPaste(text) : text);
+    const isCodex = submitStrategy === 'codex-ctrl-enter';
+    await this.waitForInputSettle(terminal, generation, isCodex ? CODEX_INPUT_SETTLE_MIN_MS : CLAUDE_INPUT_SETTLE_MIN_MS);
+    if (this.terminals.get(terminal.panelId) !== terminal || terminal.destroying) return;
+    this.writeToTerminal(terminal.panelId, isCodex ? CODEX_SUBMIT_SEQUENCE : '\r');
+  }
+
+  /** Resolve once the terminal has output since `generation` and then a quiet window, or after a bound. */
+  private async waitForInputSettle(terminal: TerminalProcess, generation: number, minMs: number): Promise<void> {
+    const startedAt = Date.now();
+    for (;;) {
+      await new Promise(resolve => setTimeout(resolve, INPUT_SETTLE_POLL_MS));
+      if (this.terminals.get(terminal.panelId) !== terminal || terminal.destroying) return;
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= INPUT_SETTLE_MAX_MS) return;
+      const echoed = terminal.outputGeneration > generation;
+      const quiet = !terminal.lastOutputAt || Date.now() - terminal.lastOutputAt.getTime() >= INPUT_SETTLE_QUIET_MS;
+      if (elapsed >= minMs && echoed && quiet) return;
+    }
   }
 
   private stripAnsiSequences(output: string): string {
@@ -1297,6 +1364,12 @@ export class TerminalPanelManager extends EventEmitter {
       // Detect alternate screen buffer enter/exit for universal TUI detection
       // (works on WSL where pty.process reports wsl.exe instead of the Linux foreground app)
       // \x1b[?1049h = enter alternate screen, \x1b[?1049l = leave alternate screen
+      if (data.includes('\x1b[?2004')) {
+        const lastEnable = data.lastIndexOf('\x1b[?2004h');
+        const lastDisable = data.lastIndexOf('\x1b[?2004l');
+        if (lastEnable !== lastDisable) terminal.bracketedPasteMode = lastEnable > lastDisable;
+      }
+
       const enterAlt = data.includes('\x1b[?1049h');
       const leaveAlt = data.includes('\x1b[?1049l');
       if (enterAlt || leaveAlt) {
@@ -1450,6 +1523,11 @@ export class TerminalPanelManager extends EventEmitter {
 
   getOutputGeneration(panelId: string): number {
     return this.terminals.get(panelId)?.outputGeneration ?? 0;
+  }
+
+  /** Whether the program in the panel has turned on bracketed paste. */
+  isBracketedPasteEnabled(panelId: string): boolean {
+    return this.terminals.get(panelId)?.bracketedPasteMode === true;
   }
   
   writeToTerminal(panelId: string, data: string): void {

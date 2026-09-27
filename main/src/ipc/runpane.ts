@@ -19,6 +19,16 @@ import { detectAgentState } from '../services/agentStatus/manifestEngine';
 import { getManifestForAgent } from '../services/agentStatus/manifests';
 import { detectAgentComposer, detectAgentFromScreen } from '../services/agents/agentScreenSignature';
 import { resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
+import {
+  bracketedPaste,
+  claudePromptWarnings,
+  filePointerPrompt,
+  isLongPrompt,
+  normalizePromptNewlines,
+  promptFileShellWord,
+  stripTrailingNewlines,
+  writePromptFile,
+} from '../services/agents/promptDelivery';
 import type { ArchiveProgressManager, SerializedArchiveTask } from '../services/archiveProgressManager';
 import type { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
@@ -63,6 +73,7 @@ import type {
   RunpanePaneCreateResultItem,
   RunpanePaneReadiness,
   RunpanePaneSummary,
+  RunpanePromptWarning,
   RunpanePanelActivityStatus,
   RunpanePaneAgentState,
   RunpaneAgentDetection,
@@ -124,7 +135,7 @@ import { WatchCadence, type WatchCadenceOptions } from '../services/workspaceWat
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { usageManager } from '../services/usage/usageManager';
-import { parseWSLPath } from '../utils/wslUtils';
+import { parseWSLPath, windowsPathToWSLMount, type WSLContext } from '../utils/wslUtils';
 import {
   dueIdleEntries,
   nextIdleDeadline,
@@ -176,6 +187,10 @@ const DEFAULT_COMPOSER_VERIFY_INTERVAL_MS = 100;
 const CODEX_SUBMIT_STAGE_DELAY_MS = 500;
 const CLAUDE_INPUT_WAIT_TIMEOUT_MS = 15_000;
 const CLAUDE_UI_QUIET_MS = 3_000;
+// After a bracketed paste, Enter waits for the agent to stop drawing it.
+const PASTE_SETTLE_QUIET_MS = 300;
+const PASTE_SETTLE_MAX_MS = 2_000;
+const CODEX_PASTE_ECHO_TIMEOUT_MS = 3_000;
 const MAX_CREATE_SUBMIT_ATTEMPTS = 3;
 const CREATE_SUBMIT_CONFIRMATION_DELAY_MS = 400;
 const DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS = 30_000;
@@ -901,7 +916,7 @@ export function registerRunpaneHandlers(
         throw new Error(`No Pane repo found for pane ${pane.id}`);
       }
       const tool = resolveToolSpec(normalized.tool, new PathResolver(repo).environment);
-      const { panel, readiness, initialInput } = await createTerminalPanelForSession(services, pane, tool, {
+      const { panel, readiness, initialInput, promptFile, warnings } = await createTerminalPanelForSession(services, pane, tool, {
         activate: resolvePanelCreateActivation(normalized, tool),
         waitReady: normalized.waitReady,
         readyTimeoutMs: normalized.readyTimeoutMs,
@@ -917,6 +932,8 @@ export function registerRunpaneHandlers(
         tool: describeTool(tool),
         readiness,
         initialInput,
+        promptFile,
+        warnings,
         nextCommand: initialInput?.nextCommand ?? readiness?.nextCommand ?? panelOutputCommand(panel.id),
       };
     }, result => ({
@@ -1027,9 +1044,17 @@ export function registerRunpaneHandlers(
       }
 
       let beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
-      const stagedInput = stripSubmitEnter(normalized.input);
+      const promptFile = normalized.asFilePointer
+        ? await writePromptFile(panel.sessionId, stripTrailingNewlines(normalizePromptNewlines(normalized.input)))
+        : undefined;
+      const submittedText = promptFile
+        ? filePointerPrompt(agentVisiblePath(promptFile, sessionWslContext(services, panel.sessionId)))
+        : normalized.input;
+      // A CR inside the text would be Enter to an agent composer.
+      const stagedInput = stripTrailingNewlines(normalizePromptNewlines(submittedText));
       const { activityStatus, isCliReady } = beforeScreen.state;
       const agentType = screenAgentType(beforeScreen);
+      const warnings = agentType === 'claude' ? claudePromptWarnings(stagedInput) : undefined;
       // Claude reads text and Enter arriving in one read as a paste and keeps
       // the Enter as a newline. Terminal readiness can precede Claude drawing
       // its UI or reading input, so wait while it is still drawing for its
@@ -1046,29 +1071,24 @@ export function registerRunpaneHandlers(
       }
       const stagesComposer = beforeScreen.composer.isPresent && (agentType === 'claude' ||
         (agentType === 'codex' && activityStatus === 'idle' && isCliReady === true));
-      if (stagedInput.length > 0 && stagesComposer) {
-        const outputGenerationBeforeStage = terminalPanelManager.getOutputGeneration(panel.id);
-        terminalPanelManager.writeToTerminal(panel.id, stagedInput);
-        if (agentType === 'claude') {
-          await waitForPanelScreen(
-            panel,
-            screen => screen.composer.hasUndeliveredText && panelHasFreshOutputSince(panel.id, outputGenerationBeforeStage),
-          );
-        } else {
-          await sleep(CODEX_SUBMIT_STAGE_DELAY_MS);
-        }
+      if (stagedInput.length > 0 && stagesComposer && (agentType === 'claude' || agentType === 'codex')) {
+        // Claude takes a separately written Enter while it works (it queues
+        // the message), so staging never waits for it to be idle.
+        const staged = await stageComposerText(panel, agentType, stagedInput);
         const submission = await submitComposerForPanel(panel, 'auto');
         return {
           ok: submission.ok,
           panelId: panel.id,
           paneId: panel.sessionId,
-          inputBytes: Buffer.byteLength(stagedInput, 'utf8') + submission.inputBytes,
+          inputBytes: staged.inputBytes + submission.inputBytes,
           enter: 'cr',
           sequenceName: submission.sequenceName,
           verifiedSubmitted: submission.verifiedSubmitted,
           verification: submission.verification,
           sentAt: submission.sentAt,
           blocked: submission.blocked,
+          promptFile,
+          warnings,
           nextCommand: submission.nextCommand,
         };
       }
@@ -1089,11 +1109,14 @@ export function registerRunpaneHandlers(
             message: `Pane could not find the ${agentType === 'codex' ? 'Codex' : 'Claude'} composer in this panel, so it sent nothing. The agent may still be starting, or showing a view without its prompt. Check the screen, then submit again or use \`panels input\`.`,
             suggestedCommand,
           },
+          promptFile,
+          warnings,
           nextCommand: suggestedCommand,
         };
       }
 
-      const input = ensureSubmitEnter(normalized.input);
+      // An agent's CRs inside the text would each be an Enter; a shell keeps its bytes.
+      const input = ensureSubmitEnter(agentType === 'claude' || agentType === 'codex' ? stagedInput : submittedText);
       terminalPanelManager.writeToTerminal(panel.id, input);
 
       return {
@@ -1105,6 +1128,8 @@ export function registerRunpaneHandlers(
         sequenceName: 'enter-cr',
         verifiedSubmitted: false,
         sentAt: new Date().toISOString(),
+        promptFile,
+        warnings,
         nextCommand: panelWaitCommand(panel.id),
       };
     }, result => ({
@@ -1475,15 +1500,80 @@ interface TerminalPanelCreateResult {
   panel: ToolPanel;
   readiness?: RunpanePaneReadiness;
   initialInput?: RunpaneInitialInputDeliveryResult;
+  promptFile?: string;
+  warnings?: RunpanePromptWarning[];
+}
+
+interface PreparedInitialInput {
+  /** The tool with the prompt as it will be sent: newlines normalised, or the file pointer line. */
+  tool: RunpaneResolvedTool;
+  useArgumentDelivery: boolean;
+  /** Prompt file the launch command reads with `"$(cat '<file>')"`. */
+  initialInputFile?: string;
+  /** Prompt file written for `--as-file-pointer`. */
+  promptFile?: string;
+  warnings?: RunpanePromptWarning[];
+}
+
+/**
+ * Decide how a create prompt reaches the agent. A long or multi-line prompt
+ * is never typed into the shell as an argument: on a POSIX shell the launch
+ * reads it from a prompt file, elsewhere the agent's composer takes it as a
+ * paste once the agent is ready. `--as-file-pointer` swaps the prompt for a
+ * one-line pointer to its file.
+ */
+async function prepareInitialInput(
+  session: Session,
+  tool: RunpaneResolvedTool,
+  wslContext: WSLContext | null,
+): Promise<PreparedInitialInput> {
+  if (!tool.initialInput) {
+    return { tool, useArgumentDelivery: false };
+  }
+
+  // Agent composers read CR as Enter; plain terminals keep their bytes.
+  let text = tool.agent ? stripTrailingNewlines(normalizePromptNewlines(tool.initialInput)) : tool.initialInput;
+  let promptFile: string | undefined;
+  if (tool.initialInputAsFilePointer) {
+    promptFile = await writePromptFile(session.id, text);
+    text = filePointerPrompt(agentVisiblePath(promptFile, wslContext));
+  }
+  const prepared: RunpaneResolvedTool = { ...tool, initialInput: text };
+  const warnings = tool.agent === 'claude' ? claudePromptWarnings(text) : undefined;
+
+  if (!shouldUseArgumentDelivery(prepared) || !isLongPrompt(text)) {
+    return { tool: prepared, useArgumentDelivery: shouldUseArgumentDelivery(prepared), promptFile, warnings };
+  }
+  if (terminalPanelManager.launchShellReadsPromptFile(wslContext)) {
+    const initialInputFile = await writePromptFile(session.id, text);
+    if (promptFileShellWord(initialInputFile)) {
+      return { tool: prepared, useArgumentDelivery: true, initialInputFile, promptFile, warnings };
+    }
+  }
+  return { tool: prepared, useArgumentDelivery: false, promptFile, warnings };
+}
+
+/** A Pane-side file path as the agent's shell sees it (a WSL mount path for WSL repos). */
+function agentVisiblePath(file: string, wslContext: WSLContext | null): string {
+  return wslContext && process.platform === 'win32' ? windowsPathToWSLMount(file) : file;
+}
+
+function sessionWslContext(services: AppServices, sessionId: string): WSLContext | null {
+  return services.sessionManager.getProjectContext(sessionId)?.commandRunner.wslContext ?? null;
 }
 
 async function createTerminalPanelForSession(
   services: AppServices,
   session: Session,
-  tool: RunpaneResolvedTool,
+  requestedTool: RunpaneResolvedTool,
   options: TerminalPanelCreateOptions,
 ): Promise<TerminalPanelCreateResult> {
-  const useArgumentDelivery = shouldUseArgumentDelivery(tool);
+  const wslContext = sessionWslContext(services, session.id);
+  const { tool, useArgumentDelivery, initialInputFile, promptFile, warnings } = await prepareInitialInput(
+    session,
+    requestedTool,
+    wslContext,
+  );
   const shouldCreateSubmitInitialInput = Boolean(
     options.waitReady &&
     tool.agent &&
@@ -1501,6 +1591,9 @@ async function createTerminalPanelForSession(
   if (useArgumentDelivery) {
     initialState.initialInputMode = 'argument';
   }
+  if (initialInputFile) {
+    initialState.initialInputFile = initialInputFile;
+  }
   if (shouldCreateSubmitInitialInput) {
     initialState.initialInputSentAt = new Date().toISOString();
   }
@@ -1516,12 +1609,7 @@ async function createTerminalPanelForSession(
   }
 
   const panel = await panelManager.createPanel(createRequest);
-  const context = services.sessionManager.getProjectContext(session.id);
-  await terminalPanelManager.initializeTerminal(
-    panel,
-    session.worktreePath,
-    context?.commandRunner.wslContext ?? null,
-  );
+  await terminalPanelManager.initializeTerminal(panel, session.worktreePath, wslContext);
 
   const readiness = options.waitReady
     ? toPaneReadiness(await waitForPanel(panel, {
@@ -1532,21 +1620,22 @@ async function createTerminalPanelForSession(
     }))
     : undefined;
 
-  const initialInput = readiness ? await submitCreateInitialInput(panel, tool, readiness) : undefined;
+  const initialInput = readiness ? await submitCreateInitialInput(panel, tool, useArgumentDelivery, readiness) : undefined;
 
-  return { panel, readiness, initialInput };
+  return { panel, readiness, initialInput, promptFile, warnings };
 }
 
 async function submitCreateInitialInput(
   panel: ToolPanel,
   tool: RunpaneResolvedTool,
+  useArgumentDelivery: boolean,
   readiness?: RunpanePaneReadiness,
 ): Promise<RunpaneInitialInputDeliveryResult | undefined> {
   if (!tool.initialInput) {
     return undefined;
   }
 
-  if (shouldUseArgumentDelivery(tool)) {
+  if (useArgumentDelivery) {
     const currentPanel = panelManager.getPanel(panel.id);
     const customState = currentPanel && isRecord(currentPanel.state.customState)
       ? currentPanel.state.customState
@@ -1588,9 +1677,13 @@ async function submitCreateInitialInput(
     };
   }
 
-  terminalPanelManager.writeToTerminal(panel.id, tool.initialInput);
-  await sleep(300);
-  return submitCreateComposerInput(panel, tool);
+  if (tool.agent !== 'claude' && tool.agent !== 'codex') {
+    terminalPanelManager.writeToTerminal(panel.id, tool.initialInput);
+    await sleep(300);
+    return submitCreateComposerInput(panel, tool, tool.initialInput);
+  }
+  const staged = await stageComposerText(panel, tool.agent, tool.initialInput);
+  return submitCreateComposerInput(panel, tool, staged.evidenceText);
 }
 
 async function clearInitialInputSentPremark(panel: ToolPanel): Promise<void> {
@@ -1622,9 +1715,14 @@ function shouldUseArgumentDelivery(tool: RunpaneResolvedTool): boolean {
   );
 }
 
+/**
+ * Submit create input already staged in the composer. `evidenceText` is what
+ * the composer shows for it: the text, or the agent's paste marker.
+ */
 async function submitCreateComposerInput(
   panel: ToolPanel,
   tool: RunpaneResolvedTool,
+  evidenceText: string,
 ): Promise<RunpaneInitialInputDeliveryResult> {
   const input = tool.initialInput ?? '';
   const submit = resolveComposerSubmit('auto', tool.agent);
@@ -1646,7 +1744,7 @@ async function submitCreateComposerInput(
       lastVerdict = assessComposerEvidence({
         beforeText: beforeScreen.text,
         afterText: afterScreen.text,
-        stagedText: input,
+        stagedText: evidenceText,
       });
 
       if (lastVerdict === 'cleared' && panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit)) {
@@ -1680,12 +1778,12 @@ async function submitCreateComposerInput(
       const confirmationVerdict = assessComposerEvidence({
         beforeText: beforeScreen.text,
         afterText: confirmationScreen.text,
-        stagedText: input,
+        stagedText: evidenceText,
       });
       const unchangedSinceFirstSample = assessComposerEvidence({
         beforeText: afterScreen.text,
         afterText: confirmationScreen.text,
-        stagedText: input,
+        stagedText: evidenceText,
       }) === 'staged';
       const confirmationScreenHasFreshOutput = panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit);
       lastVerdict = confirmationVerdict;
@@ -1765,7 +1863,7 @@ async function createPaneItem(
     }
     createdWorktreePath = session.worktreePath;
 
-    const { panel, readiness, initialInput } = await createTerminalPanelForSession(services, session, tool, {
+    const { panel, readiness, initialInput, promptFile, warnings } = await createTerminalPanelForSession(services, session, tool, {
       activate: options.activate,
       waitReady: options.waitReady,
       readyTimeoutMs: options.readyTimeoutMs,
@@ -1787,6 +1885,8 @@ async function createPaneItem(
       focused: Boolean(panel.state.isActive),
       readiness,
       initialInput,
+      promptFile,
+      warnings,
     };
   } catch (error) {
     return createFailureItem(index, item, error, createdSessionId, createdWorktreePath);
@@ -2108,12 +2208,6 @@ function ensureSubmitEnter(input: string): string {
   return `${input}\r`;
 }
 
-function stripSubmitEnter(input: string): string {
-  if (input.endsWith('\r\n')) return input.slice(0, -2);
-  if (input.endsWith('\r') || input.endsWith('\n')) return input.slice(0, -1);
-  return input;
-}
-
 interface ComposerSubmit {
   strategy: 'codex-ctrl-enter' | 'enter';
   sequenceName: RunpanePanelSubmitComposerResult['sequenceName'];
@@ -2178,14 +2272,68 @@ async function submitComposerForPanel(
 async function waitForPanelScreen(
   panel: ToolPanel,
   isReady: (screen: RunpanePanelScreenResult) => boolean,
+  timeoutMs = CLAUDE_INPUT_WAIT_TIMEOUT_MS,
 ): Promise<RunpanePanelScreenResult> {
   const startedAt = Date.now();
   let screen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
-  while (!isReady(screen) && Date.now() - startedAt < CLAUDE_INPUT_WAIT_TIMEOUT_MS) {
+  while (!isReady(screen) && Date.now() - startedAt < timeoutMs) {
     await sleep(DEFAULT_COMPOSER_VERIFY_INTERVAL_MS);
     screen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
   }
   return screen;
+}
+
+interface StagedComposerText {
+  inputBytes: number;
+  /** What the composer shows for the staged text: the agent's paste marker, or the text. */
+  evidenceText: string;
+}
+
+/**
+ * Type text into a Claude or Codex composer and wait until it has landed, so
+ * the caller's Enter goes as its own write. Long or multi-line text goes as
+ * one bracketed paste (when the agent turned bracketed paste on): newlines
+ * stay text, and Enter waits for the paste marker or the text, then for the
+ * agent to stop drawing (bounded).
+ */
+async function stageComposerText(
+  panel: ToolPanel,
+  agentType: 'claude' | 'codex',
+  text: string,
+): Promise<StagedComposerText> {
+  const pasted = isLongPrompt(text) && terminalPanelManager.isBracketedPasteEnabled(panel.id);
+  const payload = pasted ? bracketedPaste(text) : text;
+  // A short Codex stage waits a fixed delay and reads no output.
+  const watchesEcho = agentType === 'claude' || pasted;
+  const outputGenerationBeforeStage = watchesEcho ? terminalPanelManager.getOutputGeneration(panel.id) : 0;
+  terminalPanelManager.writeToTerminal(panel.id, payload);
+  const landed = (screen: RunpanePanelScreenResult) =>
+    screen.composer.hasUndeliveredText && panelHasFreshOutputSince(panel.id, outputGenerationBeforeStage);
+
+  let screen: RunpanePanelScreenResult | undefined;
+  if (agentType === 'claude') {
+    screen = await waitForPanelScreen(panel, landed);
+  } else {
+    await sleep(CODEX_SUBMIT_STAGE_DELAY_MS);
+    if (pasted) screen = await waitForPanelScreen(panel, landed, CODEX_PASTE_ECHO_TIMEOUT_MS);
+  }
+  if (pasted) {
+    await waitForPanelOutputQuiet(panel.id);
+    screen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+  }
+
+  return {
+    inputBytes: Buffer.byteLength(payload, 'utf8'),
+    evidenceText: (pasted && screen ? composerEvidenceText(screen.text) : '') || text,
+  };
+}
+
+/** Wait until the panel has drawn nothing for a short window, bounded. */
+async function waitForPanelOutputQuiet(panelId: string): Promise<void> {
+  const startedAt = Date.now();
+  while (panelHasOutputWithin(panelId, PASTE_SETTLE_QUIET_MS) && Date.now() - startedAt < PASTE_SETTLE_MAX_MS) {
+    await sleep(DEFAULT_COMPOSER_VERIFY_INTERVAL_MS);
+  }
 }
 
 async function verifyComposerSubmitted(
@@ -2962,6 +3110,7 @@ function parsePanelSubmitRequest(value: PaneCommandValue): RunpanePanelSubmitReq
   return {
     panelId,
     input,
+    asFilePointer: optionalBoolean(value.asFilePointer),
   };
 }
 
@@ -3371,6 +3520,7 @@ function parseRunpaneToolSpec(value: PaneCommandValue, label: string): RunpaneTo
       agent,
       title: optionalString(value.title),
       initialInput: optionalString(value.initialInput),
+      initialInputAsFilePointer: optionalBoolean(value.initialInputAsFilePointer),
     };
   }
 
@@ -3385,6 +3535,7 @@ function parseRunpaneToolSpec(value: PaneCommandValue, label: string): RunpaneTo
       agentType,
       title: optionalString(value.title),
       initialInput: optionalString(value.initialInput),
+      initialInputAsFilePointer: optionalBoolean(value.initialInputAsFilePointer),
     };
   }
 
@@ -3499,6 +3650,7 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
       command: template.command,
       agent: tool.agent,
       initialInput: tool.initialInput,
+      initialInputAsFilePointer: tool.initialInputAsFilePointer,
     };
   }
 
@@ -3508,6 +3660,7 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
       title: tool.title ?? 'Terminal',
       command: tool.command,
       initialInput: tool.initialInput,
+      initialInputAsFilePointer: tool.initialInputAsFilePointer,
     };
   }
 
@@ -3519,6 +3672,7 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
     agent: declaredAgent,
     launchMode: resolveAgentTypeFromCommand(tool.command) === declaredAgent ? undefined : 'wrapped',
     initialInput: tool.initialInput,
+    initialInputAsFilePointer: tool.initialInputAsFilePointer,
   };
 }
 

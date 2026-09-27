@@ -204,6 +204,8 @@ export interface RunpaneAgentToolSpec {
   agent: RunpaneAgentId;
   title?: string;
   initialInput?: string;
+  /** Write initialInput to a prompt file and send `Read and follow <path>` instead (`--as-file-pointer`). */
+  initialInputAsFilePointer?: boolean;
 }
 
 export interface RunpaneCommandToolSpec {
@@ -212,6 +214,8 @@ export interface RunpaneCommandToolSpec {
   agentType?: RunpaneAgentId;
   title?: string;
   initialInput?: string;
+  /** Write initialInput to a prompt file and send `Read and follow <path>` instead (`--as-file-pointer`). */
+  initialInputAsFilePointer?: boolean;
 }
 
 export type RunpaneToolSpec = RunpaneAgentToolSpec | RunpaneCommandToolSpec;
@@ -322,6 +326,18 @@ export interface RunpaneInitialInputDeliveryResult {
   nextCommand?: string;
 }
 
+/** A leading character Claude Code gives a meaning of its own; Pane sends the text unchanged. */
+export type RunpanePromptWarningCode =
+  | 'leading-bang-runs-shell'
+  | 'leading-hash-memory'
+  | 'leading-slash-command'
+  | 'leading-at-mention';
+
+export interface RunpanePromptWarning {
+  code: RunpanePromptWarningCode;
+  message: string;
+}
+
 export interface RunpanePaneCreateSuccessItem {
   ok: boolean;
   index: number;
@@ -341,6 +357,9 @@ export interface RunpanePaneCreateSuccessItem {
   focused?: boolean;
   readiness?: RunpanePaneReadiness;
   initialInput?: RunpaneInitialInputDeliveryResult;
+  /** The prompt file Pane wrote for `--as-file-pointer`. */
+  promptFile?: string;
+  warnings?: RunpanePromptWarning[];
 }
 
 export interface RunpanePaneCreateFailureItem {
@@ -580,6 +599,9 @@ export interface RunpanePanelCreateResult {
   };
   readiness?: RunpanePaneReadiness;
   initialInput?: RunpaneInitialInputDeliveryResult;
+  /** The prompt file Pane wrote for `--as-file-pointer`. */
+  promptFile?: string;
+  warnings?: RunpanePromptWarning[];
   nextCommand?: string;
 }
 
@@ -645,6 +667,8 @@ export interface RunpanePanelInputResult {
 export interface RunpanePanelSubmitRequest {
   panelId: string;
   input: string;
+  /** Write the text to a prompt file and submit `Read and follow <path>` instead. */
+  asFilePointer?: boolean;
 }
 
 export type RunpanePanelVerification = 'observed' | 'unverifiable';
@@ -661,6 +685,9 @@ export interface RunpanePanelSubmitResult {
   verification?: RunpanePanelVerification;
   sentAt: string;
   blocked?: RunpanePanelBlockedState;
+  /** The prompt file Pane wrote for `asFilePointer`. */
+  promptFile?: string;
+  warnings?: RunpanePromptWarning[];
   nextCommand?: string;
 }
 
@@ -739,4 +766,5 @@ export interface RunpaneResolvedTool {
   /** `wrapped` when `command` is a wrapper that runs `agent`; Pane launches it unchanged. */
   launchMode?: 'wrapped';
   initialInput?: string;
+  initialInputAsFilePointer?: boolean;
 }

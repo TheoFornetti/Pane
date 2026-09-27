@@ -42,6 +42,8 @@ vi.spyOn(terminalPanelManager, 'getInputScreenText');
 vi.spyOn(terminalPanelManager, 'deliverPendingInitialInput');
 vi.spyOn(terminalPanelManager, 'getAgentStatus');
 vi.spyOn(terminalPanelManager, 'getForegroundProcess');
+vi.spyOn(terminalPanelManager, 'isBracketedPasteEnabled');
+vi.spyOn(terminalPanelManager, 'launchShellReadsPromptFile');
 vi.spyOn(panelDatabase, 'getPanelBuffers');
 vi.spyOn(usageManager, 'getPaneCosts');
 
@@ -308,6 +310,8 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.deliverPendingInitialInput).mockReset();
     vi.mocked(terminalPanelManager.getAgentStatus).mockReset();
     vi.mocked(terminalPanelManager.getForegroundProcess).mockReset().mockReturnValue(undefined);
+    vi.mocked(terminalPanelManager.isBracketedPasteEnabled).mockReset().mockReturnValue(false);
+    vi.mocked(terminalPanelManager.launchShellReadsPromptFile).mockReset().mockReturnValue(true);
     vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValue(0);
     vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('idle');
     vi.mocked(usageManager.getPaneCosts).mockReturnValue({
@@ -3743,6 +3747,330 @@ describe('runpane IPC handlers', () => {
         }
       }
     }
+  });
+
+  describe('intact prompt delivery', () => {
+    const rule = '─'.repeat(40);
+    const claudeComposer = (content: string) => `${rule}\n❯ ${content}\n${rule}\n`;
+
+    function createdTerminalPanel(request: CreatePanelRequest): ToolPanel {
+      return {
+        id: 'panel-1',
+        sessionId: session.id,
+        type: 'terminal',
+        title: request.title ?? '',
+        // SAFETY: The terminal panel mock keeps the terminal customState it was created with.
+        state: { isActive: false, customState: { ...(request.initialState as TerminalPanelState) } },
+        metadata: { createdAt: '2026-01-01T00:00:00.000Z', lastActiveAt: '2026-01-01T00:01:00.000Z', position: 0 },
+      };
+    }
+
+    function createdInitialState(): TerminalPanelState {
+      // SAFETY: createPanel was invoked for a terminal panel, so initialState is the terminal customState.
+      return vi.mocked(panelManager.createPanel).mock.calls[0]?.[0].initialState as TerminalPanelState;
+    }
+
+    it('pastes multi-line Claude text as one bracketed paste and presses Enter alone once the paste settles', async () => {
+      vi.useFakeTimers();
+      vi.mocked(terminalPanelManager.isBracketedPasteEnabled).mockReturnValue(true);
+      let stagedAt = -1;
+      let enterAt = -1;
+      vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, data) => {
+        if (data === '\r') enterAt = Date.now();
+        else stagedAt = Date.now();
+      });
+      vi.mocked(terminalPanelManager.getOutputGeneration).mockImplementation(() => (stagedAt < 0 ? 0 : enterAt < 0 ? 1 : 2));
+      // Claude keeps drawing the paste for 600ms after it arrives.
+      vi.mocked(terminalPanelManager.getLastOutputAt).mockImplementation(() => (stagedAt < 0 || enterAt >= 0
+        ? undefined
+        : new Date(Math.min(Date.now(), stagedAt + 600)).toISOString()));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => terminalSnapshot(
+        stagedAt < 0
+          ? claudeComposer('')
+          : enterAt < 0 ? claudeComposer('[Pasted text #1 +2 lines]') : `✻ Working\n${claudeComposer('')}`,
+        enterAt < 0 ? 'idle' : 'active',
+        'claude',
+      ));
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{
+        panelId: terminalPanel.id,
+        input: 'First line\r\nSecond line\r\nThird line\r\n',
+      }]);
+      await vi.advanceTimersByTimeAsync(10_000);
+      const result = await pending;
+
+      const paste = '\x1b[200~First line\nSecond line\nThird line\x1b[201~';
+      expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([
+        [terminalPanel.id, paste],
+        [terminalPanel.id, '\r'],
+      ]);
+      expect(enterAt - stagedAt).toBeGreaterThanOrEqual(600 + 300);
+      expect(result).toMatchObject({
+        ok: true,
+        verifiedSubmitted: true,
+        inputBytes: Buffer.byteLength(paste, 'utf8') + 1,
+      });
+    });
+
+    it('pastes long single-line Codex text before the Codex submit sequence', async () => {
+      vi.useFakeTimers();
+      vi.mocked(terminalPanelManager.isBracketedPasteEnabled).mockReturnValue(true);
+      const text = 'x'.repeat(600);
+      let staged = false;
+      let submitted = false;
+      vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, data) => {
+        if (data === '\x1b[13;5u\r') submitted = true;
+        else staged = true;
+      });
+      vi.mocked(terminalPanelManager.getOutputGeneration).mockImplementation(() => (submitted ? 2 : staged ? 1 : 0));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => (submitted
+        ? terminalSnapshot('Working\n›', 'active')
+        : terminalSnapshot(staged ? '› [Pasted Content 600 chars]' : '› Ask Codex to do anything', 'idle')));
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: text }]);
+      await vi.advanceTimersByTimeAsync(10_000);
+      const result = await pending;
+
+      expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([
+        [terminalPanel.id, `\x1b[200~${text}\x1b[201~`],
+        [terminalPanel.id, '\x1b[13;5u\r'],
+      ]);
+      expect(result).toMatchObject({ ok: true, sequenceName: 'codex-ctrl-enter-cr', verifiedSubmitted: true });
+    });
+
+    it('types short single-line text without a paste even when the agent accepts one', async () => {
+      vi.useFakeTimers();
+      vi.mocked(terminalPanelManager.isBracketedPasteEnabled).mockReturnValue(true);
+      let staged = false;
+      let enters = 0;
+      vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, data) => {
+        if (data === '\r') enters += 1;
+        else staged = true;
+      });
+      vi.mocked(terminalPanelManager.getOutputGeneration).mockImplementation(() => (staged ? enters + 1 : 0));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => terminalSnapshot(
+        !staged ? claudeComposer('') : enters === 0 ? claudeComposer('Continue') : `✻ Working\n${claudeComposer('')}`,
+        'idle',
+        'claude',
+      ));
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Continue\n' }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await pending;
+
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(1, terminalPanel.id, 'Continue');
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(2, terminalPanel.id, '\r');
+    });
+
+    it('stages text for a busy Claude and sends Enter on its own, which Claude queues', async () => {
+      vi.useFakeTimers();
+      let staged = false;
+      let enters = 0;
+      vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, data) => {
+        if (data === '\r') enters += 1;
+        else staged = true;
+      });
+      vi.mocked(terminalPanelManager.getOutputGeneration).mockImplementation(() => (staged ? enters + 1 : 0));
+      vi.mocked(terminalPanelManager.getLastOutputAt).mockImplementation(() => new Date().toISOString());
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => terminalSnapshot(
+        `✻ Running 3 subagents… (esc to interrupt)\n${claudeComposer(staged && enters === 0 ? 'Also check the tests' : '')}`,
+        'active',
+        'claude',
+      ));
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{
+        panelId: terminalPanel.id,
+        input: 'Also check the tests',
+      }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await pending;
+
+      expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([
+        [terminalPanel.id, 'Also check the tests'],
+        [terminalPanel.id, '\r'],
+      ]);
+      expect(result).toMatchObject({ ok: true, verifiedSubmitted: true });
+    });
+
+    it('writes the prompt to a private file and submits a one-line pointer to it', async () => {
+      vi.useFakeTimers();
+      let staged = false;
+      let enters = 0;
+      let stagedText = '';
+      vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, data) => {
+        if (data === '\r') enters += 1;
+        else {
+          staged = true;
+          stagedText = data;
+        }
+      });
+      vi.mocked(terminalPanelManager.getOutputGeneration).mockImplementation(() => (staged ? enters + 1 : 0));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => terminalSnapshot(
+        !staged ? claudeComposer('') : enters === 0 ? claudeComposer(stagedText) : `✻ Working\n${claudeComposer('')}`,
+        'idle',
+        'claude',
+      ));
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{
+        panelId: terminalPanel.id,
+        input: '!Line one\r\nLine two\r\n',
+        asFilePointer: true,
+      }]);
+      // The prompt file is written with real I/O before anything is typed.
+      await vi.waitFor(() => expect(terminalPanelManager.writeToTerminal).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(5_000);
+      // SAFETY: The panels:submit handler resolves to a RunpanePanelSubmitResult.
+      const result = await pending as { promptFile?: string; warnings?: unknown; ok: boolean };
+
+      const promptFile = result.promptFile ?? '';
+      expect(path.dirname(promptFile)).toBe(path.join(process.env.PANE_DIR ?? '', 'prompts', session.id));
+      expect(fs.readFileSync(promptFile, 'utf8')).toBe('!Line one\nLine two\n');
+      if (process.platform !== 'win32') {
+        expect(fs.statSync(promptFile).mode & 0o777).toBe(0o600);
+      }
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(1, terminalPanel.id, `Read and follow ${promptFile}`);
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(2, terminalPanel.id, '\r');
+      // The pointer line, not the file's `!`, is what Claude reads.
+      expect(result.warnings).toBeUndefined();
+      expect(result.ok).toBe(true);
+    });
+
+    it('warns without rewriting when Claude text starts with a character Claude gives a meaning', async () => {
+      vi.useFakeTimers();
+      let staged = false;
+      let enters = 0;
+      vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, data) => {
+        if (data === '\r') enters += 1;
+        else staged = true;
+      });
+      vi.mocked(terminalPanelManager.getOutputGeneration).mockImplementation(() => (staged ? enters + 1 : 0));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => terminalSnapshot(
+        !staged ? claudeComposer('') : enters === 0 ? claudeComposer('! git status') : `✻ Working\n${claudeComposer('')}`,
+        'idle',
+        'claude',
+      ));
+
+      const pending = createRegistry().invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: '! git status' }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await pending;
+
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(1, terminalPanel.id, '! git status');
+      expect(result).toMatchObject({ warnings: [{ code: 'leading-bang-runs-shell' }] });
+    });
+
+    it('launches a long or multi-line create prompt from a private prompt file instead of typing it', async () => {
+      vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
+
+      await createRegistry().invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'long', tool: { agent: 'claude', initialInput: 'Line one with !bang\r\nLine two\r\n' } }],
+      }]);
+
+      const state = createdInitialState();
+      expect(state).toMatchObject({
+        initialInput: 'Line one with !bang\nLine two',
+        initialInputMode: 'argument',
+        initialInputSubmitStrategy: 'enter',
+      });
+      expect(path.dirname(state.initialInputFile ?? '')).toBe(path.join(process.env.PANE_DIR ?? '', 'prompts', session.id));
+      expect(fs.readFileSync(state.initialInputFile ?? '', 'utf8')).toBe('Line one with !bang\nLine two\n');
+    });
+
+    it('keeps a short single-line create prompt as a launch argument', async () => {
+      vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
+
+      await createRegistry().invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'short', tool: { agent: 'claude', initialInput: 'Plan issue 42' } }],
+      }]);
+
+      expect(createdInitialState()).toMatchObject({ initialInput: 'Plan issue 42', initialInputMode: 'argument' });
+      expect(createdInitialState().initialInputFile).toBeUndefined();
+    });
+
+    it.each([
+      ['claude', 'enter'],
+      ['codex', 'codex-ctrl-enter'],
+    ] as const)('hands a long %s create prompt to the composer when the shell cannot read a prompt file', async (agent, strategy) => {
+      vi.mocked(terminalPanelManager.launchShellReadsPromptFile).mockReturnValue(false);
+      vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
+
+      await createRegistry().invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'pwsh', tool: { agent, initialInput: 'Line one\nLine two' } }],
+      }]);
+
+      const state = createdInitialState();
+      expect(state.initialInputMode).toBeUndefined();
+      expect(state.initialInputFile).toBeUndefined();
+      expect(state).toMatchObject({ initialInput: 'Line one\nLine two', initialInputSubmitStrategy: strategy });
+    });
+
+    it('sends a create prompt as a pointer to its file with --as-file-pointer', async () => {
+      vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
+
+      // SAFETY: The panes:create handler resolves to a RunpanePaneCreateResult.
+      const result = await createRegistry().invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{
+          name: 'pointer',
+          tool: { agent: 'codex', initialInput: 'Step one\nStep two', initialInputAsFilePointer: true },
+        }],
+      }]) as { items: Array<{ promptFile?: string }> };
+
+      const promptFile = result.items[0]?.promptFile ?? '';
+      expect(fs.readFileSync(promptFile, 'utf8')).toBe('Step one\nStep two\n');
+      expect(createdInitialState()).toMatchObject({
+        initialInput: `Read and follow ${promptFile}`,
+        initialInputMode: 'argument',
+      });
+      expect(createdInitialState().initialInputFile).toBeUndefined();
+    });
+
+    it('stages a wrapped Claude\'s long create prompt as a paste and submits it with its own Enter', async () => {
+      vi.useFakeTimers();
+      vi.mocked(terminalPanelManager.isBracketedPasteEnabled).mockReturnValue(true);
+      vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
+      vi.mocked(panelManager.getPanel).mockImplementation(() => {
+        const request = vi.mocked(panelManager.createPanel).mock.calls[0]?.[0];
+        return request ? createdTerminalPanel(request) : undefined;
+      });
+      let staged = false;
+      let enters = 0;
+      vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, data) => {
+        if (data === '\r') enters += 1;
+        else staged = true;
+      });
+      vi.mocked(terminalPanelManager.getOutputGeneration).mockImplementation(() => (staged ? enters + 1 : 0));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => terminalSnapshot(
+        !staged ? claudeComposer('') : enters === 0 ? claudeComposer('[Pasted text #1 +1 lines]') : `✻ Working\n${claudeComposer('')}`,
+        enters === 0 ? 'idle' : 'active',
+        'claude',
+      ));
+
+      const pending = createRegistry().invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        waitReady: true,
+        readyTimeoutMs: 100,
+        panes: [{
+          name: 'farm',
+          tool: { command: 'agent-farm run free-range', agentType: 'claude', initialInput: 'Line one\nLine two' },
+        }],
+      }]);
+      await vi.advanceTimersByTimeAsync(20_000);
+      const result = await pending;
+
+      expect(createdInitialState()).toMatchObject({ launchMode: 'wrapped', initialInputSubmitStrategy: 'enter' });
+      expect(createdInitialState().initialInputMode).toBeUndefined();
+      expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([
+        ['panel-1', '\x1b[200~Line one\nLine two\x1b[201~'],
+        ['panel-1', '\r'],
+      ]);
+      expect(result).toMatchObject({
+        ok: true,
+        items: [{ ok: true, initialInput: { submitted: true, verifiedSubmitted: true } }],
+      });
+    });
   });
 
   describe('runpane:panes:archive', () => {

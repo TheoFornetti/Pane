@@ -13,6 +13,9 @@ All notable changes to Pane will be documented in this file.
   ```
 
   Pane Chat arms this automatically through its pane-orchestrator skill, so you only need the flags for your own scripts. `runpane watch --help`, `runpane agent-context --command watch --json`, and `runpane doctor` (which now prints the effective watch defaults) document every flag with its default.
+- `runpane watch --quiet` (alias `--no-control-lines`) drops the control lines that only prove liveness (`WATCH OK`, `HEARTBEAT`, `WATCH RECONNECTED`; `_ok`, `_heartbeat`, `_reconnected` in JSON). `WATCH ERROR`, `RESET`, and `DROPPED` always print. Under `--follow`, JSON entries now carry `heldInputPresent: true`, the JSON form of `STUCK`.
+- A "user present" watch profile (`--settle 60000 --blocked-settle 15000 --min-interval 120000`, no `--idle-backoff`) documented next to the unattended one, for when someone is waiting on the result: READY arrives within about 3 minutes instead of 13.
+- `runpane panes archive` explains a skipped safety check: `safetyCheck.reason` is `external-worktree`, `main-repo`, `missing-project-context`, or `git-error`, and `worktreeWillRemain: true` marks an archive that leaves the worktree on disk.
 - Cursor Agent CLI (`cursor-agent`) as a third built-in agent tool: launch pill/menu entries with `mod+alt+5`, prompt-as-argument delivery, chat pre-creation with resume-after-restart, at-a-glance status detection, RunPane `--agent cursor` support with a doctor fallback probe for `~/.local/bin`, and a Cursor option for the Pane Chat orchestrator. Pane supports Cursor in macOS, Linux, and WSL repositories. Native Windows launches stay disabled.
 
 ### Changed
@@ -20,11 +23,17 @@ All notable changes to Pane will be documented in this file.
 - Cursor Agent is now available inside WSL repositories.
 - `runpane watch` defaults are unchanged and stay responsive: no settle, no batching, all event kinds, IDLE every 10 minutes, HEARTBEAT every 60 seconds under `--follow`.
 - The Pane Chat orchestrator's Liveness Contract now arms the cadence flags above, filters HEARTBEAT out of its monitor, and judges a dead watch by a non-zero exit or a `WATCH ERROR` line rather than by silence.
+- The Pane Chat orchestrator arms its Session watcher with `--quiet` and the cursor `session-<uuid>`, documents both watch profiles, dispatches long prompts as a one-line pointer to a prompt file, and tells workers to wait for shared resources instead of taking them over.
+- `runpane agent-context --command <unknown>` exits 2 with the closest command names. With `--json` it prints `{ ok: false, code: "unknown_command", message, candidates }` on stdout instead of plain text on stderr.
+- `runpane panes create` shows `--base-branch` in its usage line, and daemon command usage lines show `[--pane-dir <path>]`.
 
 ### Fixed
 - Pane Chat has its skills again. Pane synced its agents' skills from the skills repository, which moved them on 2026-08-13; every sync since then failed, and new installs had none. Pane now ships 37 skills: Agent Farm's current raw-profile skills and their helpers, general-purpose primitives such as `verify-app`, `options`, `brief`, and `orchestrate-sessions`, and three Pane-specific ones (`pane-orchestrator`, `runpane`, `pane-work`). It also installs four helper subagents (explorer, cold-reader, qa-and-verify, reviewer) for Claude and Codex Sessions. The skill sync is removed, and Pane deletes its old sync folders.
 - `runpane panels submit` now submits prompts to Claude panes instead of leaving them in the composer. Pane waits for Claude's composer, types the prompt, and presses Enter separately once the text shows, so a pane created with `--wait-ready` and submitted to right away starts the turn. `verifiedSubmitted` is true only when Claude's composer is seen empty afterwards.
 - `runpane panels screen` reports `composer.hasUndeliveredText` for Claude panes. It used to read false for every Claude pane, even with a prompt sitting in the composer. Claude's dim placeholder suggestion does not count.
+- `runpane watch` named cursors may be up to 128 characters, so `session-<full session id>` works. The CLI shortens a derived cursor name longer than 64 characters (the `PANE_PANEL_ID` default in orchestrator panels) to `panel-<sha256 prefix>`, which older daemons accept.
+- `runpane watch --session` fails with a clear error instead of being silently ignored; Session-scoped watch comes later.
+- `runpane agent-context` and `runpane version` accept and ignore `--pane-dir`, so one `--pane-dir` works for every command.
 - `runpane watch` no longer reports STUCK for the grey prompt suggestion Claude Code shows in an empty composer. STUCK now means real unsubmitted composer text.
 
 ## [1.1.123] - 2026-04-25

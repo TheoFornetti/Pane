@@ -180,19 +180,42 @@ stale.
 Use one durable, named watcher per Session, scoped to every associated Pane:
 
 ```text
-runpane watch --as session-<session-id> --follow --pane <pane-id> \
+runpane watch --as session-<uuid> --follow --quiet --pane <pane-id> \
   --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone \
   --settle 180000 --blocked-settle 30000 --min-interval 600000 \
   --idle-backoff --json
 ```
 
+`<uuid>` is the UUID inside the Session ID: the Session
+`__orchestration_session_<uuid>__` uses the cursor `session-<uuid>`. Cursor
+names may be up to 128 characters (64 before this release); when runpane
+derives a name itself, such as the `PANE_PANEL_ID` default, it shortens one
+longer than 64 characters to `panel-<first 12 hex characters of its sha256>`.
+
 Repeat `--pane` for each associated Pane. A discussion-only Session has no
-follow watcher; never omit `--pane` to watch all Panes. After an associate or
-detach mutation, refresh `sessions overview` and re-arm the same cursor with
-the current Pane set. On restart, retain the `session-<session-id>` cursor and
-capture a fresh output baseline before interpreting notifications. Return
-blocked and decision findings to the Session conversation. Terminal idle or
-exit remains activity evidence only.
+follow watcher; never omit `--pane` to watch all Panes. `watch --session` is
+not supported yet and fails rather than watching everything. After an
+associate or detach mutation, refresh `sessions overview` and re-arm the same
+cursor with the current Pane set. On restart, retain the `session-<uuid>`
+cursor and capture a fresh output baseline before interpreting notifications.
+Return blocked and decision findings to the Session conversation. Terminal
+idle or exit remains activity evidence only.
+
+`--quiet` (alias `--no-control-lines`) drops the control lines that only prove
+liveness: `_ok`, `_heartbeat`, and `_reconnected` (`WATCH OK`, `HEARTBEAT`,
+and `WATCH RECONNECTED` in lines mode). `_error`, `_reset`, and `_dropped`
+always print. Under `--follow`, JSON entries for a panel holding unsent
+composer text carry `heldInputPresent: true`, the JSON form of `STUCK`.
+
+### Watch profiles
+
+| Profile | When | Flags | Worst-case READY delay |
+|---|---|---|---|
+| Unattended (default) | Overnight or background runs; every wake-up costs a full context replay | `--settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff` | about 13 minutes |
+| User present | Someone is waiting on the result | `--settle 60000 --blocked-settle 15000 --min-interval 120000`, no `--idle-backoff` | about 3 minutes |
+
+Both profiles use the same `--kinds` list, `--quiet`, and named cursor.
+Switch profiles by re-arming the same cursor.
 
 ## Skill contract
 

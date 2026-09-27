@@ -448,6 +448,106 @@ describe('runpane IPC handlers', () => {
       );
     });
 
+    function createAdoptWorktree(name: string) {
+      const repoPath = createTempGitRepo(`${name}-repo`);
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      const worktreePath = path.join(path.dirname(repoPath), `${name}-worktree`);
+      execFileSync('git', ['worktree', 'add', '-b', name, worktreePath], { cwd: repoPath, stdio: 'ignore' });
+      return { repoPath, worktreePath };
+    }
+
+    it('launches an adopted agent with a prompt and reports its delivery like create', async () => {
+      const { repoPath, worktreePath } = createAdoptWorktree('prompt-adopt');
+      const services = adoptionServices(repoPath, worktreePath);
+      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+      const claudePanel = {
+        ...terminalPanel,
+        title: 'Claude Code',
+        state: { isActive: false, customState: { agentType: 'claude', initialInputSentAt: '2026-01-01T00:02:00.000Z' } },
+      } as ToolPanel;
+      vi.mocked(panelManager.createPanel).mockResolvedValue(claudePanel);
+      vi.mocked(panelManager.getPanel).mockReturnValue(claudePanel);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
+        ...terminalSnapshot(`${'─'.repeat(40)}\n❯ \n${'─'.repeat(40)}\n`, 'idle', 'claude'),
+      });
+
+      const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        waitReady: true,
+        readyTimeoutMs: 100,
+        panes: [{
+          path: worktreePath,
+          name: 'Adopted',
+          tool: { agent: 'claude', initialInput: 'Read and follow prompt.md' },
+          launch: true,
+        }],
+      }]);
+
+      expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
+        initialState: expect.objectContaining({
+          initialCommand: RUNPANE_CONTRACT.agentTemplates.claude.command,
+          initialInput: 'Read and follow prompt.md',
+          initialInputMode: 'argument',
+          agentType: 'claude',
+        }),
+        activate: false,
+      }));
+      expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+      expect(result, JSON.stringify(result)).toMatchObject({
+        ok: true,
+        items: [{
+          ok: true,
+          sessionId: session.id,
+          panelId: claudePanel.id,
+          readiness: { ok: true, condition: 'ready' },
+          initialInput: { delivered: true, submitted: true, strategy: 'argument', verifiedSubmitted: true },
+          nextCommand: expect.stringContaining(`--panel ${claudePanel.id}`),
+        }],
+      });
+    });
+
+    it('sends a resumed conversation its prompt through the composer', async () => {
+      const { repoPath, worktreePath } = createAdoptWorktree('resume-prompt-adopt');
+      const services = adoptionServices(repoPath, worktreePath);
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
+
+      const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        panes: [{
+          path: worktreePath,
+          name: 'Adopted',
+          tool: { agent: 'codex', initialInput: 'Continue with step 2' },
+          resume: 'thread-1',
+          launch: true,
+        }],
+      }]);
+
+      expect(result).toMatchObject({ ok: true, items: [{ ok: true }] });
+      const initialState = vi.mocked(panelManager.createPanel).mock.calls[0][0].initialState;
+      expect(initialState).toMatchObject({
+        initialCommand: RUNPANE_CONTRACT.agentTemplates.codex.command,
+        initialInput: 'Continue with step 2',
+        initialInputSubmitStrategy: 'codex-ctrl-enter',
+        agentSessionId: 'thread-1',
+        hasClaudeSessionId: false,
+      });
+      expect(initialState).not.toHaveProperty('initialInputMode');
+    });
+
+    it('refuses an adopt prompt without launch instead of dropping it', async () => {
+      const { repoPath, worktreePath } = createAdoptWorktree('unlaunched-prompt-adopt');
+      const services = adoptionServices(repoPath, worktreePath);
+
+      await expect(createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        panes: [{ path: worktreePath, name: 'Adopted', tool: { agent: 'codex', initialInput: 'Do the thing' } }],
+      }])).rejects.toThrow('has a prompt but no launch');
+      expect(services.sessionManager.createSession).not.toHaveBeenCalled();
+      expect(panelManager.createPanel).not.toHaveBeenCalled();
+    });
+
     it('rolls back the pane record when terminal setup fails', async () => {
       const repoPath = createTempGitRepo('rollback-adopt-repo');
       execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
@@ -2527,6 +2627,80 @@ describe('runpane IPC handlers', () => {
         focused: false,
         nextCommand: 'runpane panels output --panel panel-1 --limit 200 --json',
       }],
+    });
+  });
+
+  describe('panes create --branch', () => {
+    function branchServices(existingBranches: string[] = []): AppServices {
+      const repoPath = createTempGitRepo('branch-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      execFileSync('git', ['branch', 'release/foo'], { cwd: repoPath, stdio: 'ignore' });
+      for (const branch of existingBranches) {
+        execFileSync('git', ['branch', branch], { cwd: repoPath, stdio: 'ignore' });
+      }
+      const branchProject = { ...project, path: repoPath };
+      // SAFETY: This session-manager double implements the project-context lookup the create handler uses.
+      return createServices({
+        databaseService: { ...createServices().databaseService, getAllProjects: vi.fn(() => [branchProject]) },
+        sessionManager: {
+          ...createServices().sessionManager,
+          getProjectContextByProjectId: vi.fn(() => ({ commandRunner: new CommandRunner(branchProject) })),
+        } as never,
+      });
+    }
+
+    it('passes the exact requested branch and base to pane creation', async () => {
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      const services = branchServices();
+
+      const result = await createRegistry(services).invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'w5a', branch: 'agents/x', baseBranch: 'release/foo', tool: { agent: 'codex' } }],
+      }]);
+
+      expect(result).toMatchObject({ ok: true, items: [{ ok: true }] });
+      expect(services.taskQueue?.createSessionAndWait).toHaveBeenCalledWith(
+        expect.objectContaining({ worktreeTemplate: 'w5a', branchName: 'agents/x', baseBranch: 'release/foo' }),
+        expect.anything(),
+      );
+    });
+
+    it('fails an existing or invalid branch before queueing, including in dry runs', async () => {
+      const services = branchServices(['agents/taken']);
+      const registry = createRegistry(services);
+
+      const existing = await registry.invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'w5a', branch: 'agents/taken', tool: { agent: 'codex' } }],
+      }]);
+      const invalid = await registry.invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        dryRun: true,
+        panes: [
+          { name: 'ok', branch: 'agents/new', tool: { agent: 'codex' } },
+          { name: 'bad', branch: 'agents/bad..name', tool: { agent: 'codex' } },
+        ],
+      }]);
+
+      expect(existing).toMatchObject({
+        ok: false,
+        items: [{ ok: false, error: { message: expect.stringContaining("Branch 'agents/taken' already exists") } }],
+      });
+      expect(invalid).toMatchObject({
+        ok: false,
+        items: [{ ok: true, name: 'ok' }, { ok: false, name: 'bad', error: { message: expect.stringContaining('check-ref-format') } }],
+      });
+      expect(services.taskQueue?.createSessionAndWait).not.toHaveBeenCalled();
+    });
+
+    it('refuses the same branch twice in one request', async () => {
+      await expect(createRegistry(branchServices()).invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [
+          { name: 'a', branch: 'agents/x', tool: { agent: 'codex' } },
+          { name: 'b', branch: 'agents/x', tool: { agent: 'codex' } },
+        ],
+      }])).rejects.toThrow("names branch 'agents/x' more than once");
     });
   });
 

@@ -13,6 +13,7 @@ import { databaseService as panelDatabase } from '../services/database';
 import type { PanelBuffers } from '../database/panelBuffers';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
 import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
+import { assertNewBranchName } from '../services/worktreeManager';
 import { assessComposerEvidence, isSlashCommandInput } from './runpaneComposerEvidence';
 import { projectWorkspaceEntry } from '../services/workspaceJournal';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
@@ -639,17 +640,21 @@ export function registerRunpaneHandlers(
       const repoSummary = projectToRepoSummary(repo, sessionManager.getSessionsForProject(repo.id).length);
 
       if (normalized.dryRun) {
-        return {
-          ok: true,
-          repo: repoSummary,
-          items: normalized.panes.map((pane, index) => ({
+        const items = await mapSequentially(normalized.panes, async (pane, index): Promise<RunpanePaneCreateResultItem> => {
+          try {
+            await validateRequestedBranch(services, repo, pane.branch);
+          } catch (error) {
+            return createFailureItem(index, pane, error);
+          }
+          return {
             ok: true,
             index,
             name: pane.name,
             pinned: Boolean(pane.pinned),
             tool: describeTool(resolveToolSpec(pane.tool, new PathResolver(repo).environment)),
-          })),
-        };
+          };
+        });
+        return { ok: items.every(item => item.ok), repo: repoSummary, items };
       }
 
       if (!taskQueue) {
@@ -727,31 +732,21 @@ export function registerRunpaneHandlers(
             panelManager.ensureDiffPanel(session.id),
           ]);
 
-          const initialState: TerminalPanelState = {
-            initialCommand: item.launch ? tool.command : undefined,
-            agentType: tool.agent,
-            agentSessionId: item.resume,
-            hasClaudeSessionId: tool.agent === 'claude' && Boolean(item.resume),
-            isCliPanel: Boolean(tool.agent),
-          };
-          const panel = await panelManager.createPanel({
-            sessionId: session.id,
-            type: 'terminal',
-            title: tool.title,
-            initialState,
-            activate: normalized.focus === true,
-          });
-          const context = sessionManager.getProjectContext(session.id);
-          await terminalPanelManager.initializeTerminal(panel, storedWorktreePath, context?.commandRunner.wslContext ?? null);
-          if (!item.launch) {
-            await terminalPanelManager.stageInitialCommand(panel.id, tool.command);
-          }
+          // Announce the Pane before any readiness wait, as `panes create` does.
           sessionManager.emitSessionCreated(stoppedSession, {
             activateOnCreate: normalized.focus === true,
             createDefaultTerminalOnCreate: false,
           });
+          const launch = item.launch === true;
+          const { panel, readiness, initialInput } = await createTerminalPanelForSession(services, stoppedSession, tool, {
+            activate: normalized.focus === true,
+            launch,
+            agentSessionId: item.resume,
+            waitReady: launch && normalized.waitReady,
+            readyTimeoutMs: normalized.readyTimeoutMs,
+          });
           items.push({
-            ok: true,
+            ok: Boolean((!readiness || readiness.ok) && (!initialInput || initialInput.submitted)),
             index,
             name: item.name,
             pinned: item.pinned !== false,
@@ -762,7 +757,9 @@ export function registerRunpaneHandlers(
             tool: describeTool(tool),
             active: Boolean(panel.state.isActive),
             focused: Boolean(panel.state.isActive),
-            nextCommand: panelOutputCommand(panel.id),
+            readiness,
+            initialInput,
+            nextCommand: initialInput?.nextCommand ?? readiness?.nextCommand ?? panelOutputCommand(panel.id),
           });
         } catch (error) {
           let failureSessionId = createdSessionId;
@@ -1403,6 +1400,10 @@ interface TerminalPanelCreateOptions {
   activate?: boolean;
   waitReady?: boolean;
   readyTimeoutMs?: number;
+  /** false types the launch command at the shell prompt without running it (`panes adopt` without `--launch`). */
+  launch?: boolean;
+  /** Agent conversation to resume instead of starting a new one (`panes adopt --resume`). */
+  agentSessionId?: string;
 }
 
 interface TerminalPanelCreateResult {
@@ -1417,15 +1418,19 @@ async function createTerminalPanelForSession(
   tool: RunpaneResolvedTool,
   options: TerminalPanelCreateOptions,
 ): Promise<TerminalPanelCreateResult> {
-  const useArgumentDelivery = shouldUseArgumentDelivery(tool);
+  const launch = options.launch !== false;
+  const waitReady = launch && options.waitReady;
+  // A resumed conversation launches without the prompt argument, so its
+  // prompt goes through the composer once the agent is ready.
+  const useArgumentDelivery = !options.agentSessionId && shouldUseArgumentDelivery(tool);
   const shouldCreateSubmitInitialInput = Boolean(
-    options.waitReady &&
+    waitReady &&
     tool.agent &&
     tool.initialInput &&
     !useArgumentDelivery,
   );
   const initialState: TerminalPanelState = {
-    initialCommand: tool.command,
+    initialCommand: launch ? tool.command : undefined,
     initialInput: tool.initialInput,
     initialInputSubmitStrategy: tool.agent === 'codex' && !useArgumentDelivery
       ? 'codex-ctrl-enter'
@@ -1433,6 +1438,10 @@ async function createTerminalPanelForSession(
     agentType: tool.agent,
     isCliPanel: Boolean(tool.agent),
   };
+  if (options.agentSessionId) {
+    initialState.agentSessionId = options.agentSessionId;
+    initialState.hasClaudeSessionId = tool.agent === 'claude';
+  }
   if (useArgumentDelivery) {
     initialState.initialInputMode = 'argument';
   }
@@ -1457,8 +1466,11 @@ async function createTerminalPanelForSession(
     session.worktreePath,
     context?.commandRunner.wslContext ?? null,
   );
+  if (!launch) {
+    await terminalPanelManager.stageInitialCommand(panel.id, tool.command);
+  }
 
-  const readiness = options.waitReady
+  const readiness = waitReady
     ? toPaneReadiness(await waitForPanel(panel, {
       panelId: panel.id,
       condition: 'ready',
@@ -1467,7 +1479,9 @@ async function createTerminalPanelForSession(
     }))
     : undefined;
 
-  const initialInput = readiness ? await submitCreateInitialInput(panel, tool, readiness) : undefined;
+  const initialInput = readiness
+    ? await submitCreateInitialInput(panel, tool, useArgumentDelivery, readiness)
+    : undefined;
 
   return { panel, readiness, initialInput };
 }
@@ -1475,13 +1489,14 @@ async function createTerminalPanelForSession(
 async function submitCreateInitialInput(
   panel: ToolPanel,
   tool: RunpaneResolvedTool,
+  useArgumentDelivery: boolean,
   readiness?: RunpanePaneReadiness,
 ): Promise<RunpaneInitialInputDeliveryResult | undefined> {
   if (!tool.initialInput) {
     return undefined;
   }
 
-  if (shouldUseArgumentDelivery(tool)) {
+  if (useArgumentDelivery) {
     const currentPanel = panelManager.getPanel(panel.id);
     const customState = currentPanel && isRecord(currentPanel.state.customState)
       ? currentPanel.state.customState
@@ -1680,11 +1695,15 @@ async function createPaneItem(
   let createdWorktreePath: string | undefined;
 
   try {
+    // Checked again under the creation lock; this early check keeps a bad or
+    // taken branch name from reaching the queue and its failure toast.
+    await validateRequestedBranch(services, repo, item.branch);
     const sessionResult = await taskQueue.createSessionAndWait({
       prompt: item.sessionPrompt ?? '',
       worktreeTemplate: item.worktreeName ?? item.name,
       projectId: repo.id,
       baseBranch: item.baseBranch,
+      branchName: item.branch,
       toolType: 'none',
       startPinned: item.pinned,
       activateOnCreate: options.activate !== false,
@@ -1724,6 +1743,13 @@ async function createPaneItem(
   } catch (error) {
     return createFailureItem(index, item, error, createdSessionId, createdWorktreePath);
   }
+}
+
+async function validateRequestedBranch(services: AppServices, repo: Project, branch: string | undefined): Promise<void> {
+  if (branch === undefined) return;
+  const context = services.sessionManager.getProjectContextByProjectId(repo.id);
+  if (!context) throw new Error(`Project context is unavailable for ${repo.name}`);
+  await assertNewBranchName(repo.path, branch, context.commandRunner);
 }
 
 function isPaneCreateItemSuccessful(item: RunpanePaneCreateResultItem): boolean {
@@ -2655,9 +2681,16 @@ function parsePaneCreateRequest(value: PaneCommandValue): RunpanePaneCreateReque
     throw new Error('Pane create source must be user or agent');
   }
 
+  const panes = panesValue.map(parsePaneCreateItem);
+  const requestedBranches = panes.flatMap(pane => pane.branch === undefined ? [] : [pane.branch]);
+  const duplicateBranch = requestedBranches.find((branch, index) => requestedBranches.indexOf(branch) !== index);
+  if (duplicateBranch !== undefined) {
+    throw new Error(`Pane create request names branch '${duplicateBranch}' more than once`);
+  }
+
   return {
     repo,
-    panes: panesValue.map(parsePaneCreateItem),
+    panes,
     dryRun: optionalBoolean(value.dryRun),
     timeoutMs: optionalNumber(value.timeoutMs),
     waitReady: optionalBoolean(value.waitReady),
@@ -2685,18 +2718,25 @@ function parsePaneAdoptRequest(value: PaneCommandValue): RunpanePaneAdoptRequest
       const name = optionalString(entry.name)?.trim();
       if (!worktreePath) throw new Error(`Pane adopt item ${index} must include path`);
       if (!name) throw new Error(`Pane adopt item ${index} must include name`);
+      const tool = parseRunpaneToolSpec(entry.tool, `Pane adopt item ${index}`);
+      const launch = optionalBoolean(entry.launch);
+      if (tool.initialInput !== undefined && launch !== true) {
+        throw new Error(`Pane adopt item ${index} has a prompt but no launch. Pass --launch (launch: true) so the agent starts and receives the prompt.`);
+      }
       return {
         path: worktreePath,
         name,
         baseBranch: optionalString(entry.baseBranch),
         folder: optionalString(entry.folder),
         pinned: optionalBoolean(entry.pinned),
-        tool: parseRunpaneToolSpec(entry.tool, `Pane adopt item ${index}`),
+        tool,
         resume: optionalString(entry.resume),
-        launch: optionalBoolean(entry.launch),
+        launch,
       };
     }),
     dryRun: optionalBoolean(value.dryRun),
+    waitReady: optionalBoolean(value.waitReady),
+    readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),
     noFocus: optionalBoolean(value.noFocus),
     focus: optionalBoolean(value.focus),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
@@ -3290,6 +3330,7 @@ function parsePaneCreateItem(value: PaneCommandValue, index: number): RunpanePan
   return {
     name,
     worktreeName: optionalString(value.worktreeName),
+    branch: optionalString(value.branch),
     baseBranch: optionalString(value.baseBranch),
     sessionPrompt: optionalString(value.sessionPrompt),
     // CLI/daemon-created Panes pin by default so orchestrated work stays visible

@@ -188,6 +188,44 @@ export async function resolveDefaultWorktreeBase(
   return 'HEAD';
 }
 
+// Worktree commands still run through a shell, so a requested branch keeps to
+// characters that need no quoting on top of Git's own ref-name rules.
+const REQUESTED_BRANCH_PATTERN = /^[A-Za-z0-9._/+,=@%-]+$/;
+
+/**
+ * Checks a caller-requested branch name before a worktree is created on it.
+ * The name must be a valid new branch (`git check-ref-format --branch`) that
+ * does not exist yet; Pane never renames or reuses a branch that was asked for
+ * by name. Returns the name exactly as requested.
+ */
+export async function assertNewBranchName(
+  projectPath: string,
+  branchName: string,
+  commandRunner: CommandRunner,
+): Promise<string> {
+  if (!branchName || branchName.trim() !== branchName) {
+    throw new Error(`Invalid branch name '${branchName}': it must be non-empty with no surrounding whitespace.`);
+  }
+  if (!REQUESTED_BRANCH_PATTERN.test(branchName) || branchName.startsWith('-')) {
+    throw new Error(`Invalid branch name '${branchName}': use letters, digits, and . _ / + , = @ % -.`);
+  }
+  try {
+    await commandRunner.execFile('git', ['check-ref-format', '--branch', branchName], projectPath);
+  } catch {
+    throw new Error(`Invalid branch name '${branchName}': git check-ref-format --branch rejected it.`);
+  }
+  let exists = true;
+  try {
+    await commandRunner.execFile('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], projectPath);
+  } catch {
+    exists = false;
+  }
+  if (exists) {
+    throw new Error(`Branch '${branchName}' already exists. Choose a new --branch name, or adopt an existing worktree with \`runpane panes adopt\`.`);
+  }
+  return branchName;
+}
+
 export class WorktreeManager {
   private projectsCache: Map<string, { baseDir: string }> = new Map();
 
@@ -373,6 +411,10 @@ export class WorktreeManager {
    * Resolves the working directory for a session. When useWorktree is true, creates
    * an isolated git worktree. When false, uses the project directory directly and
    * optionally checks out the specified branch.
+   *
+   * `branchName` names the new worktree branch exactly (for example
+   * `agents/w5a`); it must not exist yet. Without it the branch is the
+   * worktree name.
    */
   async resolveWorkingDirectory(
     projectPath: string,
@@ -381,14 +423,21 @@ export class WorktreeManager {
     useWorktree: boolean,
     worktreeFolder: string | undefined,
     pathResolver: PathResolver,
-    commandRunner: CommandRunner
+    commandRunner: CommandRunner,
+    options: { branchName?: string } = {},
   ): Promise<{ worktreePath: string; baseCommit: string | undefined; baseBranch: string | undefined }> {
+    if (!useWorktree && options.branchName) {
+      throw new Error('A branch name can only be requested for a Pane with its own worktree.');
+    }
     if (useWorktree) {
+      const requestedBranch = options.branchName
+        ? await assertNewBranchName(projectPath, options.branchName, commandRunner)
+        : undefined;
       const effectiveBase = baseBranch || await resolveDefaultWorktreeBase(projectPath, commandRunner);
 
       // Try claiming a pre-created reserve worktree for instant creation
       try {
-        const branchName = worktreeName; // worktreeName is used as both dir name and branch name
+        const branchName = requestedBranch ?? worktreeName;
         const claimed = await worktreePoolManager.claimReserve(
           projectPath,
           effectiveBase,
@@ -408,7 +457,7 @@ export class WorktreeManager {
       }
 
       // Fall back to standard worktree creation
-      const result = await this.createWorktree(projectPath, worktreeName, undefined, effectiveBase, worktreeFolder, pathResolver, commandRunner);
+      const result = await this.createWorktree(projectPath, worktreeName, requestedBranch, effectiveBase, worktreeFolder, pathResolver, commandRunner);
 
       // Trigger background replenishment after successful creation
       worktreePoolManager.createReserve(projectPath, effectiveBase, worktreeFolder, pathResolver, commandRunner).catch(err => {

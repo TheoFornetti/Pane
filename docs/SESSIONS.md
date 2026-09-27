@@ -304,13 +304,15 @@ contract. The legacy shared Cursor rule is not always applied; Session-specific
 instructions belong to the Session's working directory. User-selected profiles
 and workflows determine behavior after the user supplies a task.
 
-## Terminal and Files
+## Tabs, Terminal, and Files
 
-Each Session has a collapsible **Terminal** dock and a **Files** button beside
-its agent tabs. The shell and file browser use the Session's workspace folder.
-Selecting a file opens an editor tab alongside the agent conversation. Panels
-are saved with the Session and reused when you reopen the tools; switching
-Sessions keeps their shells and files separate.
+A Session's tab strip has the same **+** menu as a Pane (also ⌘T): terminals,
+the browser, agent presets, and saved custom commands open as tabs beside the
+orchestrator and run in the Session's folder. As in a Pane, the first plain
+shell becomes the collapsible **Terminal** dock; later shells are tabs. The
+**Files** button opens the Session folder's file browser, and selecting a file
+opens an editor tab. Tabs and the layout are saved with the Session and
+restored when you reopen it; switching Sessions keeps their tools separate.
 
 ## Plans, pages, and split view
 

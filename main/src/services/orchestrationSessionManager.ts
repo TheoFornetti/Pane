@@ -388,6 +388,17 @@ export class OrchestrationSessionManager extends EventEmitter {
     };
   }
 
+  /**
+   * Panes associated with a Session that is not archived, for the Session PR monitor. Reads the
+   * in-memory store without taking the Session lock, like `workspaceMembership`.
+   */
+  activeMemberPaneIds(): string[] {
+    const paneIds = this.store.read().sessions
+      .filter(session => session.archived !== true)
+      .flatMap(session => session.associations.map(association => association.paneId));
+    return [...new Set(paneIds)];
+  }
+
   /** Persist meaningful live state transitions and notify visible overviews. */
   async notifyLiveActivity(panelId: string, state: AgentState): Promise<void> {
     await withLock('orchestration-sessions', async () => {

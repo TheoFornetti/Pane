@@ -1248,6 +1248,14 @@ export class GitStatusManager extends EventEmitter {
     }
   }
 
+  /**
+   * Runs a GitHub CLI operation in the same one-at-a-time slot as PR enrichment, so other
+   * services' `gh` calls (the Session PR monitor) never overlap Pane's own PR lookups.
+   */
+  async withGithubSlot<T>(operation: () => Promise<T>): Promise<T> {
+    return this.executePrEnrichmentWithLimit(operation);
+  }
+
   private async executePrEnrichmentWithLimit<T>(operation: () => Promise<T>): Promise<T> {
     while (this.activePrEnrichmentOperations >= this.MAX_CONCURRENT_PR_ENRICHMENT) {
       await new Promise(resolve => setTimeout(resolve, 250));

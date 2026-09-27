@@ -9,6 +9,7 @@ import {
   panelListResultSchema,
   panelScreenResultSchema,
   panelSubmitResultSchema,
+  printPromptNotes,
   workspaceStateResultSchema,
 } from './localControl';
 
@@ -104,11 +105,14 @@ export async function runAgentsSend(parsed: ParsedArgs): Promise<number> {
     panelId,
     delivered,
     blocked: sent.blocked?.message,
+    promptFile: sent.promptFile,
+    warnings: sent.warnings,
     next: delivered
       ? `Check on it with \`runpane agents status --pane ${paneId}\`.`
       : `The message may still be in the composer. Run \`runpane agents status --panel ${panelId}\` to see the screen.`,
   };
   print(parsed, result, delivered ? `Delivered to ${panelId}.` : `Not confirmed: ${result.blocked ?? result.next}`);
+  if (!parsed.json) printPromptNotes(result);
   return delivered ? 0 : 1;
 }
 

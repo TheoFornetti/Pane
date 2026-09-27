@@ -584,9 +584,18 @@ def run_panels_submit(parsed: Any) -> int:
         )
         if result.get("blocked"):
             print(f"Blocked: {result['blocked'].get('message')}")
+        print_prompt_notes(result)
         if result.get("nextCommand"):
             print(f"Next: {result.get('nextCommand')}")
     return 0 if result.get("ok") else 1
+
+
+def print_prompt_notes(result: Dict[str, Any], prefix: str = "") -> None:
+    """The prompt file Pane wrote and any leading-character warnings, for human output."""
+    if result.get("promptFile"):
+        print(f"{prefix}Prompt file: {result.get('promptFile')}")
+    for warning in result.get("warnings") or []:
+        print(f"{prefix}Warning ({warning.get('code')}): {warning.get('message')}")
 
 
 def run_panels_submit_composer(parsed: Any) -> int:
@@ -669,6 +678,8 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
         raise ValueError(f"runpane panels {command} requires --text, --keys, or --input-file.")
     if parsed.keys is not None and command != "input":
         raise ValueError("--keys is for panels input; panels submit sends text followed by Enter.")
+    if parsed.as_file_pointer and command != "submit":
+        raise ValueError("--as-file-pointer is for panels submit; panels input sends exact bytes.")
 
     if parsed.keys is not None:
         text = keys_to_bytes(parsed.keys)
@@ -676,7 +687,11 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
         text = read_input_source(parsed.panel_input_file)
     else:
         text = parsed.panel_input or ""
-    return {"panelId": parsed.panel_id, "input": text}
+    return {
+        "panelId": parsed.panel_id,
+        "input": text,
+        **optional_value("asFilePointer", True if parsed.as_file_pointer else None),
+    }
 
 
 def keys_to_bytes(keys: Any) -> str:
@@ -783,6 +798,9 @@ def apply_pane_focus_options(parsed: Any, request: Dict[str, Any]) -> None:
 
 def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any]:
     initial_input = resolve_initial_input(parsed)
+    if parsed.as_file_pointer and initial_input is None:
+        raise ValueError(f"--as-file-pointer needs a prompt: pass --prompt or --initial-input-file to runpane {command}.")
+    file_pointer = optional_value("initialInputAsFilePointer", True if parsed.as_file_pointer else None)
 
     # With --tool-command, --agent names the agent the command runs (a wrapper
     # such as `agent-farm run`); Pane launches the command unchanged.
@@ -792,6 +810,7 @@ def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any
             "agentType": parsed.agent,
             **optional_value("title", parsed.title),
             **optional_value("initialInput", initial_input),
+            **file_pointer,
         }
     agent = parsed.agent
 
@@ -805,6 +824,7 @@ def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any
             "agent": agent,
             **optional_value("title", parsed.title),
             **optional_value("initialInput", initial_input),
+            **file_pointer,
         }
 
     if not parsed.tool_command:
@@ -814,6 +834,7 @@ def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any
         "command": parsed.tool_command,
         **optional_value("title", parsed.title),
         **optional_value("initialInput", initial_input),
+        **file_pointer,
     }
 
 
@@ -1136,6 +1157,7 @@ def print_pane_create_result(result: Dict[str, Any]) -> None:
                 blocked = readiness.get("blocked")
                 if blocked:
                     print(f"  Blocked: {blocked.get('message')}")
+            print_prompt_notes(item, "  ")
             if item.get("nextCommand"):
                 print(f"  Next: {item.get('nextCommand')}")
         else:
@@ -1185,6 +1207,7 @@ def print_panel_create_result(result: Dict[str, Any]) -> None:
         blocked = readiness.get("blocked")
         if blocked:
             print(f"Blocked: {blocked.get('message')}")
+    print_prompt_notes(result)
     if result.get("nextCommand"):
         print(f"Next: {result.get('nextCommand')}")
 

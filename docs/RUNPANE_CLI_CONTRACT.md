@@ -351,6 +351,7 @@ These flags are consumed by local daemon-control commands:
 --no-pinned
 --force
 --launch
+--as-file-pointer
 --follow
 --ack-now
 --include-held-input

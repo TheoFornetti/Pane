@@ -40,6 +40,7 @@ export interface ParsedArgs {
   title?: string;
   initialInput?: string;
   initialInputFile?: string;
+  asFilePointer?: boolean;
   panelInput?: string;
   panelInputFile?: string;
   fromJson?: string;
@@ -341,6 +342,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--launch') {
     parsed.launch = true;
+    return;
+  }
+  if (flag === '--as-file-pointer') {
+    parsed.asFilePointer = true;
     return;
   }
   if (flag === '--follow') {

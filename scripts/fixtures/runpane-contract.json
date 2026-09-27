@@ -536,6 +536,33 @@
       "Plan",
       "--yes",
       "--json"
+    ],
+    [
+      "panels",
+      "submit",
+      "--panel",
+      "panel-1",
+      "--input-file",
+      "brief.md",
+      "--as-file-pointer",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panes",
+      "create",
+      "--repo",
+      "active",
+      "--name",
+      "long",
+      "--agent",
+      "claude",
+      "--initial-input-file",
+      "brief.md",
+      "--as-file-pointer",
+      "--dry-run",
+      "--yes",
+      "--json"
     ]
   ],
   "help": {

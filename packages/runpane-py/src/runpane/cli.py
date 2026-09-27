@@ -125,6 +125,7 @@ class ParsedArgs:
     title: Optional[str] = None
     initial_input: Optional[str] = None
     initial_input_file: Optional[str] = None
+    as_file_pointer: bool = False
     panel_input: Optional[str] = None
     panel_input_file: Optional[str] = None
     from_json: Optional[str] = None
@@ -617,6 +618,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--force":
         parsed.force = True
+        return
+    if flag == "--as-file-pointer":
+        parsed.as_file_pointer = True
         return
     if flag == "--follow":
         parsed.follow = True

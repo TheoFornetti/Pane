@@ -229,8 +229,13 @@ interface PaneCreateItem {
 }
 
 type PaneToolSpec =
-  | { agent: RunpaneAgent; title?: string; initialInput?: string }
-  | { command: string; agentType?: RunpaneAgent; title?: string; initialInput?: string };
+  | { agent: RunpaneAgent; title?: string; initialInput?: string; initialInputAsFilePointer?: boolean }
+  | { command: string; agentType?: RunpaneAgent; title?: string; initialInput?: string; initialInputAsFilePointer?: boolean };
+
+interface PromptWarning {
+  code: 'leading-bang-runs-shell' | 'leading-hash-memory' | 'leading-slash-command' | 'leading-at-mention';
+  message: string;
+}
 
 interface PaneCreateSuccessItem {
   /** False when the pane was created but did not become ready or take its initial input. */
@@ -244,6 +249,8 @@ interface PaneCreateSuccessItem {
   nextCommand?: string;
   readiness?: PanelReadiness;
   initialInput?: InitialInputDeliveryResult;
+  promptFile?: string;
+  warnings?: PromptWarning[];
 }
 
 interface PaneCreateFailureItem {
@@ -489,6 +496,8 @@ interface PanelCreateResult {
   };
   readiness?: PanelReadiness;
   initialInput?: InitialInputDeliveryResult;
+  promptFile?: string;
+  warnings?: PromptWarning[];
   nextCommand?: string;
 }
 
@@ -512,6 +521,8 @@ interface PanelOutputResult {
 interface PanelInputRequest {
   panelId: string;
   input: string;
+  /** panels submit only: send `Read and follow <prompt file>` in place of the text. */
+  asFilePointer?: boolean;
 }
 
 interface PanelInputResult {
@@ -580,6 +591,8 @@ interface PanelSubmitResult {
   verification?: 'observed' | 'unverifiable';
   sentAt: string;
   blocked?: PanelBlockedState;
+  promptFile?: string;
+  warnings?: PromptWarning[];
   nextCommand?: string;
 }
 
@@ -689,6 +702,7 @@ interface PaneToolInput {
   agentType?: string;
   title?: string;
   initialInput?: string;
+  initialInputAsFilePointer?: boolean;
 }
 
 interface PaneCreateItemInput {
@@ -775,6 +789,10 @@ const panelReadinessSchema: BoundarySchema<PanelReadiness> = boundary.object({
   nextCommand: boundary.optional(boundary.string),
 });
 const verificationSchema = boundary.optional(boundary.enumeration('observed', 'unverifiable'));
+const promptWarningsSchema = boundary.optional(boundary.array(boundary.object({
+  code: boundary.enumeration('leading-bang-runs-shell', 'leading-hash-memory', 'leading-slash-command', 'leading-at-mention'),
+  message: boundary.string,
+})));
 const initialInputSchema: BoundarySchema<InitialInputDeliveryResult> = boundary.object({
   delivered: boundary.boolean,
   submitted: boundary.boolean,
@@ -1042,6 +1060,8 @@ export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary
       nextCommand: boundary.optional(boundary.string),
       readiness: boundary.optional(panelReadinessSchema),
       initialInput: boundary.optional(initialInputSchema),
+      promptFile: boundary.optional(boundary.string),
+      warnings: promptWarningsSchema,
     }),
     boundary.object({
       ok: boundary.literal(false),
@@ -1133,6 +1153,8 @@ const panelCreateResultSchema: BoundarySchema<PanelCreateResult> = boundary.obje
   }),
   readiness: boundary.optional(panelReadinessSchema),
   initialInput: boundary.optional(initialInputSchema),
+  promptFile: boundary.optional(boundary.string),
+  warnings: promptWarningsSchema,
   nextCommand: boundary.optional(boundary.string),
 });
 const panelOutputResultSchema: BoundarySchema<PanelOutputResult> = boundary.object({
@@ -1186,6 +1208,8 @@ export const panelSubmitResultSchema: BoundarySchema<PanelSubmitResult> = bounda
   verification: verificationSchema,
   sentAt: boundary.string,
   blocked: boundary.optional(panelBlockedSchema),
+  promptFile: boundary.optional(boundary.string),
+  warnings: promptWarningsSchema,
   nextCommand: boundary.optional(boundary.string),
 });
 const panelSubmitComposerResultSchema: BoundarySchema<PanelSubmitComposerResult> = boundary.object({
@@ -1309,6 +1333,7 @@ const paneToolInputSchema: BoundarySchema<PaneToolInput> = boundary.object({
   agentType: boundary.optional(boundary.string),
   title: boundary.optional(boundary.string),
   initialInput: boundary.optional(boundary.string),
+  initialInputAsFilePointer: boundary.optional(boundary.boolean),
 });
 const paneCreateRequestInputSchema: BoundarySchema<PaneCreateRequestInput> = boundary.object({
   repo: repoSelectorSchema,
@@ -1989,12 +2014,23 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
     if (result.blocked) {
       console.log(`Blocked: ${result.blocked.message}`);
     }
+    printPromptNotes(result);
     if (result.nextCommand) {
       console.log(`Next: ${result.nextCommand}`);
     }
   }
 
   return result.ok ? 0 : 1;
+}
+
+/** The prompt file Pane wrote and any leading-character warnings, for human output. */
+export function printPromptNotes(result: { promptFile?: string; warnings?: PromptWarning[] }, prefix = ''): void {
+  if (result.promptFile) {
+    console.log(`${prefix}Prompt file: ${result.promptFile}`);
+  }
+  for (const warning of result.warnings ?? []) {
+    console.log(`${prefix}Warning (${warning.code}): ${warning.message}`);
+  }
 }
 
 export async function runPanelsSubmitComposer(parsed: ParsedArgs): Promise<number> {
@@ -2098,10 +2134,14 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
   if (parsed.keys !== undefined && command !== 'input') {
     throw new Error('--keys is for panels input; panels submit sends text followed by Enter.');
   }
+  if (parsed.asFilePointer && command !== 'submit') {
+    throw new Error('--as-file-pointer is for panels submit; panels input sends exact bytes.');
+  }
 
   return {
     panelId: parsed.panelId,
     input: parsed.keys ? keysToBytes(parsed.keys) : parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
+    asFilePointer: parsed.asFilePointer || undefined,
   };
 }
 
@@ -2248,6 +2288,10 @@ async function confirmRepoAdd(parsed: ParsedArgs, request: RepoAddRequest): Prom
 
 async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Promise<PaneToolSpec> {
   const initialInput = resolveInitialInput(parsed);
+  if (parsed.asFilePointer && initialInput === undefined) {
+    throw new Error(`--as-file-pointer needs a prompt: pass --prompt or --initial-input-file to runpane ${command}.`);
+  }
+  const initialInputAsFilePointer = parsed.asFilePointer || undefined;
 
   // With --tool-command, --agent names the agent the command runs (a wrapper
   // such as `agent-farm run`); Pane launches the command unchanged.
@@ -2257,6 +2301,7 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
       agentType: parsed.agent,
       title: parsed.title,
       initialInput,
+      initialInputAsFilePointer,
     };
   }
 
@@ -2274,6 +2319,7 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
       agent,
       title: parsed.title,
       initialInput,
+      initialInputAsFilePointer,
     };
   }
 
@@ -2285,6 +2331,7 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
     command: parsed.toolCommand,
     title: parsed.title,
     initialInput,
+    initialInputAsFilePointer,
   };
 }
 
@@ -2615,6 +2662,7 @@ function printPaneCreateResult(result: PaneCreateResult): void {
         }
       }
       printInitialInputDelivery(item.initialInput, '  ');
+      printPromptNotes(item, '  ');
       if (item.nextCommand) {
         console.log(`  Next: ${item.nextCommand}`);
       }
@@ -2665,6 +2713,7 @@ function printPanelCreateResult(result: PanelCreateResult): void {
     }
   }
   printInitialInputDelivery(result.initialInput);
+  printPromptNotes(result);
   if (result.nextCommand) {
     console.log(`Next: ${result.nextCommand}`);
   }
@@ -2797,6 +2846,7 @@ function parsePaneToolSpecPayload(value: PaneToolInput, index: number): PaneTool
       agent,
       title: value.title,
       initialInput: value.initialInput,
+      initialInputAsFilePointer: value.initialInputAsFilePointer,
     };
   }
 
@@ -2812,6 +2862,7 @@ function parsePaneToolSpecPayload(value: PaneToolInput, index: number): PaneTool
       agentType,
       title: value.title,
       initialInput: value.initialInput,
+      initialInputAsFilePointer: value.initialInputAsFilePointer,
     };
   }
 

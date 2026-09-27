@@ -89,8 +89,18 @@ record an output baseline (cursor or hash) and a timestamp. Put the prompt in a
 file and submit it:
 
 ```bash
-runpane panels submit --panel <panel-id> --input-file <prompt-file> --yes --json
+runpane panels submit --panel <panel-id> --input-file <prompt-file> --as-file-pointer --yes --json
 ```
+
+Prefer `--as-file-pointer` for long prompts. Pane writes a private copy under
+`<pane-dir>/prompts/` and submits the single line `Read and follow <path>`
+(the result's `promptFile`), so nothing long passes through the terminal.
+Without it, multi-line or long text still goes to a Claude or Codex
+composer as one bracketed paste with a separate Enter, and `panes create`
+launches a long prompt from a file rather than typing it into the shell.
+A `warnings` entry such as `leading-bang-runs-shell` means Claude Code gives
+the text's first character a meaning of its own (`!` runs a shell command);
+reword the prompt or send it as a file pointer.
 
 Agents in other repositories don't have Pane's skills installed. When a prompt
 asks for a skill, give its absolute path from the skills folder that

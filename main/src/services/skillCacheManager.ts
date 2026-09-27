@@ -486,7 +486,9 @@ When a pane finishes something a human will read, have it run the
    work, usually \`tdd\`, \`quick-verify\`, \`prepare-pr\`, and
    \`babysit-pr\`, and name them by absolute path (see \`runpane\`). Pass the
    ticket, the stable Session ID, and the associated Pane and tab IDs so
-   progress returns to this conversation.
+   progress returns to this conversation. Prefer \`--as-file-pointer\` for
+   long prompts (\`panes create\`, \`panels submit\`, \`agents send\`): Pane
+   writes the prompt to a private file and submits one line pointing at it.
 5. Keep the Session's own agent, profile, and tool configuration as they are.
 
 Never edit project implementation files from the Session. A Session can stay

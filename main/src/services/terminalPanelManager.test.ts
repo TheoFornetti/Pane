@@ -22,8 +22,12 @@ type TerminalUnderTest = {
     resize: ReturnType<typeof vi.fn>;
     write: ReturnType<typeof vi.fn>;
     kill: ReturnType<typeof vi.fn>;
+    pid?: number;
+    process?: string;
   };
   isPtyHost: boolean;
+  isWSL?: boolean;
+  shellProcessName?: string;
   panelId: string;
   sessionId: string;
   scrollbackBuffer: string;
@@ -44,6 +48,7 @@ type TerminalUnderTest = {
   agentType?: 'claude' | 'codex' | 'cursor';
   agentSessionScrapeBuffer: string;
   capturedAgentSessionId?: string;
+  agentProbe?: unknown;
 };
 
 type FlushOutputBufferAccess = {
@@ -1160,5 +1165,199 @@ describe('TerminalPanelManager agent status poll', () => {
 
     manager.destroyTerminal(terminal.panelId);
     vi.useRealTimers();
+  });
+});
+
+describe('TerminalPanelManager wrapper launches', () => {
+  it('runs a declared wrapper command unchanged, with no Claude session id', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('11111111-1111-4111-8111-111111111111', 'agent-farm run free-range', {
+      agentType: 'claude',
+      agentDetection: 'declared',
+      launchMode: 'wrapped',
+      initialInput: 'Plan the work',
+      initialInputMode: 'argument',
+    });
+
+    expect(result.commandToRun).toBe('agent-farm run free-range');
+    expect(result.isCliCommand).toBe(true);
+    expect(result.customState).toMatchObject({
+      agentType: 'claude',
+      agentDetection: 'declared',
+      launchMode: 'wrapped',
+      launchCommand: 'agent-farm run free-range',
+      isCliPanel: true,
+      isCliReady: false,
+    });
+    expect(result.customState).not.toHaveProperty('agentSessionId');
+    expect(result.customState).not.toHaveProperty('initialInputSentAt');
+  });
+
+  it('relaunches an interrupted wrapper as given instead of resuming the agent directly', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'agent-farm run free-range', {
+      agentType: 'codex',
+      agentDetection: 'process',
+      launchMode: 'wrapped',
+      agentSessionId: '019a0000-0000-7000-8000-000000000000',
+      wasInterrupted: true,
+    });
+
+    expect(result.commandToRun).toBe('agent-farm run free-range');
+    expect(result.customState.wasInterrupted).toBeUndefined();
+  });
+
+  it('records how a built-in agent command was identified', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    expect(manager.resolveCliLaunchCommand('panel-1', 'codex --yolo', {}).customState).toMatchObject({
+      agentType: 'codex',
+      agentDetection: 'command',
+      launchCommand: 'codex --yolo',
+    });
+    expect(manager.resolveCliLaunchCommand('panel-1', 'my-codex-alias', { agentType: 'codex' }).customState).toMatchObject({
+      agentType: 'codex',
+      agentDetection: 'declared',
+    });
+  });
+});
+
+type DetectionAccess = AgentStatusAccess & {
+  getForegroundProcess(panelId: string): { name: string; isShell: boolean } | undefined;
+};
+
+describe('TerminalPanelManager wrapper agent detection', () => {
+  const rule = '─'.repeat(40);
+
+  function wrapperPanel(customState: TerminalPanelState = { initialCommand: 'agent-farm run free-range' }) {
+    const panel = {
+      id: 'panel-1',
+      sessionId: 'session-1',
+      type: 'terminal' as const,
+      title: 'Farm',
+      state: { isActive: true, customState },
+      metadata: { createdAt: '2026-01-01T00:00:00.000Z', lastActiveAt: '2026-01-01T00:01:00.000Z', position: 0 },
+    };
+    vi.mocked(panelManager.getPanel).mockReturnValue(panel);
+    vi.mocked(panelManager.updatePanel).mockResolvedValue(undefined);
+    return panel;
+  }
+
+  function attachWrapper(
+    processName: string | undefined,
+    readForegroundExecutable: (shellPid: number) => Promise<string | undefined> = async () => undefined,
+  ) {
+    const manager = testAccess<DetectionAccess>(new TerminalPanelManager(undefined, readForegroundExecutable));
+    const screenEmulator = inProcessEmulatorHost().createEmulator(60, 10);
+    const terminal = createTerminal({ screenEmulator, shellProcessName: 'zsh' });
+    terminal.pty.process = processName;
+    terminal.pty.pid = 4242;
+    manager.terminals.set(terminal.panelId, terminal);
+    manager.registerAgentStatusPanel(terminal);
+    return { manager, terminal, screenEmulator };
+  }
+
+  it.skipIf(process.platform === 'win32')('adopts the agent named by the foreground process', async () => {
+    const panel = wrapperPanel();
+    const { manager, terminal } = attachWrapper('codex');
+
+    manager.pollAgentStatus();
+
+    expect(terminal.agentType).toBe('codex');
+    expect(panel.state.customState).toMatchObject({
+      agentType: 'codex',
+      agentDetection: 'process',
+      launchMode: 'wrapped',
+      launchCommand: 'agent-farm run free-range',
+      isCliPanel: true,
+      isCliReady: true,
+    });
+    expect(panelManager.updatePanel).toHaveBeenCalledWith('panel-1', { state: panel.state });
+    manager.destroyTerminal(terminal.panelId);
+  });
+
+  it.skipIf(process.platform === 'win32')('resolves Claude\'s versioned native binary through its executable path', async () => {
+    const panel = wrapperPanel();
+    const readForegroundExecutable = vi.fn(async () => '/Users/me/.local/share/claude/versions/2.1.283');
+    const { manager, terminal } = attachWrapper('2.1.283', readForegroundExecutable);
+
+    manager.pollAgentStatus();
+    manager.pollAgentStatus();
+    await flushPromises();
+    await flushPromises();
+
+    expect(readForegroundExecutable).toHaveBeenCalledTimes(1);
+    expect(readForegroundExecutable).toHaveBeenCalledWith(4242);
+    expect(terminal.agentType).toBe('claude');
+    expect(panel.state.customState).toMatchObject({ agentType: 'claude', agentDetection: 'process' });
+    manager.destroyTerminal(terminal.panelId);
+  });
+
+  it('adopts an agent from its screen only after two consecutive matches', async () => {
+    const panel = wrapperPanel();
+    const { manager, terminal, screenEmulator } = attachWrapper('node');
+
+    screenEmulator.write(`${rule}\r\n❯ \r\n${rule}`);
+    await screenEmulator.refresh();
+    manager.pollAgentStatus();
+    expect(terminal.agentType).toBeUndefined();
+    expect(panel.state.customState).not.toHaveProperty('agentType');
+
+    manager.pollAgentStatus();
+    expect(terminal.agentType).toBe('claude');
+    expect(panel.state.customState).toMatchObject({ agentType: 'claude', agentDetection: 'screen', launchMode: 'wrapped' });
+    manager.destroyTerminal(terminal.panelId);
+  });
+
+  it('restarts the screen count when a frame does not match', async () => {
+    wrapperPanel();
+    const { manager, terminal, screenEmulator } = attachWrapper('node');
+
+    screenEmulator.write(`${rule}\r\n❯ \r\n${rule}`);
+    await screenEmulator.refresh();
+    manager.pollAgentStatus();
+    screenEmulator.write('\x1b[2J\x1b[Hbuilding…');
+    await screenEmulator.refresh();
+    manager.pollAgentStatus();
+    screenEmulator.write(`\x1b[2J\x1b[H${rule}\r\n❯ \r\n${rule}`);
+    await screenEmulator.refresh();
+    manager.pollAgentStatus();
+
+    expect(terminal.agentType).toBeUndefined();
+    manager.destroyTerminal(terminal.panelId);
+  });
+
+  it.skipIf(process.platform === 'win32')('ignores an agent frame left on screen at Pane\'s own shell prompt', async () => {
+    wrapperPanel({});
+    const { manager, terminal, screenEmulator } = attachWrapper('-zsh');
+
+    screenEmulator.write(`${rule}\r\n❯ \r\n${rule}\r\n$ `);
+    await screenEmulator.refresh();
+    manager.pollAgentStatus();
+    manager.pollAgentStatus();
+    manager.pollAgentStatus();
+
+    expect(terminal.agentType).toBeUndefined();
+    expect(manager.getForegroundProcess(terminal.panelId)).toEqual({ name: '-zsh', isShell: true });
+    manager.destroyTerminal(terminal.panelId);
+  });
+
+  it.skipIf(process.platform === 'win32')('treats a shell-script wrapper as a program, not the prompt', () => {
+    wrapperPanel();
+    const { manager, terminal } = attachWrapper('bash');
+
+    expect(manager.getForegroundProcess(terminal.panelId)).toEqual({ name: 'bash', isShell: false });
+    manager.destroyTerminal(terminal.panelId);
+  });
+
+  it('cannot name the foreground process of a ptyHost terminal', () => {
+    wrapperPanel();
+    const { manager, terminal } = attachWrapper('ptyHost');
+    terminal.isPtyHost = true;
+
+    expect(manager.getForegroundProcess(terminal.panelId)).toBeUndefined();
+    manager.destroyTerminal(terminal.panelId);
   });
 });

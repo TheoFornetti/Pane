@@ -314,3 +314,57 @@ export function resolveAgentTypeFromCommand(
   const basename = executable?.replace(/\\/g, '/').split('/').pop()?.toLowerCase();
   return basename ? AGENT_EXECUTABLES[basename] : undefined;
 }
+
+const SHELL_PROCESS_NAMES = new Set([
+  'ash',
+  'bash',
+  'cmd',
+  'csh',
+  'dash',
+  'fish',
+  'ksh',
+  'login',
+  'mksh',
+  'nu',
+  'powershell',
+  'pwsh',
+  'sh',
+  'tcsh',
+  'zsh',
+]);
+
+/**
+ * Claude Code's native installer runs `~/.local/share/claude/versions/<version>`,
+ * so the kernel reports the version string as its process name.
+ */
+const VERSIONED_EXECUTABLE_NAME = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+const CLAUDE_VERSIONED_EXECUTABLE_PATH = /(?:^|\/)claude\/versions\/[^/]+$/;
+
+/** A process name or path as a comparable basename: `/bin/-zsh.exe` → `zsh`. */
+export function normalizeProcessName(name: string): string {
+  const basename = name.trim().replace(/\\/g, '/').split('/').pop() ?? '';
+  return basename.replace(/^-/, '').replace(/\.exe$/i, '').toLowerCase();
+}
+
+/** True for a foreground process name that is an interactive shell (login shells report `-zsh`). */
+export function isShellProcessName(name: string | undefined): boolean {
+  return name !== undefined && SHELL_PROCESS_NAMES.has(normalizeProcessName(name));
+}
+
+/** Map a foreground process name, as node-pty reports it, to the agent it runs. */
+export function resolveAgentTypeFromProcessName(name: string | undefined): CliAgentType | undefined {
+  return name ? AGENT_EXECUTABLES[normalizeProcessName(name)] : undefined;
+}
+
+/** A bare `1.2.3` process name, which only its executable path can identify. */
+export function isVersionedExecutableName(name: string | undefined): boolean {
+  return name !== undefined && VERSIONED_EXECUTABLE_NAME.test(normalizeProcessName(name));
+}
+
+/** Map a foreground executable path to its agent, including Claude's versioned native binary. */
+export function resolveAgentTypeFromExecutablePath(executablePath: string | undefined): CliAgentType | undefined {
+  if (!executablePath) return undefined;
+  const normalized = executablePath.trim().replace(/\\/g, '/');
+  if (CLAUDE_VERSIONED_EXECUTABLE_PATH.test(normalized)) return 'claude';
+  return resolveAgentTypeFromProcessName(normalized);
+}

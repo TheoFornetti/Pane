@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceJournal } from './workspaceJournal';
 
+/** What the daemon knows about a panel's agent, before and after wrapper detection. */
+interface WrapperIdentity {
+  isCliPanel: boolean;
+  agentType?: string;
+}
+
 describe('WorkspaceJournal', () => {
   it('appends gapless entries and filters reads', () => {
     let now = 1000;
@@ -78,6 +84,30 @@ describe('WorkspaceJournal', () => {
     expect(presenceOnly).toMatchObject({ heldInputPresent: true });
     expect(presenceOnly).not.toHaveProperty('heldInput');
     expect(journal.readySince('panel-1')).toBe(now);
+  });
+
+  it('reports a wrapper-launched panel to agents-only readers once its agent is known', () => {
+    // A panel launched as `agent-farm run`: plain until Pane detects Claude behind it.
+    const wrapper: WrapperIdentity = { isCliPanel: false };
+    const journal = new WorkspaceJournal({
+      resolvePane: paneId => ({ paneId, paneName: 'Farm' }),
+      resolvePanel: panelId => ({ panelId, paneId: 'pane-1', ...wrapper }),
+    });
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'working' });
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'idle' });
+    expect(journal.readAfter(0, { agentsOnly: true }).entries).toEqual([]);
+
+    wrapper.isCliPanel = true;
+    wrapper.agentType = 'claude';
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'working' });
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'blocked' });
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'idle' });
+
+    expect(journal.readAfter(0, { agentsOnly: true }).entries.map(entry => [entry.kind, entry.agentType])).toEqual([
+      ['agent.busy', 'claude'],
+      ['agent.blocked', 'claude'],
+      ['agent.ready', 'claude'],
+    ]);
   });
 
   it('does not report the Claude Code prompt suggestion as held input', () => {

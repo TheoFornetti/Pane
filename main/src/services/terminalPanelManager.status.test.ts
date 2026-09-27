@@ -5,7 +5,7 @@ import { AgentStatusMonitor } from './agentStatus/agentStatusMonitor';
 import { WorkspaceJournal } from './workspaceJournal';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import type { PaneEventArgument } from '../core/eventSink';
-import type { ToolPanel } from '../../../shared/types/panels';
+import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { createFlowControlRecord, disposeFlowControlRecord } from '../ptyHost/flowControl';
 import { panelManager } from '../test/setup';
 import { formatWaitResult } from '../../../packages/runpane/src/watchLines';
@@ -19,6 +19,8 @@ function createTerminal(agentType: 'claude' | 'codex' | undefined = 'codex') {
       onData: (listener: typeof onData) => { onData = listener; },
       onExit: (listener: typeof onExit) => { onExit = listener; },
       write: vi.fn(), kill: vi.fn(), cols: 80, rows: 24, pid: process.pid,
+      // SAFETY: node-pty's foreground-process name; fixtures start without one and tests may set it.
+      process: undefined as string | undefined,
     },
     screenEmulator: inProcessEmulatorHost().createEmulator(80, 24),
     scrollbackBuffer: '', alternateScreenBuffer: '', commandHistory: [],
@@ -414,5 +416,45 @@ describe('terminal status events', () => {
     expect(manager.getAgentStatus('p')).toBe('working');
     fixture.exit();
     expect(manager.getAgentStatus('p')).toBeUndefined();
+  });
+
+  it('detects a wrapper agent from its screen and then reports it to agents-only watchers', async () => {
+    const customState: TerminalPanelState = { initialCommand: 'agent-farm run free-range' };
+    const panel = {
+      id: 'p', sessionId: 's', type: 'terminal' as const, title: 'Farm',
+      state: { isActive: true, customState },
+      metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+    };
+    panelManager.getPanel.mockReturnValue(panel);
+    panelManager.updatePanel.mockResolvedValue(undefined);
+    // Resolve panels the way the daemon does: from the panel's custom state.
+    const wrapperJournal = new WorkspaceJournal({
+      resolvePane: paneId => ({ paneId, paneName: 'Farm' }),
+      resolvePanel: panelId => ({
+        panelId, paneId: 's',
+        isCliPanel: panel.state.customState.isCliPanel ?? false,
+        agentType: panel.state.customState.agentType,
+      }),
+    });
+    setPaneRuntime({ eventSink: { send(channel, payload) { wrapperJournal.send(channel, payload); } } });
+    const fixture = attach();
+    // An unknown launch command: no agent until detection finds one.
+    fixture.terminal.agentType = undefined;
+    fixture.terminal.pty.process = 'node';
+    const rule = '─'.repeat(40);
+
+    fixture.data(`${rule}\r\n❯ \r\n${rule}\r\n`);
+    await pollAgentStatus();
+    expect(panel.state.customState.agentType).toBeUndefined();
+    await pollAgentStatus();
+    expect(panel.state.customState).toMatchObject({
+      agentType: 'claude', agentDetection: 'screen', launchMode: 'wrapped', isCliPanel: true, launchCommand: 'agent-farm run free-range',
+    });
+
+    fixture.data('\x1b]2;⠹ Claude\x07Thinking...');
+    await pollAgentStatus();
+    expect(wrapperJournal.readAfter(0, { agentsOnly: true }).entries.map(entry => [entry.kind, entry.agentType]))
+      .toEqual([['agent.busy', 'claude']]);
+    wrapperJournal.dispose();
   });
 });

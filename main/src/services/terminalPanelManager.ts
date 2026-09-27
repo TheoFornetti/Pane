@@ -36,6 +36,8 @@ const OUTPUT_BATCH_SIZE = 131072; // 128KB — timer-based flush preferred; size
 const OUTPUT_BATCH_SIZE_HIDDEN = 80_000; // 80KB — cap hidden flush size to avoid foreground backpressure churn
 const MAX_CONCURRENT_SPAWNS = 3;
 const AGENT_STATUS_POLL_MS = 500; // cadence for re-deriving blocked/working/done from the live screen
+/** Consecutive status polls whose screen must show an agent's signature before Pane adopts it. */
+const SCREEN_SIGNATURE_MATCHES = 2;
 const MAX_SCROLLBACK_BUFFER_SIZE = 500_000; // 500KB of normal shell history
 const MAX_ALTERNATE_SCREEN_BUFFER_SIZE = 100_000; // 100KB of recent TUI redraw state
 // Command-detection heuristic bounds. These buffers live in memory only and
@@ -57,7 +59,17 @@ const SHELL_PROMPT_FALLBACK_MS = 5000;
 // practice; the cap is a backstop against pathological payloads.
 export const MAX_RESTORE_PAYLOAD_SIZE = 512 * 1024;
 
-import { CliAgentType, resolveAgentTypeFromCommand } from './agents/agentIdentity';
+import {
+  CliAgentType,
+  isShellProcessName,
+  isVersionedExecutableName,
+  normalizeProcessName,
+  resolveAgentTypeFromCommand,
+  resolveAgentTypeFromExecutablePath,
+  resolveAgentTypeFromProcessName,
+} from './agents/agentIdentity';
+import { detectAgentFromScreen } from './agents/agentScreenSignature';
+import { readForegroundExecutablePath } from '../utils/foregroundProcess';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -227,6 +239,10 @@ interface TerminalProcess {
   isAlternateScreen: boolean;
   /** CLI agent driving this panel, when any — selects the status-detection manifest. */
   agentType?: CliAgentType;
+  /** Basename of the shell Pane spawned, to tell its prompt from a program running in it. */
+  shellProcessName?: string;
+  /** Foreground-process and screen evidence gathered while `agentType` is unresolved. */
+  agentProbe?: AgentProbe;
   /** Last status scan, reused while the emulator pushes no new screen. */
   lastStatusScan?: { screen: ScreenState; detection: AgentDetectionResult };
   /** The CLI came up with typed initial input still to send; the status poll sends it. */
@@ -238,6 +254,21 @@ interface TerminalProcess {
   filterInAltScreen: boolean;
   capturedAgentSessionId?: string;
   agentSessionScrapeBuffer: string;
+}
+
+interface AgentProbe {
+  screen?: ScreenState;
+  screenAgent?: CliAgentType;
+  screenMatches: number;
+  processName?: string;
+  executableLookupInFlight?: boolean;
+}
+
+/** The program in the foreground of a panel's PTY, when the platform can tell. */
+export interface TerminalForegroundProcess {
+  name: string;
+  /** The foreground is Pane's own interactive shell, not a program started from it. */
+  isShell: boolean;
 }
 
 interface CliLaunchResolution {
@@ -261,8 +292,14 @@ export class TerminalPanelManager extends EventEmitter {
   private readonly agentStatusMonitor = new AgentStatusMonitor();
   private agentStatusPollTimer: ReturnType<typeof setInterval> | null = null;
 
-  /** Screen models parse PTY output on this host, off the main thread. */
-  constructor(private readonly emulatorHost: () => TerminalEmulatorHostConnection = sharedEmulatorThread) {
+  /**
+   * Screen models parse PTY output on this host, off the main thread.
+   * `readForegroundExecutable` names the program behind a versioned process name.
+   */
+  constructor(
+    private readonly emulatorHost: () => TerminalEmulatorHostConnection = sharedEmulatorThread,
+    private readonly readForegroundExecutable: (shellPid: number) => Promise<string | undefined> = readForegroundExecutablePath,
+  ) {
     super();
     this.setMaxListeners(100);
   }
@@ -277,7 +314,27 @@ export class TerminalPanelManager extends EventEmitter {
     customState: TerminalPanelState,
     shellType?: string,
   ): CliLaunchResolution {
-    const agentType = customState.agentType ?? resolveAgentTypeFromCommand(initialCommand);
+    if (customState.launchMode === 'wrapped') {
+      // A wrapper runs the agent itself: never rewrite it with session ids,
+      // resume flags, or prompt arguments meant for the agent's own CLI.
+      if (!customState.agentType) {
+        return { commandToRun: initialCommand, customState, isCliCommand: false };
+      }
+      return {
+        commandToRun: initialCommand,
+        customState: {
+          ...customState,
+          isCliPanel: true,
+          isCliReady: false,
+          launchCommand: customState.launchCommand ?? initialCommand,
+          wasInterrupted: undefined,
+        },
+        isCliCommand: true,
+      };
+    }
+
+    const commandAgentType = resolveAgentTypeFromCommand(initialCommand);
+    const agentType = customState.agentType ?? commandAgentType;
     if (!agentType) {
       return { commandToRun: initialCommand, customState, isCliCommand: false };
     }
@@ -287,6 +344,8 @@ export class TerminalPanelManager extends EventEmitter {
       isCliPanel: true,
       isCliReady: false,
       agentType,
+      agentDetection: customState.agentDetection ?? (commandAgentType === agentType ? 'command' : 'declared'),
+      launchCommand: customState.launchCommand ?? initialCommand,
     };
 
     const resolution = agentType === 'claude'
@@ -1088,6 +1147,7 @@ export class TerminalPanelManager extends EventEmitter {
       inSyncBlock: false,
       filterInAltScreen: false,
       agentType: this.resolveTerminalAgentType(terminalCustomState(panel.state)),
+      shellProcessName: normalizeProcessName(shellPath),
       agentSessionScrapeBuffer: ''
     };
 
@@ -1638,7 +1698,7 @@ export class TerminalPanelManager extends EventEmitter {
 
     const panel = panelManager.getPanel(panelId);
     const customState = panel ? terminalCustomState(panel.state) : {};
-    const agentType = customState.agentType ?? resolveAgentTypeFromCommand(customState.initialCommand);
+    const agentType = customState.agentType ?? resolveAgentTypeFromCommand(customState.initialCommand) ?? terminal.agentType;
 
     return {
       initialized: true,
@@ -1750,7 +1810,6 @@ export class TerminalPanelManager extends EventEmitter {
     try {
       for (const terminal of this.terminals.values()) {
         if (terminal.destroying || !this.agentStatusMonitor.isTracked(terminal.panelId)) continue;
-        const manifest = getManifestForAgent(terminal.agentType);
         const emulator = terminal.screenEmulator;
         if (!emulator) continue;
 
@@ -1758,6 +1817,8 @@ export class TerminalPanelManager extends EventEmitter {
         // The emulator only pushes a new object when the screen changed, so an
         // idle panel reuses its last detection instead of rescanning.
         const screen = emulator.state;
+        if (!terminal.agentType) this.detectForegroundAgent(terminal, screen);
+        const manifest = getManifestForAgent(terminal.agentType);
         let detection = terminal.lastStatusScan?.screen === screen ? terminal.lastStatusScan.detection : null;
         if (!detection) {
           detection = detectAgentState(manifest, {
@@ -1774,6 +1835,112 @@ export class TerminalPanelManager extends EventEmitter {
     } catch (error) {
       console.error('[TerminalPanelManager] agent status poll failed:', error);
     }
+  }
+
+  /**
+   * The program in the foreground of a panel's PTY. Undefined on Windows, WSL
+   * and ptyHost terminals, where node-pty cannot name it.
+   */
+  getForegroundProcess(panelId: string): TerminalForegroundProcess | undefined {
+    const terminal = this.terminals.get(panelId);
+    if (!terminal || terminal.destroying) return undefined;
+    const name = this.readForegroundProcessName(terminal);
+    if (!name) return undefined;
+    return { name, isShell: this.isInteractiveShellProcess(terminal, name) };
+  }
+
+  private readForegroundProcessName(terminal: TerminalProcess): string | undefined {
+    if (terminal.isPtyHost || terminal.isWSL || process.platform === 'win32') return undefined;
+    try {
+      return terminal.pty.process || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private isInteractiveShellProcess(terminal: TerminalProcess, name: string): boolean {
+    if (!isShellProcessName(name)) return false;
+    // A shell-script wrapper is a shell too; only Pane's own shell is a prompt.
+    return terminal.shellProcessName === undefined || normalizeProcessName(name) === terminal.shellProcessName;
+  }
+
+  /**
+   * Resolve the agent behind a wrapper or an unknown launch command: first the
+   * foreground process (`claude`, `codex`, `cursor-agent`, or Claude's
+   * versioned binary), then the agent's screen signature on consecutive polls.
+   */
+  private detectForegroundAgent(terminal: TerminalProcess, screen: ScreenState): void {
+    const probe = terminal.agentProbe ??= { screenMatches: 0 };
+    const processName = this.readForegroundProcessName(terminal);
+    const processAgent = resolveAgentTypeFromProcessName(processName);
+    if (processAgent) {
+      this.applyDetectedAgent(terminal, processAgent, 'process');
+      return;
+    }
+    if (processName !== probe.processName) {
+      probe.processName = processName;
+      if (isVersionedExecutableName(processName)) this.lookupForegroundExecutable(terminal, probe);
+    }
+
+    // Pane's own shell at its prompt can still show an agent's last frame.
+    if (processName && this.isInteractiveShellProcess(terminal, processName)) {
+      probe.screen = undefined;
+      probe.screenAgent = undefined;
+      probe.screenMatches = 0;
+      return;
+    }
+    const screenAgent = probe.screen === screen ? probe.screenAgent : detectAgentFromScreen(screen.screenText);
+    probe.screenMatches = screenAgent && screenAgent === probe.screenAgent ? probe.screenMatches + 1 : screenAgent ? 1 : 0;
+    probe.screen = screen;
+    probe.screenAgent = screenAgent;
+    if (screenAgent && probe.screenMatches >= SCREEN_SIGNATURE_MATCHES) {
+      this.applyDetectedAgent(terminal, screenAgent, 'screen');
+    }
+  }
+
+  private lookupForegroundExecutable(terminal: TerminalProcess, probe: AgentProbe): void {
+    if (probe.executableLookupInFlight) return;
+    probe.executableLookupInFlight = true;
+    this.readForegroundExecutable(terminal.pty.pid)
+      .then((executablePath) => {
+        if (this.terminals.get(terminal.panelId) !== terminal || terminal.destroying || terminal.agentType) return;
+        const agentType = resolveAgentTypeFromExecutablePath(executablePath);
+        if (agentType) this.applyDetectedAgent(terminal, agentType, 'process');
+      })
+      .catch((error) => {
+        console.warn(`[TerminalPanelManager] Could not read the foreground executable for panel ${terminal.panelId}:`, error);
+      })
+      .finally(() => {
+        probe.executableLookupInFlight = false;
+      });
+  }
+
+  /** Record a detected wrapper agent so submit, status, `panels list` and watch treat the panel as that agent. */
+  private applyDetectedAgent(terminal: TerminalProcess, agentType: CliAgentType, detection: 'process' | 'screen'): void {
+    terminal.agentType = agentType;
+    terminal.agentProbe = undefined;
+    terminal.lastStatusScan = undefined;
+
+    const panel = panelManager.getPanel(terminal.panelId);
+    if (!panel) return;
+    const customState = terminalCustomState(panel.state);
+    panel.state.customState = {
+      ...customState,
+      agentType,
+      agentDetection: detection,
+      isCliPanel: true,
+      isCliReady: true,
+      launchMode: 'wrapped',
+      launchCommand: customState.launchCommand ?? customState.initialCommand,
+    };
+    void panelManager.updatePanel(terminal.panelId, { state: panel.state }).catch(error => {
+      console.warn(`[TerminalPanelManager] Failed to persist detected ${agentType} for panel ${terminal.panelId}:`, error);
+    });
+    console.log(`[TerminalPanelManager] Detected ${agentType} in panel ${terminal.panelId} from its ${detection}`);
+
+    // Watchers ignored this panel's earlier transitions; restate where it is now.
+    const state = this.agentStatusMonitor.getState(terminal.panelId);
+    if (state) this.emitAgentStatus(terminal, state, 'agent_detected');
   }
 
   destroyTerminal(panelId: string, options: { saveState?: boolean } = {}): Promise<void> {

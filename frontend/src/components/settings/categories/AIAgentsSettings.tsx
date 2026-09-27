@@ -62,7 +62,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
         <SettingRow
           settingId="mcp-registration"
           label="Register Pane tools with Claude Code, Codex, and Cursor"
-          description="Adds a pane MCP server to your user-level Claude Code, Codex, and Cursor configs, so agents in every repository can list, create, and drive Panes. Turning this off removes Pane's entry."
+          description="Adds a pane MCP server to your user-level Claude Code, Codex, and Cursor configs, so agents in every repository can list, create, and drive Panes. The same setting installs an on-demand user skill for all three clients. Turning this off removes Pane-managed entries and skills."
           saveState={persistence.saveStates['mcp-registration']}
         >
           <ImmediateToggle

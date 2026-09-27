@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  syncPaneMcpForApp,
   syncMcpRegistration,
   type McpRegistrationTarget,
   type PaneMcpServerEntry,
@@ -284,5 +285,13 @@ describe('syncMcpRegistration', () => {
       { client: 'Claude Code', action: 'skipped', detail: 'claude: command failed' },
       { client: 'Codex', action: 'added' },
     ]);
+  });
+});
+
+it('does not sync user-home registrations or skills in development', () => {
+  syncPaneMcpForApp({
+    isPackaged: false,
+    config: { agentContext: { registerMcp: true }, claudeExecutablePath: undefined },
+    getProjects: () => { throw new Error('development sync must not inspect projects'); },
   });
 });

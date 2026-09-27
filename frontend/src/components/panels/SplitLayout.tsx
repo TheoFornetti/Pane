@@ -20,7 +20,7 @@ import type {
   SessionPanelLayout,
   ToolPanel,
 } from '../../../../shared/types/panels';
-import { containsGroup } from '../../utils/panelLayout';
+import { containsGroup, groupRects } from '../../utils/panelLayout';
 import type { DropZone } from '../../utils/panelLayout';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 
@@ -77,6 +77,14 @@ export interface SplitLayoutProps {
   showAddTool?: boolean;
   /** Group strips keep tab close buttons visible instead of on hover. */
   alwaysShowClose?: boolean;
+  /**
+   * The stage sits directly under the window title bar. Once split, groups on
+   * the top edge use their strips as the title row (window drag area), and the
+   * top-right one leaves room for the title bar controls.
+   */
+  titleBarInset?: boolean;
+  /** Show permanent tabs in group strips instead of hoisting them elsewhere. */
+  showPermanentTabs?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +112,8 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   emptyState,
   showAddTool,
   alwaysShowClose,
+  titleBarInset = false,
+  showPermanentTabs = false,
 }) => {
   // Inject allotment theme CSS on first render
   React.useEffect(() => { injectTheme(); }, []);
@@ -133,6 +143,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
 
   // Focus chrome only exists once a real split does (pixel-identical rule)
   const multiGroup = layout.root.type === 'split';
+  const rects = useMemo(() => groupRects(layout.root), [layout.root]);
 
   // Allotment's defaultSizes is mount-only, so when a sibling is added to or
   // removed from an existing split (n-ary tab drop), the on-screen
@@ -178,6 +189,8 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     if (node.type === 'group') {
       const groupPanels = resolvePanels(node);
       const isPrimary = node.id === primaryGroupId;
+      const rect = rects.get(node.id);
+      const onTopEdge = titleBarInset && multiGroup && !!rect && rect.y < 1e-6;
       return (
         <PanelGroupView
           key={node.id}
@@ -202,6 +215,9 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
           emptyState={emptyState}
           showAddTool={showAddTool}
           alwaysShowClose={alwaysShowClose}
+          titleRow={onTopEdge}
+          reserveTitleControls={onTopEdge && !!rect && rect.x + rect.w > 1 - 1e-6}
+          showPermanentTabs={showPermanentTabs}
         />
       );
     }
@@ -246,7 +262,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     onPanelSelect, onPanelClose, onFocusGroup, onSizesChange,
     isTabDragging, draggedPanelId, dropZones, onDropZoneChange,
     onDropTab, onDragStart, onDragEnd, onStripDrop, getPanelTabPresentation, zoomedGroupId, emptyState,
-    showAddTool, alwaysShowClose,
+    showAddTool, alwaysShowClose, rects, titleBarInset, showPermanentTabs,
   ]);
 
   // Single-group root: render directly without Allotment

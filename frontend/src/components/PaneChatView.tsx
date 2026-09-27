@@ -324,6 +324,7 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
   const [overview, setOverview] = useState<OrchestrationSessionOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const sessionTabsSlot = useTitleBarSlotStore(state => state.sessionTabsSlot);
+  const [stageSplit, setStageSplit] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const overviewRequestId = useRef(0);
   const overviewRefreshTimer = useRef<number | null>(null);
@@ -447,7 +448,7 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
   return (
     <div className="pane-chat-shell flex-1 flex min-h-0 flex-col overflow-hidden bg-bg-primary">
       <LiveRegion>{statusAnnouncement}</LiveRegion>
-      {sessionTabsSlot && (
+      {sessionTabsSlot && !stageSplit && (
         <div className="flex h-[38px] flex-shrink-0 bg-bg-chrome">
           <div className="pane-drag-area min-w-0 flex-1" />
           <div className="w-12 flex-shrink-0" />
@@ -467,7 +468,7 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <SessionProvider session={view.internalSession}>
           <SessionWorkspacePanels agentPanel={view.panel} agentPanelIds={Object.values(view.session.panelIds)}
-            toolbarActions={sessionControls}
+            toolbarActions={sessionControls} onStageSplitChange={setStageSplit}
             overviewContent={<SessionOverviewPanel
             record={view.session}
             overview={overview}

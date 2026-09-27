@@ -507,18 +507,43 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
         </div>
   );
 
-  // Once the pane is split every tab lives in its group strip, so the top row
-  // has nothing to show and collapses — unless a drag is in flight (it is the
-  // drop target that merges the groups) or the title bar cannot host the
-  // controls (native-framed Linux).
-  const barCollapsed = tabsInGroups && !isTabDragging && !!trailingSlot;
+  // Once the pane is split every tab lives in its group strip, and the top-edge
+  // strips become the title row, so this bar takes no space at all. It stays
+  // mounted for the add-tool menu and the title bar controls; during a tab drag
+  // a floating target offers the merge-all drop instead. Native-framed Linux
+  // (no title bar controls) keeps the full bar.
+  const barCollapsed = tabsInGroups && !!trailingSlot;
 
   return (
     <>
-    <div className={cn("panel-tab-bar bg-bg-chrome flex-shrink-0", trailingSlot && "panel-tab-bar-with-title-controls", barCollapsed && "hidden")}>
+    <div className={cn(
+      "panel-tab-bar bg-bg-chrome flex-shrink-0",
+      trailingSlot && "panel-tab-bar-with-title-controls",
+      barCollapsed && (isTabDragging ? "relative z-20 h-0 border-b-0" : "hidden"),
+    )}>
+      {barCollapsed && isTabDragging && (
+        <div
+          role="presentation"
+          className={cn(
+            "absolute left-1/2 top-1 -translate-x-1/2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border shadow-dropdown",
+            dragOverBar
+              ? "bg-surface-selected border-[color-mix(in_srgb,var(--color-interactive-primary)_60%,transparent)] text-text-primary"
+              : "bg-surface-primary border-border-primary text-text-secondary",
+          )}
+          onDragOver={event => { event.preventDefault(); setDragOverBar(true); }}
+          onDragLeave={() => setDragOverBar(false)}
+          onDrop={event => {
+            event.preventDefault();
+            setDragOverBar(false);
+            if (draggedPanelId) onStripDrop?.(draggedPanelId, 0);
+          }}
+        >
+          Drop here to merge all tabs
+        </div>
+      )}
       {/* Flex container */}
       <div
-        className={cn("relative flex min-h-[38px] items-center", trailingSlot ? "pr-28" : "pr-2")}
+        className={cn("relative flex min-h-[38px] items-center", trailingSlot ? "pr-28" : "pr-2", barCollapsed && "hidden")}
         onDragOver={tabsInGroups && isTabDragging ? () => setDragOverBar(true) : undefined}
         onDragLeave={tabsInGroups && isTabDragging ? () => setDragOverBar(false) : undefined}
       >

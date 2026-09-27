@@ -1460,10 +1460,20 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await openPage('plan-page', 'plan.html');
   const groupStrips = page.locator('.panel-group-tab-bar');
   await expect(groupStrips).toHaveCount(2);
-  // The permanent agent tab stays in the title bar; opened pages get the side strip.
-  await expect(titleBarTabs.getByRole('tab')).toHaveCount(1);
+  // Once split, every tab (the agent's too) lives in a group strip, and the
+  // strips are the title row: nothing is left in, or reserved for, the title bar.
+  await expect(titleBarTabs.getByRole('tab')).toHaveCount(0);
+  await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(1);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
-  await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(0);
+  const [titleBarBox, leftStripBox, rightStripBox] = await Promise.all([
+    page.getByTestId('window-title-bar').boundingBox(),
+    groupStrips.nth(0).boundingBox(),
+    groupStrips.nth(1).boundingBox(),
+  ]);
+  expect(leftStripBox?.y).toBe(titleBarBox?.y);
+  expect(rightStripBox?.y).toBe(titleBarBox?.y);
+  await expect(groupStrips.nth(0)).toHaveCSS('-webkit-app-region', 'drag');
+  await expect(groupStrips.nth(1)).toHaveCSS('padding-right', '112px');
 
   await openPage('report-page', 'report.html');
   await expect(groupStrips).toHaveCount(2);

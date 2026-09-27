@@ -74,7 +74,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
       {activeView === 'pane-chat' && (
         <div
           ref={setSessionTabsSlot}
-          className="pointer-events-auto absolute inset-y-0 flex min-w-0 items-center overflow-hidden transition-[left] duration-reveal ease-out-strong"
+          className="pointer-events-none absolute inset-y-0 flex min-w-0 items-center overflow-hidden transition-[left] duration-reveal ease-out-strong [&>*]:pointer-events-auto"
           style={{ ...NO_DRAG, left: sessionTabsLeft, right: sessionTabsRight }}
           data-testid="window-title-bar-session-tabs"
         />

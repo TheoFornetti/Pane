@@ -507,6 +507,60 @@
       "folder-9",
       "--yes",
       "--json"
+    ],
+    [
+      "lock",
+      "acquire",
+      "--name",
+      "testing-account",
+      "--ttl",
+      "30m",
+      "--wait",
+      "1800000",
+      "--note",
+      "call QA",
+      "--json"
+    ],
+    [
+      "lock",
+      "acquire",
+      "--name",
+      "staging-db",
+      "--ttl",
+      "1500",
+      "--pane",
+      "session-1",
+      "--panel",
+      "panel-1",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "lock",
+      "acquire",
+      "--name=db",
+      "--ttl=2h"
+    ],
+    [
+      "lock",
+      "release",
+      "--name",
+      "testing-account",
+      "--force",
+      "--session",
+      "Release QA",
+      "--json"
+    ],
+    [
+      "lock",
+      "list",
+      "--session",
+      "Release QA",
+      "--json"
+    ],
+    [
+      "lock",
+      "--help"
     ]
   ],
   "help": {

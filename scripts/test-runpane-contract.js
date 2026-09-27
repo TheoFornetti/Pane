@@ -608,6 +608,9 @@ function compareParserParity() {
       keys: parsed.keys ?? null,
       toolsets: parsed.toolsets ?? null,
       readOnly: parsed.readOnly ?? false,
+      lockTtlMs: parsed.lockTtlMs ?? null,
+      lockWaitMs: parsed.lockWaitMs ?? null,
+      note: parsed.note ?? null,
       remoteSetupArgs: parsed.remoteSetupArgs
     };
   });
@@ -697,6 +700,9 @@ for args in samples:
         "keys": parsed.keys,
         "toolsets": parsed.toolsets,
         "readOnly": parsed.read_only,
+        "lockTtlMs": parsed.lock_ttl_ms,
+        "lockWaitMs": parsed.lock_wait_ms,
+        "note": parsed.note,
         "remoteSetupArgs": parsed.remote_setup_args,
     })
 print(json.dumps(normalized))
@@ -2077,6 +2083,127 @@ print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines(), "ref
   assert.strictEqual(python.emptyRejected, true);
 }
 
+async function checkLockParity() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { runLockAcquire, runLockRelease, runLockList } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const originalEnv = { PANE_SESSION_ID: process.env.PANE_SESSION_ID, PANE_PANEL_ID: process.env.PANE_PANEL_ID };
+  const lock = {
+    name: 'testing-account',
+    scope: 'session',
+    sessionId: 'orch-1',
+    owner: { kind: 'pane', paneId: 'pane-a', panelId: 'panel-a' },
+    acquiredAt: '2026-09-27T12:00:00.000Z',
+    expiresAt: '2026-09-27T12:30:00.000Z',
+    ttlMs: 1_800_000,
+  };
+  const contended = (timedOut) => ({ ok: false, acquired: false, timedOut, waitedMs: 0, heldBy: lock.owner, expiresAt: lock.expiresAt, lock });
+  const scripted = [
+    contended(true),
+    { ok: true, acquired: true, renewed: false, waitedMs: 0, lock },
+    contended(false),
+    { ok: true, released: true, forced: true, lock },
+    { ok: true, locks: [lock] },
+  ];
+  const calls = [];
+  const codes = [];
+  daemonClient.invokeDaemon = async (channel, args) => {
+    calls.push({ channel, request: args[0] });
+    return scripted[calls.length - 1];
+  };
+  console.log = () => {};
+  const setEnv = (paneId, panelId) => {
+    if (paneId) process.env.PANE_SESSION_ID = paneId; else delete process.env.PANE_SESSION_ID;
+    if (panelId) process.env.PANE_PANEL_ID = panelId; else delete process.env.PANE_PANEL_ID;
+  };
+
+  try {
+    setEnv('pane-b', 'panel-b');
+    codes.push(await runLockAcquire(parseRunpaneArgs(['lock', 'acquire', '--name', 'testing-account', '--ttl', '30m', '--wait', '250000', '--note', 'call QA', '--json'])));
+    setEnv();
+    codes.push(await runLockAcquire(parseRunpaneArgs(['lock', 'acquire', '--name', 'testing-account', '--ttl', '90s', '--note', 'nightly QA', '--json'])));
+    codes.push(await runLockRelease(parseRunpaneArgs(['lock', 'release', '--name', 'testing-account', '--force', '--session', 'Release QA', '--json'])));
+    codes.push(await runLockList(parseRunpaneArgs(['lock', 'list', '--session', 'Release QA', '--json'])));
+    await assert.rejects(
+      runLockAcquire(parseRunpaneArgs(['lock', 'acquire', '--name', 'testing-account', '--ttl', '30m'])),
+      /pass --note/,
+    );
+    assert.throws(() => parseRunpaneArgs(['lock', 'acquire', '--name', 'x', '--ttl', '30']), /between 1s and 24h/);
+    assert.throws(() => parseRunpaneArgs(['lock', 'acquire', '--name', 'x', '--ttl', '30 minutes']), /duration such as/);
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+    setEnv(originalEnv.PANE_SESSION_ID, originalEnv.PANE_PANEL_ID);
+  }
+
+  assert.deepStrictEqual(codes, [0, 1, 0, 0]);
+  const acquireRequest = { name: 'testing-account', ttlMs: 1_800_000, note: 'call QA', owner: { paneId: 'pane-b', panelId: 'panel-b' } };
+  assert.deepStrictEqual(calls.map((call) => call.channel), [
+    'runpane:locks:acquire',
+    'runpane:locks:acquire',
+    'runpane:locks:acquire',
+    'runpane:locks:release',
+    'runpane:locks:list',
+  ]);
+  assert.deepStrictEqual(calls[0].request, { ...acquireRequest, waitMs: 120_000 });
+  assert.deepStrictEqual(calls[1].request, { ...acquireRequest, waitMs: 120_000 });
+  assert.deepStrictEqual(calls[2].request, { name: 'testing-account', ttlMs: 90_000, note: 'nightly QA', owner: { label: 'nightly QA' }, waitMs: 0 });
+  assert.deepStrictEqual(calls[3].request, { name: 'testing-account', force: true, sessionId: 'Release QA', owner: {} });
+  assert.deepStrictEqual(calls[4].request, { sessionId: 'Release QA' });
+
+  const pythonOutput = runPythonSnippet(`
+import contextlib
+import io
+import json
+import os
+import sys
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+scripted = json.loads(sys.stdin.read())
+calls = []
+def fake_invoke(channel, args, **kwargs):
+    calls.append({"channel": channel, "request": args[0]})
+    return scripted[len(calls) - 1]
+
+def set_env(pane_id=None, panel_id=None):
+    for key, value in (("PANE_SESSION_ID", pane_id), ("PANE_PANEL_ID", panel_id)):
+        if value:
+            os.environ[key] = value
+        else:
+            os.environ.pop(key, None)
+
+local_control.invoke_daemon = fake_invoke
+codes = []
+with contextlib.redirect_stdout(io.StringIO()):
+    set_env("pane-b", "panel-b")
+    codes.append(local_control.run_lock_acquire(parse_args(["lock", "acquire", "--name", "testing-account", "--ttl", "30m", "--wait", "250000", "--note", "call QA", "--json"])))
+    set_env()
+    codes.append(local_control.run_lock_acquire(parse_args(["lock", "acquire", "--name", "testing-account", "--ttl", "90s", "--note", "nightly QA", "--json"])))
+    codes.append(local_control.run_lock_release(parse_args(["lock", "release", "--name", "testing-account", "--force", "--session", "Release QA", "--json"])))
+    codes.append(local_control.run_lock_list(parse_args(["lock", "list", "--session", "Release QA", "--json"])))
+
+errors = []
+try:
+    local_control.run_lock_acquire(parse_args(["lock", "acquire", "--name", "testing-account", "--ttl", "30m"]))
+except ValueError as error:
+    errors.append("pass --note" in str(error))
+for ttl, expected in (("30", "between 1s and 24h"), ("30 minutes", "duration such as")):
+    try:
+        parse_args(["lock", "acquire", "--name", "x", "--ttl", ttl])
+    except ValueError as error:
+        errors.append(expected in str(error))
+
+print(json.dumps({"calls": calls, "codes": codes, "errors": errors}))
+`, JSON.stringify(scripted));
+  const python = JSON.parse(pythonOutput);
+  assert.deepStrictEqual(python.calls, calls);
+  assert.deepStrictEqual(python.codes, codes);
+  assert.deepStrictEqual(python.errors, [true, true, true]);
+}
+
 function checkHelpOutput() {
   const python = findPython();
   const pythonEnv = {
@@ -2730,6 +2857,7 @@ async function runChecks() {
   await checkPaneCreateBlockedReadiness();
   await checkPanesCostParity();
   await checkPaneRenameParity();
+  await checkLockParity();
   await checkAgentTemplateParity();
   checkHelpOutput();
   compareAgentContextParity();

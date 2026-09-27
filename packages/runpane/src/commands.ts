@@ -90,6 +90,9 @@ export interface ParsedArgs {
   keys?: string[];
   toolsets?: string[];
   readOnly?: boolean;
+  lockTtlMs?: number;
+  lockWaitMs?: number;
+  note?: string;
   remoteSetupArgs: string[];
 }
 
@@ -105,7 +108,10 @@ const targetSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.installTarge
 const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactFormats);
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock']);
+const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
+const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
+const MAX_LOCK_DURATION_MS = 86_400_000;
 
 const REMOTE_VALUE_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteValue.map((flag) => flag.name));
 const REMOTE_BOOLEAN_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteBoolean.map((flag) => flag.name));
@@ -629,8 +635,32 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.toolsets = value.split(',').map((name) => name.trim()).filter(Boolean);
     return;
   }
+  if (flag === '--ttl') {
+    parsed.lockTtlMs = parseLockTtl(value);
+    return;
+  }
+  if (flag === '--wait') {
+    const waitMs = parseNonNegativeIntegerFlag(flag, value);
+    if (waitMs > MAX_LOCK_DURATION_MS) throw new Error('--wait must be at most 86400000 (24h).');
+    parsed.lockWaitMs = waitMs;
+    return;
+  }
+  if (flag === '--note') {
+    parsed.note = value;
+    return;
+  }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
+}
+
+/** A lock TTL such as 90s, 30m, or 2h; a bare number is milliseconds. */
+function parseLockTtl(value: string): number {
+  const match = LOCK_DURATION_PATTERN.exec(value.trim());
+  if (!match) throw new Error('--ttl must be a duration such as 90s, 30m, or 2h (a bare number is milliseconds).');
+  const unit = match[2] === 'ms' || match[2] === 's' || match[2] === 'm' || match[2] === 'h' ? match[2] : 'ms';
+  const ttlMs = Number(match[1]) * LOCK_DURATION_UNIT_MS[unit];
+  if (ttlMs < 1_000 || ttlMs > MAX_LOCK_DURATION_MS) throw new Error('--ttl must be between 1s and 24h.');
+  return ttlMs;
 }
 
 function parseNonNegativeIntegerFlag(flag: string, value: string): number {
@@ -670,6 +700,9 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'sessions associate'
     || command === 'sessions detach'
     || command === 'sessions overview'
+    || command === 'lock acquire'
+    || command === 'lock release'
+    || command === 'lock list'
     || command === 'panels create'
     || command === 'panels list'
     || command === 'panels output'

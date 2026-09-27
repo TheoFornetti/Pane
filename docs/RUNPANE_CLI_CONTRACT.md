@@ -125,6 +125,9 @@ runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--
 runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]
 runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]
 runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
+runpane lock acquire --name testing-account --ttl 30m --wait 1800000 --note "call QA" --json
+runpane lock release --name testing-account --json
+runpane lock list --json
 runpane agents start --repo active --name fix-login --agent claude --prompt "Fix the login redirect" --yes --json
 runpane agents status --pane <pane-id> --json
 runpane agents send --pane <pane-id> --text "Also add a test" --yes --json
@@ -206,6 +209,8 @@ When running from WSL while Pane is installed on Windows, the Linux wrapper may 
 `sessions detach` detach a Pane from a named Session.
 
 `sessions overview` read a live status, activity, git, and pull request overview for a named Session.
+
+`runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.
 
 `runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task in a repository, check on it, and send it a follow-up.
 
@@ -337,6 +342,9 @@ These flags are consumed by local daemon-control commands:
 --min-interval <milliseconds>
 --body-file <path|->
 --session <id|name>
+--ttl <duration>
+--wait <milliseconds>
+--note <text>
 --message <message>
 --query <text>
 --doc <path>

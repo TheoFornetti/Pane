@@ -134,7 +134,128 @@ def run_sessions_overview(parsed: Any) -> int:
                 for panel in pane.get("panels", [])
             ) or "no terminal panels"
         print(f"  {pane.get('name')}: {details}")
+    for lock in result.get("locks") or []:
+        print(f"  lock {format_lock_line(lock)}")
     return 0
+
+
+# One daemon call waits at most this long; longer waits chain calls, each blocking in the daemon.
+LOCK_WAIT_PER_CALL_MS = 120_000
+
+
+def run_lock_acquire(parsed: Any) -> int:
+    name = _require_lock_name(parsed, "acquire")
+    if parsed.lock_ttl_ms is None:
+        raise ValueError("runpane lock acquire requires --ttl <duration>, such as --ttl 30m.")
+    request: Dict[str, Any] = {
+        "name": name,
+        "ttlMs": parsed.lock_ttl_ms,
+        **optional_value("note", parsed.note),
+        "owner": _lock_owner(parsed, False),
+    }
+    wait_ms = parsed.lock_wait_ms or 0
+    started_at = time.monotonic()
+    while True:
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        call_wait_ms = min(max(0, wait_ms - elapsed_ms), LOCK_WAIT_PER_CALL_MS)
+        result = invoke_daemon(
+            "runpane:locks:acquire",
+            [{**request, "waitMs": call_wait_ms}],
+            pane_dir=parsed.pane_dir,
+            timeout_ms=call_wait_ms + 15_000,
+        )
+        # Only a call that waited out its whole window without the lock coming free chains another.
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        if result.get("ok") or not result.get("timedOut") or elapsed_ms >= wait_ms:
+            break
+    result = {**result, "waitedMs": int((time.monotonic() - started_at) * 1000)}
+    if parsed.json:
+        print_json(result)
+    elif result.get("ok"):
+        action = "Renewed" if result.get("renewed") else "Acquired"
+        print(f"{action} lock {format_lock_line(result.get('lock') or {})}")
+    else:
+        lock = result.get("lock") or {}
+        note = f" ({lock.get('note')})" if lock.get("note") else ""
+        print(f"Lock {lock.get('name')} is held by {format_lock_owner(result.get('heldBy') or {})} until {result.get('expiresAt')}{note}.")
+    return 0 if result.get("ok") else 1
+
+
+def run_lock_release(parsed: Any) -> int:
+    name = _require_lock_name(parsed, "release")
+    request: Dict[str, Any] = {
+        "name": name,
+        **optional_value("force", True if parsed.force else None),
+        **optional_value("sessionId", (parsed.session_id or "").strip() or None),
+        "owner": _lock_owner(parsed, bool(parsed.force)),
+    }
+    result = invoke_daemon("runpane:locks:release", [request], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+    elif not result.get("ok"):
+        print(
+            f"Lock {name} is held by {format_lock_owner(result.get('heldBy') or {})} until {result.get('expiresAt')}; "
+            "only its owner can release it. Rerun with --force to release it anyway."
+        )
+    elif result.get("released"):
+        print(f"{'Force-released' if result.get('forced') else 'Released'} lock {name}.")
+    else:
+        print(f"Lock {name} was not held.")
+    return 0 if result.get("ok") else 1
+
+
+def run_lock_list(parsed: Any) -> int:
+    request = optional_value("sessionId", (parsed.session_id or "").strip() or None)
+    result = invoke_daemon("runpane:locks:list", [request], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+        return 0
+    locks = result.get("locks") or []
+    for lock in locks:
+        print(format_lock_line(lock))
+    if not locks:
+        print("No locks held.")
+    return 0
+
+
+def _require_lock_name(parsed: Any, action: str) -> str:
+    name = (parsed.name or "").strip()
+    if not name:
+        raise ValueError(f"runpane lock {action} requires --name <name>.")
+    return name
+
+
+def _lock_owner(parsed: Any, forced: bool) -> Dict[str, Any]:
+    """The caller owns the lock: --pane/--panel, else $PANE_SESSION_ID/$PANE_PANEL_ID; outside Pane, --note."""
+    explicit = bool(parsed.pane_id or parsed.panel_id)
+    pane_id = parsed.pane_id if explicit else (os.environ.get("PANE_SESSION_ID") or "").strip() or None
+    panel_id = parsed.panel_id if explicit else (os.environ.get("PANE_PANEL_ID") or "").strip() or None
+    if pane_id or panel_id:
+        return {**optional_value("paneId", pane_id), **optional_value("panelId", panel_id)}
+    label = (parsed.note or "").strip()
+    if not label and not forced:
+        raise ValueError(
+            "Outside a Pane terminal, pass --note <text> to say who holds the lock "
+            "(or --pane/--panel to act for a Pane)."
+        )
+    return optional_value("label", label or None)
+
+
+def format_lock_owner(owner: Dict[str, Any]) -> str:
+    if owner.get("kind") == "external":
+        return f'external "{owner.get("label") or ""}"'
+    if owner.get("panelId"):
+        return f"pane {owner.get('paneId')} panel {owner.get('panelId')}"
+    return f"pane {owner.get('paneId')}"
+
+
+def format_lock_line(lock: Dict[str, Any]) -> str:
+    scope = f"session {lock.get('sessionId')}" if lock.get("scope") == "session" else "global"
+    note = f" ({lock.get('note')})" if lock.get("note") else ""
+    return (
+        f"{lock.get('name')} [{scope}] held by {format_lock_owner(lock.get('owner') or {})} "
+        f"until {lock.get('expiresAt')}{note}"
+    )
 
 
 def _session_selector(parsed: Any) -> Dict[str, str]:

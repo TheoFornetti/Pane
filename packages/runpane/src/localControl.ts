@@ -150,6 +150,45 @@ interface RunpaneSessionOverviewResult {
   activity: OrchestrationActivity[];
   report?: OrchestrationReport & { freshness: 'current' | 'stale' };
   refreshedAt: string;
+  /** Absent from daemons that predate named locks. */
+  locks?: LockRecord[];
+}
+
+interface LockOwner {
+  kind: 'pane' | 'external';
+  paneId?: string;
+  panelId?: string;
+  label?: string;
+}
+
+interface LockRecord {
+  name: string;
+  scope: 'session' | 'global';
+  sessionId?: string;
+  owner: LockOwner;
+  note?: string;
+  acquiredAt: string;
+  expiresAt: string;
+  ttlMs: number;
+}
+
+interface LockOwnerInput {
+  paneId?: string;
+  panelId?: string;
+  label?: string;
+}
+
+type LockAcquireResult =
+  | { ok: true; acquired: true; renewed: boolean; waitedMs: number; lock: LockRecord }
+  | { ok: false; acquired: false; timedOut: boolean; waitedMs: number; heldBy: LockOwner; expiresAt: string; lock: LockRecord };
+
+type LockReleaseResult =
+  | { ok: true; released: boolean; forced: boolean; lock?: LockRecord }
+  | { ok: false; released: false; reason: 'not-owner'; heldBy: LockOwner; expiresAt: string; lock: LockRecord };
+
+interface LockListResult {
+  ok: true;
+  locks: LockRecord[];
 }
 
 interface RepoSummary {
@@ -928,6 +967,60 @@ const orchestrationPaneOverviewSchema: BoundarySchema<OrchestrationPaneOverview>
     prState: boundary.optional(boundary.string),
   })),
 });
+const lockOwnerSchema: BoundarySchema<LockOwner> = boundary.object({
+  kind: boundary.enumeration('pane', 'external'),
+  paneId: boundary.optional(boundary.nonEmptyString),
+  panelId: boundary.optional(boundary.nonEmptyString),
+  label: boundary.optional(boundary.string),
+});
+const lockRecordSchema: BoundarySchema<LockRecord> = boundary.object({
+  name: boundary.nonEmptyString,
+  scope: boundary.enumeration('session', 'global'),
+  sessionId: boundary.optional(boundary.nonEmptyString),
+  owner: lockOwnerSchema,
+  note: boundary.optional(boundary.string),
+  acquiredAt: boundary.nonEmptyString,
+  expiresAt: boundary.nonEmptyString,
+  ttlMs: boundary.number,
+});
+const lockAcquireResultSchema: BoundarySchema<LockAcquireResult> = boundary.union(
+  boundary.object({
+    ok: boundary.literal(true),
+    acquired: boundary.literal(true),
+    renewed: boundary.boolean,
+    waitedMs: boundary.number,
+    lock: lockRecordSchema,
+  }),
+  boundary.object({
+    ok: boundary.literal(false),
+    acquired: boundary.literal(false),
+    timedOut: boundary.boolean,
+    waitedMs: boundary.number,
+    heldBy: lockOwnerSchema,
+    expiresAt: boundary.nonEmptyString,
+    lock: lockRecordSchema,
+  }),
+);
+const lockReleaseResultSchema: BoundarySchema<LockReleaseResult> = boundary.union(
+  boundary.object({
+    ok: boundary.literal(true),
+    released: boundary.boolean,
+    forced: boundary.boolean,
+    lock: boundary.optional(lockRecordSchema),
+  }),
+  boundary.object({
+    ok: boundary.literal(false),
+    released: boundary.literal(false),
+    reason: boundary.literal('not-owner'),
+    heldBy: lockOwnerSchema,
+    expiresAt: boundary.nonEmptyString,
+    lock: lockRecordSchema,
+  }),
+);
+const lockListResultSchema: BoundarySchema<LockListResult> = boundary.object({
+  ok: boundary.literal(true),
+  locks: boundary.array(lockRecordSchema),
+});
 const runpaneSessionOverviewResultSchema: BoundarySchema<RunpaneSessionOverviewResult> = boundary.object({
   ok: boundary.literal(true),
   session: orchestrationSessionRecordSchema,
@@ -939,6 +1032,7 @@ const runpaneSessionOverviewResultSchema: BoundarySchema<RunpaneSessionOverviewR
     freshness: boundary.enumeration('current', 'stale'),
   })),
   refreshedAt: boundary.nonEmptyString,
+  locks: boundary.optional(boundary.array(lockRecordSchema)),
 });
 
 function orchestrationReportSchemaFields() {
@@ -1477,7 +1571,112 @@ export async function runSessionsOverview(parsed: ParsedArgs): Promise<number> {
     const details = pane.missing ? 'missing' : pane.archived ? 'archived' : pane.panels.map(panel => `${panel.title}=${panel.state}`).join(', ') || 'no terminal panels';
     console.log(`  ${pane.name}: ${details}`);
   }
+  for (const lock of result.locks ?? []) {
+    console.log(`  lock ${formatLockLine(lock)}`);
+  }
   return 0;
+}
+
+/** One daemon call waits at most this long; longer waits chain calls, each blocking in the daemon. */
+const LOCK_WAIT_PER_CALL_MS = 120_000;
+
+export async function runLockAcquire(parsed: ParsedArgs): Promise<number> {
+  const name = requireLockName(parsed, 'acquire');
+  if (parsed.lockTtlMs === undefined) throw new Error('runpane lock acquire requires --ttl <duration>, such as --ttl 30m.');
+  const request = { name, ttlMs: parsed.lockTtlMs, note: parsed.note, owner: lockOwnerFromParsed(parsed, false) };
+  const waitMs = parsed.lockWaitMs ?? 0;
+  const startedAt = Date.now();
+  let result: LockAcquireResult;
+  for (;;) {
+    const callWaitMs = Math.min(Math.max(0, waitMs - (Date.now() - startedAt)), LOCK_WAIT_PER_CALL_MS);
+    result = await invokeDaemon('runpane:locks:acquire', [{ ...request, waitMs: callWaitMs }], lockAcquireResultSchema, {
+      paneDir: parsed.paneDir,
+      timeoutMs: callWaitMs + 15_000,
+    });
+    // Only a call that waited out its whole window without the lock coming free chains another.
+    if (result.ok || !result.timedOut || Date.now() - startedAt >= waitMs) break;
+  }
+  const final: LockAcquireResult = { ...result, waitedMs: Date.now() - startedAt };
+  if (parsed.json) {
+    printJson(final);
+  } else if (final.ok) {
+    console.log(`${final.renewed ? 'Renewed' : 'Acquired'} lock ${formatLockLine(final.lock)}`);
+  } else {
+    console.log(`Lock ${final.lock.name} is held by ${formatLockOwner(final.heldBy)} until ${final.expiresAt}${final.lock.note ? ` (${final.lock.note})` : ''}.`);
+  }
+  return final.ok ? 0 : 1;
+}
+
+export async function runLockRelease(parsed: ParsedArgs): Promise<number> {
+  const name = requireLockName(parsed, 'release');
+  const request = {
+    name,
+    force: parsed.force || undefined,
+    sessionId: parsed.sessionId?.trim() || undefined,
+    owner: lockOwnerFromParsed(parsed, parsed.force === true),
+  };
+  const result = await invokeDaemon('runpane:locks:release', [request], lockReleaseResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) {
+    printJson(result);
+  } else if (!result.ok) {
+    console.log(`Lock ${name} is held by ${formatLockOwner(result.heldBy)} until ${result.expiresAt}; only its owner can release it. Rerun with --force to release it anyway.`);
+  } else if (result.released) {
+    console.log(`${result.forced ? 'Force-released' : 'Released'} lock ${name}.`);
+  } else {
+    console.log(`Lock ${name} was not held.`);
+  }
+  return result.ok ? 0 : 1;
+}
+
+export async function runLockList(parsed: ParsedArgs): Promise<number> {
+  const sessionId = parsed.sessionId?.trim() || undefined;
+  const result = await invokeDaemon('runpane:locks:list', [{ sessionId }], lockListResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) {
+    printJson(result);
+    return 0;
+  }
+  for (const lock of result.locks) console.log(formatLockLine(lock));
+  if (result.locks.length === 0) console.log('No locks held.');
+  return 0;
+}
+
+function requireLockName(parsed: ParsedArgs, action: 'acquire' | 'release'): string {
+  const name = parsed.name?.trim();
+  if (!name) throw new Error(`runpane lock ${action} requires --name <name>.`);
+  return name;
+}
+
+/**
+ * The caller owns the lock: --pane/--panel when given, else the Pane terminal
+ * it runs in ($PANE_SESSION_ID/$PANE_PANEL_ID). Outside Pane, --note names the owner.
+ */
+function lockOwnerFromParsed(parsed: ParsedArgs, forced: boolean): LockOwnerInput {
+  const explicit = Boolean(parsed.paneId || parsed.panelId);
+  const paneId = explicit ? parsed.paneId : process.env.PANE_SESSION_ID?.trim() || undefined;
+  const panelId = explicit ? parsed.panelId : process.env.PANE_PANEL_ID?.trim() || undefined;
+  const owner: LockOwnerInput = {};
+  if (paneId || panelId) {
+    if (paneId) owner.paneId = paneId;
+    if (panelId) owner.panelId = panelId;
+    return owner;
+  }
+  const label = parsed.note?.trim();
+  if (!label && !forced) {
+    throw new Error('Outside a Pane terminal, pass --note <text> to say who holds the lock (or --pane/--panel to act for a Pane).');
+  }
+  if (label) owner.label = label;
+  return owner;
+}
+
+function formatLockOwner(owner: LockOwner): string {
+  if (owner.kind === 'external') return `external "${owner.label ?? ''}"`;
+  return owner.panelId ? `pane ${owner.paneId} panel ${owner.panelId}` : `pane ${owner.paneId}`;
+}
+
+function formatLockLine(lock: LockRecord): string {
+  const scope = lock.scope === 'session' ? `session ${lock.sessionId}` : 'global';
+  const note = lock.note ? ` (${lock.note})` : '';
+  return `${lock.name} [${scope}] held by ${formatLockOwner(lock.owner)} until ${lock.expiresAt}${note}`;
 }
 
 function sessionSelectorFromParsed(parsed: ParsedArgs): SessionSelectorValue {

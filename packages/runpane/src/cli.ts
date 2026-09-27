@@ -43,6 +43,9 @@ import {
   runSessionsGet,
   runSessionsList,
   runSessionsOverview,
+  runLockAcquire,
+  runLockList,
+  runLockRelease,
   runSessionsSetAgent,
   runSessionsUpdate,
   runReposAdd,
@@ -201,6 +204,18 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'sessions overview') {
     return runSessionsOverview(parsed);
+  }
+
+  if (parsed.command === 'lock acquire') {
+    return runLockAcquire(parsed);
+  }
+
+  if (parsed.command === 'lock release') {
+    return runLockRelease(parsed);
+  }
+
+  if (parsed.command === 'lock list') {
+    return runLockList(parsed);
   }
 
   if (parsed.command === 'workspace state') {

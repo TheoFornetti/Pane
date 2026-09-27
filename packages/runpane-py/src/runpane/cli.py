@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 import os
+import re
 import socket
 import sys
 from typing import Callable, Dict, List, Optional, Set, Tuple, TypeVar
@@ -23,6 +24,9 @@ from .installers import (
 from .local_control import (
     has_cadence_value_flag,
     run_agents_doctor,
+    run_lock_acquire,
+    run_lock_list,
+    run_lock_release,
     run_panels_create,
     run_panels_input,
     run_panels_list,
@@ -76,6 +80,10 @@ CHANNELS = set(RUNPANE_CONTRACT["enums"]["channels"])
 AGENTS = set(RUNPANE_CONTRACT["enums"]["agents"])
 COMMAND_GROUP_HELP_TOPICS = {"panes", "panels", "workspace"}
 COMMAND_GROUP_HELP_TOPICS.add("sessions")
+COMMAND_GROUP_HELP_TOPICS.add("lock")
+LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
+LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
+MAX_LOCK_DURATION_MS = 86_400_000
 
 REMOTE_VALUE_FLAGS = {flag["name"] for flag in RUNPANE_CONTRACT["flags"]["remoteValue"]}
 REMOTE_BOOLEAN_FLAGS = {flag["name"] for flag in RUNPANE_CONTRACT["flags"]["remoteBoolean"]}
@@ -175,6 +183,9 @@ class ParsedArgs:
     keys: Optional[List[str]] = None
     toolsets: Optional[List[str]] = None
     read_only: bool = False
+    lock_ttl_ms: Optional[int] = None
+    lock_wait_ms: Optional[int] = None
+    note: Optional[str] = None
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
 
@@ -258,6 +269,12 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_sessions_detach(parsed)
     if parsed.command == "sessions overview":
         return run_sessions_overview(parsed)
+    if parsed.command == "lock acquire":
+        return run_lock_acquire(parsed)
+    if parsed.command == "lock release":
+        return run_lock_release(parsed)
+    if parsed.command == "lock list":
+        return run_lock_list(parsed)
     if parsed.command == "panes list":
         return run_panes_list(parsed)
     if parsed.command == "panes cost":
@@ -495,6 +512,17 @@ def parse_args(argv: List[str]) -> ParsedArgs:
             "runpane watch accepts either --since or --settle/--blocked-settle/--min-interval, not both (cadence needs a named cursor)."
         )
     return parsed
+
+
+def parse_lock_ttl(value: str) -> int:
+    """A lock TTL such as 90s, 30m, or 2h; a bare number is milliseconds."""
+    match = LOCK_DURATION_PATTERN.match(value.strip())
+    if not match:
+        raise ValueError("--ttl must be a duration such as 90s, 30m, or 2h (a bare number is milliseconds).")
+    ttl_ms = int(match.group(1)) * LOCK_DURATION_UNIT_MS[match.group(2) or "ms"]
+    if ttl_ms < 1_000 or ttl_ms > MAX_LOCK_DURATION_MS:
+        raise ValueError("--ttl must be between 1s and 24h.")
+    return ttl_ms
 
 
 def parse_non_negative_int_flag(flag: str, value: str) -> int:
@@ -849,6 +877,18 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--toolsets":
         parsed.toolsets = [name.strip() for name in value.split(",") if name.strip()]
         return
+    if flag == "--ttl":
+        parsed.lock_ttl_ms = parse_lock_ttl(value)
+        return
+    if flag == "--wait":
+        wait_ms = parse_non_negative_int_flag(flag, value)
+        if wait_ms > MAX_LOCK_DURATION_MS:
+            raise ValueError("--wait must be at most 86400000 (24h).")
+        parsed.lock_wait_ms = wait_ms
+        return
+    if flag == "--note":
+        parsed.note = value
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -869,6 +909,9 @@ def is_runpane_local_command(command: str) -> bool:
         "sessions associate",
         "sessions detach",
         "sessions overview",
+        "lock acquire",
+        "lock release",
+        "lock list",
         "workspace state",
         "watch",
         "panes list",

@@ -461,6 +461,17 @@ export type RunpanePaneArchiveBlockCode =
   | 'uncommitted-and-unpushed'
   | 'status-unknown';
 
+/**
+ * Why the archive safety check was skipped or could not run. `external-worktree` (an adopted Pane
+ * whose worktree Pane does not own), `main-repo`, and a Pane with no repository also mean archive
+ * leaves the worktree on disk (`worktreeWillRemain`).
+ */
+export type RunpanePaneArchiveSafetyCheckReason =
+  | 'external-worktree'
+  | 'main-repo'
+  | 'missing-project-context'
+  | 'git-error';
+
 export interface RunpanePaneArchiveSafetyCheck {
   performed: boolean;
   hasUncommittedChanges?: boolean;
@@ -470,6 +481,9 @@ export interface RunpanePaneArchiveSafetyCheck {
   upstreamRefreshed?: boolean;
   unpushedCommits?: number;
   unpushedCommitDetails?: RunpanePaneArchiveCommit[];
+  reason?: RunpanePaneArchiveSafetyCheckReason;
+  /** Set when archive will not remove the worktree because cleanup does not apply to this Pane. */
+  worktreeWillRemain?: true;
 }
 
 export interface RunpanePaneArchiveCommit {

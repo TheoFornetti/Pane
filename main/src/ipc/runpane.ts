@@ -40,6 +40,7 @@ import type {
   RunpanePaneArchiveRequest,
   RunpanePaneArchiveResult,
   RunpanePaneArchiveSafetyCheck,
+  RunpanePaneArchiveSafetyCheckReason,
   RunpanePaneArchiveSuccessResult,
   RunpanePaneAdoptRequest,
   RunpanePaneAdoptResult,
@@ -179,7 +180,9 @@ const DEFAULT_ARCHIVE_CLEANUP_POLL_INTERVAL_MS = 200;
 const DEFAULT_WORKSPACE_WAIT_TIMEOUT_MS = 60_000;
 const MAX_WORKSPACE_WAIT_TIMEOUT_MS = 120_000;
 const DEFAULT_WORKSPACE_WAIT_LIMIT = 256;
-const WORKSPACE_CONSUMER_PATTERN = /^[A-Za-z0-9._-]{1,64}$/u;
+// Named cursors are keys in workspace-cursors.json, never file names. 128 fits `session-<id>` for
+// any Session ID; runpane shortens the names it derives to 64 for older daemons.
+const WORKSPACE_CONSUMER_PATTERN = /^[A-Za-z0-9._-]{1,128}$/u;
 const MUTATING_RUNPANE_ACTIONS = new Set([
   'panes:create',
   'panes:adopt',
@@ -793,12 +796,11 @@ export function registerRunpaneHandlers(
         throw new Error(`Pane ${normalized.paneId} is already archived`);
       }
 
-      const worktreeCleanupApplicable = Boolean(pane.projectId)
-        && !pane.isMainRepo
-        && pane.worktreeOwnership !== 'external';
-      const safetyCheck = worktreeCleanupApplicable
+      const cleanupSkipReason = archiveCleanupSkipReason(pane);
+      const worktreeCleanupApplicable = cleanupSkipReason === undefined;
+      const safetyCheck: RunpanePaneArchiveSafetyCheck = cleanupSkipReason === undefined
         ? await computeArchiveSafety(services, pane)
-        : { performed: false };
+        : { performed: false, reason: cleanupSkipReason, worktreeWillRemain: true };
 
       const blockCode = classifyArchiveBlock(safetyCheck, worktreeCleanupApplicable);
       if (normalized.dryRun) {
@@ -808,12 +810,12 @@ export function registerRunpaneHandlers(
           dryRun: true,
           wouldArchive: Boolean(normalized.force) || !blockCode,
           forced: Boolean(normalized.force),
-          safetyCheck: toPublicSafetyCheck(safetyCheck),
+          safetyCheck,
           blocked: blockCode
             ? {
                 code: blockCode,
                 message: describeArchiveBlock(blockCode, safetyCheck),
-                safetyCheck: toPublicSafetyCheck(safetyCheck),
+                safetyCheck,
               }
             : undefined,
         };
@@ -827,7 +829,7 @@ export function registerRunpaneHandlers(
             blocked: {
               code: blockCode,
               message: describeArchiveBlock(blockCode, safetyCheck),
-              safetyCheck: toPublicSafetyCheck(safetyCheck),
+              safetyCheck,
             },
             nextCommand: `runpane panes archive --pane ${normalized.paneId} --force --yes --json`,
           };
@@ -866,7 +868,7 @@ export function registerRunpaneHandlers(
         forced: Boolean(normalized.force),
         worktreeCleanup,
         worktreePath: pane.worktreePath,
-        safetyCheck: toPublicSafetyCheck(safetyCheck),
+        safetyCheck,
       };
       return success;
     }, result => ({ paneId: result.paneId, ok: result.ok }));
@@ -2570,7 +2572,7 @@ function parseWorkspaceWaitRequest(value: PaneCommandValue): RunpaneWorkspaceWai
   if (!isRecord(value)) throw new Error('Workspace wait request must be an object');
   const consumer = optionalString(value.as)?.trim();
   if (consumer && !WORKSPACE_CONSUMER_PATTERN.test(consumer)) {
-    throw new Error('Workspace wait as must contain 1-64 letters, numbers, dots, underscores, or hyphens');
+    throw new Error('Workspace wait as must contain 1-128 letters, numbers, dots, underscores, or hyphens');
   }
   const since = parseNonNegativeInteger(value.since, 'since');
   if (consumer && since !== undefined) throw new Error('Workspace wait request cannot include both as and since');
@@ -3012,14 +3014,18 @@ function resolvePane(sessionManager: AppServices['sessionManager'], paneId: stri
   return session;
 }
 
-interface ArchiveSafetyCheck extends RunpanePaneArchiveSafetyCheck {
-  reasonUnavailable?: 'missing-project-context' | 'git-status-error';
+/** Why archive leaves this pane's worktree alone, or undefined when archive removes it. */
+function archiveCleanupSkipReason(pane: Session): RunpanePaneArchiveSafetyCheckReason | undefined {
+  if (pane.worktreeOwnership === 'external') return 'external-worktree';
+  if (pane.isMainRepo) return 'main-repo';
+  if (!pane.projectId) return 'missing-project-context';
+  return undefined;
 }
 
-async function computeArchiveSafety(services: AppServices, pane: Session): Promise<ArchiveSafetyCheck> {
+async function computeArchiveSafety(services: AppServices, pane: Session): Promise<RunpanePaneArchiveSafetyCheck> {
   const ctx = services.sessionManager.getProjectContext(pane.id);
   if (!ctx) {
-    return { performed: false, reasonUnavailable: 'missing-project-context' };
+    return { performed: false, reason: 'missing-project-context' };
   }
 
   try {
@@ -3074,7 +3080,7 @@ async function computeArchiveSafety(services: AppServices, pane: Session): Promi
       unpushedCommitDetails,
     };
   } catch {
-    return { performed: false, reasonUnavailable: 'git-status-error' };
+    return { performed: false, reason: 'git-error' };
   }
 }
 
@@ -3096,7 +3102,7 @@ async function resolveUpstreamRemote(
   return remote;
 }
 
-function classifyArchiveBlock(check: ArchiveSafetyCheck, applicable: boolean): RunpanePaneArchiveBlockCode | undefined {
+function classifyArchiveBlock(check: RunpanePaneArchiveSafetyCheck, applicable: boolean): RunpanePaneArchiveBlockCode | undefined {
   if (!applicable) {
     return undefined;
   }
@@ -3112,7 +3118,7 @@ function classifyArchiveBlock(check: ArchiveSafetyCheck, applicable: boolean): R
   return undefined;
 }
 
-function describeArchiveBlock(code: RunpanePaneArchiveBlockCode, check: ArchiveSafetyCheck): string {
+function describeArchiveBlock(code: RunpanePaneArchiveBlockCode, check: RunpanePaneArchiveSafetyCheck): string {
   const unpushedCount = check.unpushedCommits ?? 0;
   const unpushedPhrase = unpushedCount === 1 ? '1 commit' : `${unpushedCount} commits`;
   switch (code) {
@@ -3126,19 +3132,6 @@ function describeArchiveBlock(code: RunpanePaneArchiveBlockCode, check: ArchiveS
     default:
       return 'Could not determine whether the pane has uncommitted or unpushed changes. Refusing to archive without --force.';
   }
-}
-
-function toPublicSafetyCheck(check: ArchiveSafetyCheck): RunpanePaneArchiveSafetyCheck {
-  return {
-    performed: check.performed,
-    hasUncommittedChanges: check.hasUncommittedChanges,
-    hasUntrackedFiles: check.hasUntrackedFiles,
-    hasUpstream: check.hasUpstream,
-    upstream: check.upstream,
-    upstreamRefreshed: check.upstreamRefreshed,
-    unpushedCommits: check.unpushedCommits,
-    unpushedCommitDetails: check.unpushedCommitDetails,
-  };
 }
 
 function waitForArchiveProgressCompletion(

@@ -906,6 +906,32 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  it('accepts named cursors up to 128 characters, such as session-<full session id>', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-runpane-cursor-test-'));
+    tempDirs.push(directory);
+    const cursorPath = path.join(directory, 'workspace-cursors.json');
+    const registry = createRegistry(createServices({
+      workspaceJournal: new WorkspaceJournal(),
+      workspaceCursorStore: new WorkspaceCursorStore(cursorPath),
+    }));
+    const sessionCursor = 'session-__orchestration_session_1b4e28ba-2fa1-11d2-883f-0016d3cca427__';
+    expect(sessionCursor).toHaveLength(70);
+    const longest = `c${'x'.repeat(127)}`;
+
+    for (const as of [sessionCursor, longest]) {
+      await expect(registry.invoke('runpane:workspace:wait', [{ as, timeoutMs: 0 }]))
+        .resolves.toMatchObject({ ok: true, reset: { reason: 'first-use' } });
+    }
+    const stored = new WorkspaceCursorStore(cursorPath);
+    expect(stored.get(sessionCursor)).toBeDefined();
+    expect(stored.get(longest)).toBeDefined();
+
+    await expect(registry.invoke('runpane:workspace:wait', [{ as: `${longest}x`, timeoutMs: 0 }]))
+      .rejects.toThrow('1-128 letters');
+    await expect(registry.invoke('runpane:workspace:wait', [{ as: 'session/with-slash', timeoutMs: 0 }]))
+      .rejects.toThrow('1-128 letters');
+  });
+
   it('emits baseline entries for a new --from earliest cursor', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-runpane-cursor-test-'));
     tempDirs.push(directory);
@@ -3510,7 +3536,7 @@ describe('runpane IPC handlers', () => {
       expect(preview).toMatchObject({
         ok: true,
         wouldArchive: true,
-        safetyCheck: { performed: false },
+        safetyCheck: { performed: false, reason: 'external-worktree', worktreeWillRemain: true },
       });
       expect(services.gitStatusManager.getGitStatus).not.toHaveBeenCalled();
 
@@ -3520,6 +3546,7 @@ describe('runpane IPC handlers', () => {
         ok: true,
         archived: true,
         worktreeCleanup: 'not-applicable',
+        safetyCheck: { performed: false, reason: 'external-worktree', worktreeWillRemain: true },
       });
     });
 
@@ -3889,6 +3916,8 @@ describe('runpane IPC handlers', () => {
         worktreeCleanup: 'not-applicable',
         safetyCheck: {
           performed: false,
+          reason: 'main-repo',
+          worktreeWillRemain: true,
         },
       });
     });
@@ -3916,9 +3945,11 @@ describe('runpane IPC handlers', () => {
           code: 'status-unknown',
           safetyCheck: {
             performed: false,
+            reason: 'git-error',
           },
         },
       });
+      expect(result).not.toMatchObject({ blocked: { safetyCheck: { worktreeWillRemain: expect.anything() } } });
     });
 
     it('reports failed worktree cleanup when the archive-progress task fails', async () => {

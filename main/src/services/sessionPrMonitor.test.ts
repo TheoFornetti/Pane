@@ -39,6 +39,14 @@ function setup(options: {
     if (!pr) throw Object.assign(new Error('no pull requests found'), { code: 1, stderr: 'no pull requests found' });
     return { stdout: prJson(Number(args[2]), pr), stderr: '', exitCode: 0 };
   });
+  // What `gh pr list --head <branch>` finds for each Pane's branch (GitStatusManager.lookupPrForPane).
+  const branchPrs = new Map<string, { number: number; state: string }>();
+  let lookupError: Error | undefined;
+  const lookupPrForPane = vi.fn(async (paneId: string) => {
+    if (lookupError) return { ok: false as const, error: lookupError };
+    const pr = branchPrs.get(paneId);
+    return { ok: true as const, pr: pr ? { prNumber: pr.number, prState: pr.state } : undefined };
+  });
   const journal = new WorkspaceJournal({
     resolvePane: paneId => ({ paneId, paneName: `Worker ${paneId}`, repoId: 1, repoName: 'app' }),
   });
@@ -58,6 +66,7 @@ function setup(options: {
         // SAFETY: The monitor reads only prNumber and prState from a cached status.
         return pr ? { status: { state: 'clean', prNumber: pr.number, prState: pr.state } as GitStatus, lastChecked: 0 } : null;
       },
+      lookupPrForPane,
       withGithubSlot: slot as never,
     },
     journal,
@@ -65,7 +74,8 @@ function setup(options: {
     random: () => 0,
   });
   const entries = () => journal.readAfter(0, { kinds: ['pr.conflicted', 'pr.checks', 'pr.merged'] }).entries;
-  return { monitor, remote, execFile, journal, logger, slot, entries, members };
+  const failLookups = (error: Error | undefined) => { lookupError = error; };
+  return { monitor, remote, execFile, journal, logger, slot, entries, members, branchPrs, cachedPrs, lookupPrForPane, failLookups };
 }
 
 describe('SessionPrMonitor', () => {
@@ -80,7 +90,7 @@ describe('SessionPrMonitor', () => {
     expect(entries()).toEqual([]);
     expect(execFile).toHaveBeenCalledWith(
       'gh',
-      ['pr', 'view', '747', '--json', 'number,url,state,mergeable,mergeStateStatus,statusCheckRollup,headRefOid'],
+      ['pr', 'view', '747', '--json', 'number,url,state,mergeable,statusCheckRollup,headRefOid'],
       '/work/pane-1',
       expect.objectContaining({ timeout: 10_000 }),
     );
@@ -138,8 +148,8 @@ describe('SessionPrMonitor', () => {
     expect(entries()).toEqual([]);
   });
 
-  it('polls only Session members with an open PR', async () => {
-    const { monitor, remote, execFile } = setup({
+  it('views only Session members with an open PR, and looks up the rest by branch', async () => {
+    const { monitor, remote, execFile, lookupPrForPane } = setup({
       members: ['open', 'merged', 'none', 'archived'],
       prs: {
         open: { number: 1, state: 'OPEN' },
@@ -153,16 +163,74 @@ describe('SessionPrMonitor', () => {
     await monitor.pollOnce();
     expect(execFile).toHaveBeenCalledTimes(1);
     expect(execFile.mock.calls[0][1][2]).toBe('1');
+    expect(lookupPrForPane.mock.calls.map(call => call[0])).toEqual(['merged', 'none']);
   });
 
-  it('runs no gh at all when no Session member has an open PR', async () => {
+  it('discovers the PR of a member nobody is looking at, then reports its transitions', async () => {
+    const { monitor, remote, execFile, entries, branchPrs, lookupPrForPane } = setup({ members: ['worker'], prs: {} });
+    await monitor.pollOnce();
+    expect(lookupPrForPane).toHaveBeenCalledWith('worker');
+    expect(execFile).not.toHaveBeenCalled();
+
+    // The worker opens a PR; the next round finds it by branch and seeds it silently.
+    branchPrs.set('worker', { number: 12, state: 'OPEN' });
+    remote.set(12, { mergeable: 'MERGEABLE' });
+    await monitor.pollOnce();
+    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(entries()).toEqual([]);
+
+    // Once tracked, the PR is viewed directly, without another lookup.
+    lookupPrForPane.mockClear();
+    remote.set(12, { mergeable: 'CONFLICTING' });
+    await monitor.pollOnce();
+    expect(lookupPrForPane).not.toHaveBeenCalled();
+    expect(entries()).toMatchObject([{ kind: 'pr.conflicted', paneId: 'worker', pr: { number: 12 } }]);
+  });
+
+  it('resumes polling a PR that was closed and reopened', async () => {
+    const { monitor, remote, execFile, entries, branchPrs } = setup();
+    remote.set(747, { mergeable: 'MERGEABLE' });
+    await monitor.pollOnce();
+    remote.set(747, { state: 'CLOSED' });
+    await monitor.pollOnce();
+    expect(execFile).toHaveBeenCalledTimes(2);
+
+    // Closed: the stale cached OPEN is not trusted; the branch lookup decides.
+    branchPrs.set('pane-1', { number: 747, state: 'CLOSED' });
+    await monitor.pollOnce();
+    expect(execFile).toHaveBeenCalledTimes(2);
+
+    branchPrs.set('pane-1', { number: 747, state: 'OPEN' });
+    remote.set(747, { mergeable: 'CONFLICTING' });
+    await monitor.pollOnce();
+    expect(execFile).toHaveBeenCalledTimes(3);
+    expect(entries()).toMatchObject([{ kind: 'pr.conflicted', pr: { number: 747 } }]);
+  });
+
+  it('backs off when the branch lookup finds gh unavailable', async () => {
     vi.useFakeTimers();
-    const { monitor, execFile, slot } = setup({ members: [] });
+    const { monitor, lookupPrForPane, failLookups, logger } = setup({ members: ['worker'], prs: {} });
+    failLookups(Object.assign(new Error('gh: To get started with GitHub CLI, please run: gh auth login'), {
+      code: 4,
+      stderr: 'To get started with GitHub CLI, please run:  gh auth login',
+    }));
+    monitor.start();
+    await vi.advanceTimersByTimeAsync(SESSION_PR_POLL_INTERVAL_MS);
+    await vi.advanceTimersByTimeAsync(SESSION_PR_POLL_INTERVAL_MS);
+    expect(lookupPrForPane).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('not signed in'));
+    monitor.stop();
+  });
+
+  it('runs no gh at all when no Session has a member', async () => {
+    vi.useFakeTimers();
+    const { monitor, execFile, slot, lookupPrForPane } = setup({ members: [] });
     monitor.start();
     await vi.advanceTimersByTimeAsync(SESSION_PR_POLL_INTERVAL_MS * 5);
     monitor.stop();
     expect(execFile).not.toHaveBeenCalled();
     expect(slot).not.toHaveBeenCalled();
+    expect(lookupPrForPane).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
 

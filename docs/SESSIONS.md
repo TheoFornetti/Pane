@@ -208,12 +208,16 @@ Panes, so held lines survive membership changes.
 
 PR events come from the daemon's Session PR monitor
 (`main/src/services/sessionPrMonitor.ts`, decision D7). About every 3 minutes
-(jittered) it runs `gh pr view <number> --json
-number,url,state,mergeable,mergeStateStatus,statusCheckRollup,headRefOid` for
-each Pane associated with a Session that is not archived, but only when Pane's
-git status already knows the Pane's PR is open. With no such Pane it runs no
-`gh` at all. Its calls share the one-at-a-time `gh` slot Pane uses for its own
-PR lookups. It appends, on transitions only:
+(jittered) it visits each Pane associated with a Session that is not
+archived. With no such Pane it runs no `gh` at all. A Pane whose PR is known to
+be open gets `gh pr view <number> --json
+number,url,state,mergeable,statusCheckRollup,headRefOid`. Any other member (no
+cached PR because nobody has looked at it, or a closed or merged one) is first
+looked up by branch with Pane's own `gh pr list --head <branch>` lookup, which
+also updates the Pane's git status, so a background worker's new or reopened PR
+is found within a round. All calls share the one-at-a-time `gh` slot Pane uses
+for its own PR lookups, so a round costs at most two calls per member. It
+appends, on transitions only:
 
 - `pr.conflicted` (`PR <pane-name> pane <pane-id> #<number> CONFLICTED`): the
   PR now conflicts with its base. GitHub's transient `UNKNOWN` answer never

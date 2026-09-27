@@ -13,7 +13,7 @@ const POLL_JITTER_MS = 30_000;
 const MAX_BACKOFF_MS = 60 * 60_000;
 const GH_TIMEOUT_MS = 10_000;
 const MAX_FAILING_CHECKS = 5;
-const PR_VIEW_FIELDS = 'number,url,state,mergeable,mergeStateStatus,statusCheckRollup,headRefOid';
+const PR_VIEW_FIELDS = 'number,url,state,mergeable,statusCheckRollup,headRefOid';
 /** Completed check-run conclusions that fail a PR; SUCCESS, NEUTRAL, SKIPPED, and STALE pass. */
 const FAILED_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
 
@@ -65,7 +65,7 @@ interface TrackedPr {
 interface SessionPrMonitorOptions {
   sessions: Pick<OrchestrationSessionManager, 'activeMemberPaneIds'>;
   panes: Pick<SessionManager, 'getSession' | 'getProjectContext'>;
-  gitStatus: Pick<GitStatusManager, 'getCachedStatus' | 'withGithubSlot'>;
+  gitStatus: Pick<GitStatusManager, 'getCachedStatus' | 'lookupPrForPane' | 'withGithubSlot'>;
   journal: Pick<WorkspaceJournal, 'appendPaneEntry'>;
   logger?: Pick<Logger, 'info' | 'warn'>;
   intervalMs?: number;
@@ -76,9 +76,12 @@ class GithubUnavailableError extends Error {}
 
 /**
  * Reports PR conflicts, settled checks, and merges for Panes in a live named Session (decision
- * D7). Every ~3 minutes it runs `gh pr view` only for Session members whose PR Pane already knows
- * to be open, through GitStatusManager's one-at-a-time `gh` slot, and appends `pr.conflicted`,
- * `pr.checks`, and `pr.merged` journal entries on transitions only.
+ * D7). Every ~3 minutes, for each Session member only, it runs `gh pr view` on the member's open
+ * PR and appends `pr.conflicted`, `pr.checks`, and `pr.merged` journal entries on transitions only.
+ * A member with no known open PR (never looked at, or its PR closed or merged) is first looked up
+ * by branch through GitStatusManager's PR lookup, so a background worker's new or reopened PR is
+ * found without waiting for a git status refresh. Every `gh` call goes through GitStatusManager's
+ * one-at-a-time slot.
  *
  * The first poll of a PR seeds its state without an entry, so a daemon restart does not restate
  * every conflict. A missing, signed-out, rate-limited, or timing-out `gh` doubles the delay (up to
@@ -113,22 +116,24 @@ export class SessionPrMonitor {
     this.timer = undefined;
   }
 
-  /** One polling round. Returns without running `gh` when no Session member has an open PR. */
+  /** One polling round. Runs no `gh` when there is no live Session member. */
   async pollOnce(): Promise<void> {
     if (this.running) return;
     this.running = true;
     const stopCount = this.stopCount;
     try {
-      const targets = this.targets();
-      for (const [paneId, prNumber] of targets) {
+      const members = this.members();
+      for (const paneId of members) {
         if (this.stopCount !== stopCount) return;
+        const prNumber = this.knownOpenPr(paneId) ?? await this.discoverOpenPr(paneId);
+        if (prNumber === undefined || this.stopCount !== stopCount) continue;
         const observed = await this.view(paneId, prNumber);
         if (observed) this.observe(paneId, observed);
       }
-      if (targets.size > 0 && this.failures > 0) {
+      if (members.length > 0 && this.failures > 0) {
         this.options.logger?.info('[SessionPrMonitor] GitHub CLI is reachable again; PR polling resumed');
       }
-      if (targets.size > 0) this.failures = 0;
+      if (members.length > 0) this.failures = 0;
     } catch (error) {
       if (!(error instanceof GithubUnavailableError)) throw error;
       if (this.failures === 0) {
@@ -140,27 +145,41 @@ export class SessionPrMonitor {
     }
   }
 
-  /** Session members to poll, with the PR number to view. Forgets Panes that left every Session. */
-  private targets(): Map<string, number> {
+  /** Live, unarchived Session members. Forgets Panes that left every Session. */
+  private members(): string[] {
     const members = new Set(this.options.sessions.activeMemberPaneIds());
     for (const paneId of this.tracked.keys()) {
       if (!members.has(paneId)) this.tracked.delete(paneId);
     }
-    const targets = new Map<string, number>();
-    for (const paneId of members) {
+    return [...members].filter(paneId => {
       const pane = this.options.panes.getSession(paneId);
-      if (!pane || pane.archived) continue;
-      const cached = this.options.gitStatus.getCachedStatus(paneId)?.status;
-      const tracked = this.tracked.get(paneId);
-      // Keep polling a PR this monitor still has open even after the cache moved on, so its merge is reported.
-      const prNumber = cached?.prNumber !== undefined && cached.prState === 'OPEN'
-        ? cached.prNumber
-        : tracked?.state === 'OPEN' ? tracked.number : undefined;
-      if (prNumber === undefined) continue;
-      if (tracked?.number === prNumber && tracked.state !== 'OPEN') continue;
-      targets.set(paneId, prNumber);
+      return pane !== undefined && pane.archived !== true;
+    });
+  }
+
+  /**
+   * The open PR to view without a lookup: one this monitor still has open (even after the cache
+   * moved on, so its merge is reported), or one the git status cache has open. A cached OPEN for a
+   * PR this monitor saw close or merge is stale, so that Pane is looked up again instead.
+   */
+  private knownOpenPr(paneId: string): number | undefined {
+    const tracked = this.tracked.get(paneId);
+    if (tracked?.state === 'OPEN') return tracked.number;
+    const cached = this.options.gitStatus.getCachedStatus(paneId)?.status;
+    if (cached?.prNumber === undefined || cached.prState !== 'OPEN') return undefined;
+    return tracked?.number === cached.prNumber ? undefined : cached.prNumber;
+  }
+
+  /** Looks the Pane's PR up by branch (`gh pr list --head`); its number when that PR is open. */
+  private async discoverOpenPr(paneId: string): Promise<number | undefined> {
+    const lookup = await this.options.gitStatus.lookupPrForPane(paneId);
+    if (!lookup) return undefined;
+    if (!lookup.ok) {
+      const unavailable = githubUnavailableReason(decodeOptionalBoundary(lookup.error, ghFailureSchema));
+      if (unavailable) throw new GithubUnavailableError(unavailable);
+      return undefined;
     }
-    return targets;
+    return lookup.pr?.prState === 'OPEN' ? lookup.pr.prNumber : undefined;
   }
 
   private async view(paneId: string, prNumber: number): Promise<ReturnType<typeof prViewSchema.decode> | undefined> {

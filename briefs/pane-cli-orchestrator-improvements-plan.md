@@ -387,7 +387,9 @@ workers too.
 deltas: the first poll of a PR seeds silently (a daemon restart restates nothing); `pr.checks`
 fires once every check on the head finishes (`passed`/`failed`, up to five failing names);
 `pr.conflicted` and failed `pr.checks` bypass `--min-interval`; no `pr.closed` or
-`pr.conflict-resolved` kinds; the PR kinds are opt-in like JOINED/LEFT.
+`pr.conflict-resolved` kinds; the PR kinds are opt-in like JOINED/LEFT. A member with no known open
+PR is looked up by branch each round through GitStatusManager's `gh pr list --head` path, so
+unwatched workers' new and reopened PRs are found; `mergeStateStatus` is not fetched (unused).
 
 ---
 

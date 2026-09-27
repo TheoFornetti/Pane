@@ -507,6 +507,33 @@
       "folder-9",
       "--yes",
       "--json"
+    ],
+    [
+      "panes",
+      "archive",
+      "--pane",
+      "session-1",
+      "--remove-worktree",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panes",
+      "archive",
+      "--session",
+      "refactor",
+      "--merged",
+      "--dry-run",
+      "--json"
+    ],
+    [
+      "panes",
+      "archive",
+      "--session",
+      "refactor",
+      "--merged",
+      "--remove-worktree",
+      "--yes"
     ]
   ],
   "help": {

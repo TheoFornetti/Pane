@@ -83,6 +83,13 @@ an implementation prompt, associating and verifying it, then submitting the
 prompt. Keep a Pane attached through idle and completion; do not detach on
 completion. Archive behavior remains a separate #654 follow-up.
 
+To close out finished work, `runpane panes archive --session <id|name> --merged
+[--remove-worktree] [--dry-run] --yes --json` archives every associated Pane
+whose work is clean and pushed, or whose branch was merged through a pull
+request whose head is the Pane's `HEAD`. Every other Pane is skipped with a
+reason (`skipped.code`). `--remove-worktree` also removes adopted worktrees;
+local branches are always kept. Run it with `--dry-run` first.
+
 Before mutating, use `runpane agent-context --command 'sessions associate'
 --json` to confirm the wrapper supports the command. If an older global CLI
 does not, select and verify the app-compatible dev wrapper from the Pane

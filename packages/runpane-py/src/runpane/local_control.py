@@ -372,17 +372,21 @@ def run_panes_create(parsed: Any) -> int:
 
 
 def run_panes_archive(parsed: Any) -> int:
+    if parsed.session_id:
+        return run_panes_archive_session(parsed, parsed.session_id)
     if not parsed.pane_id:
-        raise ValueError("runpane panes archive requires --pane.")
+        raise ValueError("runpane panes archive requires --pane (or --session with --merged).")
 
     request: Dict[str, Any] = {
         "paneId": parsed.pane_id,
         **optional_value("force", True if parsed.force else None),
         **optional_value("source", parsed.source if parsed.source in ("user", "agent") else None),
         **optional_value("dryRun", True if parsed.dry_run else None),
+        **optional_value("removeWorktree", True if parsed.remove_worktree else None),
     }
 
-    confirm_pane_archive(parsed, request)
+    suffix = " (including any uncommitted or unpushed work)" if request.get("force") else ""
+    confirm_pane_archive(parsed, f"Archive pane {request.get('paneId')}{suffix}")
 
     result = invoke_daemon(
         "runpane:panes:archive",
@@ -395,6 +399,35 @@ def run_panes_archive(parsed: Any) -> int:
         print_json(result)
     else:
         print_pane_archive_result(result)
+
+    return 0 if result.get("ok") else 1
+
+
+def run_panes_archive_session(parsed: Any, session_id: str) -> int:
+    if not parsed.merged:
+        raise ValueError("runpane panes archive --session requires --merged.")
+    request: Dict[str, Any] = {
+        "sessionId": session_id,
+        "merged": True,
+        **optional_value("source", parsed.source if parsed.source in ("user", "agent") else None),
+        **optional_value("dryRun", True if parsed.dry_run else None),
+        **optional_value("removeWorktree", True if parsed.remove_worktree else None),
+    }
+
+    confirm_pane_archive(parsed, f"Archive every merged or pushed Pane in Session {session_id}")
+
+    result = invoke_daemon(
+        "runpane:panes:archive",
+        [request],
+        pane_dir=parsed.pane_dir,
+        # Each Pane refreshes its upstream and may wait for its worktree removal.
+        timeout_ms=600_000,
+    )
+
+    if parsed.json:
+        print_json(result)
+    else:
+        print_pane_archive_bulk_result(result)
 
     return 0 if result.get("ok") else 1
 
@@ -842,14 +875,13 @@ def confirm_pane_create(parsed: Any, request: Dict[str, Any]) -> None:
         raise ValueError("Cancelled.")
 
 
-def confirm_pane_archive(parsed: Any, request: Dict[str, Any]) -> None:
+def confirm_pane_archive(parsed: Any, question: str) -> None:
     if parsed.dry_run or parsed.yes:
         return
     if not is_interactive_shell():
         raise ValueError("runpane panes archive mutates Pane state. Rerun with --yes in non-interactive shells.")
 
-    suffix = " (including any uncommitted or unpushed work)" if request.get("force") else ""
-    answer = input(f"Archive pane {request.get('paneId')}{suffix}? [y/N] ").strip().lower()
+    answer = input(f"{question}? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise ValueError("Cancelled.")
 
@@ -1156,6 +1188,30 @@ def print_pane_archive_result(result: Dict[str, Any]) -> None:
 
     forced = " (forced)" if result.get("forced") else ""
     print(f"Archived pane {result.get('paneId')}{forced}. Worktree cleanup: {result.get('worktreeCleanup')}.")
+    merged = (result.get("safetyCheck") or {}).get("mergedViaPr")
+    if merged:
+        print(f"Merged via PR #{merged.get('number')} (head {merged.get('headOid')}).")
+
+
+def print_pane_archive_bulk_result(result: Dict[str, Any]) -> None:
+    verb = "Would archive" if result.get("dryRun") else "Archived"
+    print(
+        f"{verb} {result.get('archived')} Pane(s) in Session {result.get('sessionId')}; "
+        f"skipped {result.get('skipped')}; failed {result.get('failed')}."
+    )
+    for item in result.get("items") or []:
+        label = f"{item.get('name')} ({item.get('paneId')})" if item.get("name") else item.get("paneId")
+        outcome = item.get("outcome")
+        if outcome == "skipped":
+            skipped = item.get("skipped") or {}
+            print(f"  skipped {label}: {skipped.get('code', 'unknown')} - {skipped.get('message', '')}")
+        elif outcome == "failed":
+            print(f"  failed {label}: {item.get('error') or 'unknown error'}", file=sys.stderr)
+        else:
+            merged_pr = (item.get("safetyCheck") or {}).get("mergedViaPr")
+            merged = f" merged via PR #{merged_pr.get('number')}" if merged_pr else ""
+            cleanup = f" worktree {item.get('worktreeCleanup')}" if item.get("worktreeCleanup") else ""
+            print(f"  {outcome} {label}{merged}{cleanup}")
 
 
 def print_archive_commit_evidence(safety_check: Dict[str, Any], file: Any = None) -> None:
@@ -1163,7 +1219,11 @@ def print_archive_commit_evidence(safety_check: Dict[str, Any], file: Any = None
     upstream = safety_check.get("upstream")
     if upstream:
         refreshed = " (refreshed)" if safety_check.get("upstreamRefreshed") else ""
-        print(f"Upstream: {upstream}{refreshed}", file=destination)
+        gone = " (gone from the remote)" if safety_check.get("upstreamGone") else ""
+        print(f"Upstream: {upstream}{refreshed}{gone}", file=destination)
+    merged = safety_check.get("mergedViaPr")
+    if merged:
+        print(f"Merged via PR #{merged.get('number')} (head {merged.get('headOid')})", file=destination)
     for commit in safety_check.get("unpushedCommitDetails") or []:
         print(f"Unpushed: {commit.get('sha')} {commit.get('subject')}", file=destination)
 

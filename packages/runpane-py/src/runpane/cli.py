@@ -143,6 +143,8 @@ class ParsedArgs:
     no_pinned: bool = False
     composer_strategy: Optional[str] = None
     force: bool = False
+    remove_worktree: bool = False
+    merged: bool = False
     watch_as: Optional[str] = None
     watch_since: Optional[int] = None
     watch_from: Optional[str] = None
@@ -481,6 +483,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         parsed.target = "client"
 
     parse_flags(args, parsed)
+    if parsed.command == "panes archive":
+        validate_panes_archive_args(parsed)
     if parsed.command == "watch" and parsed.follow and parsed.timeout_ms == 0:
         raise ValueError("--timeout-ms must be greater than 0 with --follow.")
     if parsed.command == "watch" and parsed.all_managed and parsed.watch_pane_ids:
@@ -495,6 +499,19 @@ def parse_args(argv: List[str]) -> ParsedArgs:
             "runpane watch accepts either --since or --settle/--blocked-settle/--min-interval, not both (cadence needs a named cursor)."
         )
     return parsed
+
+
+def validate_panes_archive_args(parsed: ParsedArgs) -> None:
+    if parsed.pane_id and parsed.session_id:
+        raise ValueError("runpane panes archive accepts either --pane or --session, not both.")
+    if parsed.merged and not parsed.session_id:
+        raise ValueError("--merged requires --session.")
+    if parsed.session_id and not parsed.merged:
+        raise ValueError("runpane panes archive --session requires --merged.")
+    if parsed.session_id and parsed.force:
+        raise ValueError(
+            "runpane panes archive --session does not accept --force; archive one Pane with --pane to discard its work."
+        )
 
 
 def parse_non_negative_int_flag(flag: str, value: str) -> int:
@@ -617,6 +634,12 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--force":
         parsed.force = True
+        return
+    if flag == "--remove-worktree":
+        parsed.remove_worktree = True
+        return
+    if flag == "--merged":
+        parsed.merged = True
         return
     if flag == "--follow":
         parsed.follow = True

@@ -326,9 +326,10 @@
     },
     {
       "name": "panes archive",
-      "summary": "Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree.",
+      "summary": "Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree, or archive every merged Pane in a Session.",
       "usage": [
-        "runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--dry-run] --yes [--json]"
+        "runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes [--json]",
+        "runpane panes archive --session <id|name> --merged [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]"
       ],
       "mutates": true,
       "toolsets": [
@@ -337,7 +338,9 @@
       ],
       "jsonSchemas": [
         "paneArchiveRequest",
-        "paneArchiveResult"
+        "paneArchiveBulkRequest",
+        "paneArchiveResult",
+        "paneArchiveBulkResult"
       ]
     },
     {
@@ -1459,6 +1462,14 @@
         "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes."
       },
       {
+        "name": "--remove-worktree",
+        "description": "Also check and remove an adopted Pane's worktree when archiving it. The local branch is kept."
+      },
+      {
+        "name": "--merged",
+        "description": "With panes archive --session, archive only Panes that are clean and pushed, or merged via a pull request."
+      },
+      {
         "name": "--launch",
         "description": "Run an adopted pane's agent resume command immediately instead of staging it."
       },
@@ -1538,7 +1549,8 @@
         "  runpane workspace state [--repo <selector>] [--json]",
         "  runpane watch --follow",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--wait-ready]",
-        "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--dry-run] --yes",
+        "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes",
+        "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--dry-run] --yes",
         "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] --yes",
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
@@ -1724,7 +1736,8 @@
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [options]",
-        "  runpane panes archive --pane <pane-id> [--force] [--source user|agent] [--dry-run] --yes [--json]",
+        "  runpane panes archive --pane <pane-id> [--force] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
+        "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--dry-run] --yes [--json]",
         "  runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]",
         "  runpane panes unpin --pane <pane-id> --yes [--dry-run] [--json]",
         "  runpane panes rename --pane <pane-id> --name <new-name> --yes [--dry-run] [--json]",
@@ -1844,20 +1857,24 @@
         "Usage:",
         "  runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [options]",
         "",
-        "Adopts an existing externally managed git worktree without creating, syncing, or deleting it.",
+        "Adopts an existing externally managed git worktree without creating, syncing, or deleting it. Archiving the Pane never deletes the worktree unless `runpane panes archive --remove-worktree` is used.",
         "",
         "Options: --resume <id> stages the agent resume command; --launch runs it immediately; --folder <name> groups the pane; --no-pinned opts out of pinning; --dry-run previews."
       ],
       "panes archive": [
         "Usage:",
-        "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--dry-run] --yes [--json]",
+        "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes [--json]",
+        "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
         "",
-        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. Refuses unsafe archives unless --force is passed. Use --dry-run to print the evidence without mutating Pane state.",
+        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state.",
         "",
         "Options:",
         "  --pane <pane-id>               Pane/session id to archive",
         "  --source <user|agent>          Mark mutation source",
         "  --force                        Archive even if the pane has uncommitted, untracked, or unpushed changes",
+        "  --remove-worktree              Also check and remove an adopted Pane's worktree (the branch is kept)",
+        "  --session <id|name>            Archive the Panes associated with this Session (requires --merged)",
+        "  --merged                       Only archive Panes that are clean and pushed, or merged via a PR",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Refresh and print archive safety evidence without archiving",
@@ -2494,7 +2511,8 @@
         "  runpane workspace state [--repo <selector>] [--json]",
         "  runpane watch --follow",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--wait-ready]",
-        "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--dry-run] --yes",
+        "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes",
+        "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--dry-run] --yes",
         "  python -m runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] --yes",
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
@@ -2669,7 +2687,8 @@
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [options]",
-        "  runpane panes archive --pane <pane-id> [--force] [--source user|agent] [--dry-run] --yes [--json]",
+        "  runpane panes archive --pane <pane-id> [--force] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
+        "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--dry-run] --yes [--json]",
         "  runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]",
         "  runpane panes unpin --pane <pane-id> --yes [--dry-run] [--json]",
         "  runpane panes rename --pane <pane-id> --name <new-name> --yes [--dry-run] [--json]",
@@ -2789,20 +2808,24 @@
         "Usage:",
         "  runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [options]",
         "",
-        "Adopts an existing externally managed git worktree without creating, syncing, or deleting it.",
+        "Adopts an existing externally managed git worktree without creating, syncing, or deleting it. Archiving the Pane never deletes the worktree unless `runpane panes archive --remove-worktree` is used.",
         "",
         "Options: --resume <id> stages the agent resume command; --launch runs it immediately; --folder <name> groups the pane; --no-pinned opts out of pinning; --dry-run previews."
       ],
       "panes archive": [
         "Usage:",
-        "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--dry-run] --yes [--json]",
+        "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes [--json]",
+        "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
         "",
-        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. Refuses unsafe archives unless --force is passed. Use --dry-run to print the evidence without mutating Pane state.",
+        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state.",
         "",
         "Options:",
         "  --pane <pane-id>",
         "  --source <user|agent>",
         "  --force",
+        "  --remove-worktree",
+        "  --session <id|name>",
+        "  --merged",
         "  --pane-dir <path>",
         "  --json",
         "  --dry-run",
@@ -3498,7 +3521,7 @@
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default; pass `--no-pinned` to opt out. Panes created interactively in the Pane UI are unaffected.",
       "For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is reported only after argument attachment or composer-clear plus activity evidence. Routing input does not by itself verify submission.",
-      "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. Add `--dry-run` to inspect the same evidence without archiving. Successful archives wait for worktree removal and report `worktreeCleanup`.",
+      "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup`: `removed`, or `queued` while a large worktree finishes deleting in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane.",
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
       "`runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.",
       "`runpane panels list` lists tool panels inside one Pane session.",
@@ -4047,6 +4070,33 @@
         "folder-9",
         "--yes",
         "--json"
+      ],
+      [
+        "panes",
+        "archive",
+        "--pane",
+        "session-1",
+        "--remove-worktree",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panes",
+        "archive",
+        "--session",
+        "refactor",
+        "--merged",
+        "--dry-run",
+        "--json"
+      ],
+      [
+        "panes",
+        "archive",
+        "--session",
+        "refactor",
+        "--merged",
+        "--remove-worktree",
+        "--yes"
       ]
     ],
     "topLevelHelpIncludes": [
@@ -5817,6 +5867,9 @@
         },
         "dryRun": {
           "type": "boolean"
+        },
+        "removeWorktree": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -5985,11 +6038,12 @@
             },
             "worktreeCleanup": {
               "enum": [
-                "completed",
+                "removed",
+                "queued",
                 "failed",
-                "timeout",
                 "not-applicable"
-              ]
+              ],
+              "description": "`removed`: the worktree is gone. `queued`: git no longer tracks it and its files are being deleted in the background. `failed`: removal failed and the worktree may remain. `not-applicable`: nothing was removed (main-repo Pane, or an adopted worktree without --remove-worktree). Older Pane versions reported `completed` and `timeout` instead of `removed` and `queued`."
             },
             "worktreePath": {
               "type": "string"
@@ -6039,6 +6093,27 @@
                     },
                     "additionalProperties": false
                   }
+                },
+                "upstreamGone": {
+                  "type": "boolean",
+                  "description": "The branch had an upstream that no longer exists on the remote, so commits were compared with the base branch."
+                },
+                "mergedViaPr": {
+                  "type": "object",
+                  "description": "A merged pull request whose head commit is HEAD. Its commits are not counted as unpushed.",
+                  "required": [
+                    "number",
+                    "headOid"
+                  ],
+                  "properties": {
+                    "number": {
+                      "type": "number"
+                    },
+                    "headOid": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "additionalProperties": false
@@ -7508,6 +7583,138 @@
         }
       },
       "additionalProperties": false
+    },
+    "paneArchiveBulkRequest": {
+      "type": "object",
+      "required": [
+        "sessionId",
+        "merged"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "merged": {
+          "const": true
+        },
+        "source": {
+          "enum": [
+            "user",
+            "agent"
+          ]
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "removeWorktree": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "paneArchiveBulkResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "sessionId",
+        "merged",
+        "removeWorktree",
+        "archived",
+        "skipped",
+        "failed",
+        "items"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "merged": {
+          "const": true
+        },
+        "dryRun": {
+          "const": true
+        },
+        "removeWorktree": {
+          "type": "boolean"
+        },
+        "archived": {
+          "type": "number",
+          "description": "Panes archived, or that would be archived with --dry-run."
+        },
+        "skipped": {
+          "type": "number"
+        },
+        "failed": {
+          "type": "number"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "paneId",
+              "outcome"
+            ],
+            "properties": {
+              "paneId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "archived",
+                  "would-archive",
+                  "skipped",
+                  "failed"
+                ]
+              },
+              "skipped": {
+                "type": "object",
+                "required": [
+                  "code",
+                  "message"
+                ],
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "uncommitted-changes",
+                      "unpushed-commits",
+                      "uncommitted-and-unpushed",
+                      "status-unknown",
+                      "missing-pane",
+                      "already-archived",
+                      "main-repo"
+                    ]
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "error": {
+                "type": "string"
+              },
+              "safetyCheck": {
+                "$ref": "#/jsonSchemas/paneArchiveResult/oneOf/0/properties/safetyCheck"
+              },
+              "worktreeCleanup": {
+                "$ref": "#/jsonSchemas/paneArchiveResult/oneOf/0/properties/worktreeCleanup"
+              },
+              "worktreePath": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "agentContext": {
@@ -7629,11 +7836,14 @@
         },
         {
           "name": "panes archive",
-          "summary": "Archive a Pane exactly like the UI Archive action, including safe removal of its Pane-managed git worktree.",
+          "summary": "Archive a Pane exactly like the UI Archive action, including safe removal of its Pane-managed git worktree, or archive every merged Pane in a Session.",
           "arguments": [
             "--pane <pane-id>",
+            "--session <id|name>",
+            "--merged",
             "--source <user|agent>",
             "--force",
+            "--remove-worktree",
             "--dry-run",
             "--yes",
             "--json"
@@ -8465,21 +8675,21 @@
         ],
         "notes": [
           "The resume command is staged without Enter unless --launch is passed.",
-          "Pane never removes an externally owned worktree."
+          "Archiving never deletes an adopted worktree unless `runpane panes archive --remove-worktree` is used."
         ]
       },
       "panes archive": {
         "name": "panes archive",
-        "summary": "Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree.",
-        "details": "Use this to close out a Pane once its PR has merged. The safety check refreshes the configured upstream before comparing it to HEAD and includes exact unpushed commit IDs and subjects. Refuses unsafe archive operations unless --force is used. Use --dry-run to inspect the same evidence without mutating Pane state.",
+        "summary": "Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree, or archive every merged Pane in a Session.",
+        "details": "Use this to close out a Pane once its PR has merged. The safety check refreshes the configured upstream before comparing it to HEAD and includes exact unpushed commit IDs and subjects. When the branch has no upstream or its upstream is gone (GitHub deletes merged branches), a merged pull request whose head is HEAD counts as pushed, so squash-merged branches archive without --force. Refuses unsafe archive operations unless --force is used. Use --dry-run to inspect the same evidence without mutating Pane state. Use --session <id|name> --merged to close out every finished Pane of a Session at once.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
           {
             "name": "--pane",
             "value": "<pane-id>",
-            "required": true,
-            "description": "Pane/session id to archive."
+            "required": false,
+            "description": "Pane/session id to archive. Required unless --session is used."
           },
           {
             "name": "--source",
@@ -8491,6 +8701,22 @@
             "name": "--force",
             "required": false,
             "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes."
+          },
+          {
+            "name": "--remove-worktree",
+            "required": false,
+            "description": "Also check and remove an adopted Pane's worktree. Pane-managed worktrees are always removed; the local branch is always kept."
+          },
+          {
+            "name": "--session",
+            "value": "<id|name>",
+            "required": false,
+            "description": "Archive the Panes associated with this named Session instead of one Pane. Requires --merged."
+          },
+          {
+            "name": "--merged",
+            "required": false,
+            "description": "With --session, archive only Panes that are clean and pushed, or merged via a pull request; skip the rest with a reason."
           },
           {
             "name": "--yes",
@@ -8511,17 +8737,25 @@
         "examples": [
           "runpane panes archive --pane <pane-id> --source agent --yes --json",
           "runpane panes archive --pane <pane-id> --dry-run --json",
+          "runpane panes archive --pane <pane-id> --remove-worktree --yes --json",
+          "runpane panes archive --session <id|name> --merged --dry-run --json",
+          "runpane panes archive --session <id|name> --merged --remove-worktree --yes --json",
           "runpane panes archive --pane <pane-id> --force --yes --json"
         ],
         "jsonSchemas": [
           "paneArchiveRequest",
-          "paneArchiveResult"
+          "paneArchiveBulkRequest",
+          "paneArchiveResult",
+          "paneArchiveBulkResult"
         ],
         "notes": [
           "If the result has ok:false with a blocked field, the pane was NOT archived; inspect blocked.code and rerun with --force if discarding the flagged work is intentional.",
           "Inspect safetyCheck.unpushedCommitDetails for exact commit IDs and subjects; upstreamRefreshed confirms the tracking ref was refreshed first.",
           "A --dry-run result sets dryRun:true and wouldArchive without deleting the Pane or its worktree.",
-          "A successful archive waits for the Pane-managed worktree to be removed before returning; check worktreeCleanup in the result for the final outcome.",
+          "A successful archive reports worktreeCleanup `removed`, or `queued` when a large worktree (for example one with node_modules) is detached from git and still deleting in the background. Both are ok:true.",
+          "safetyCheck.mergedViaPr names the merged PR whose head is HEAD; it needs an authenticated `gh`. Without it, a squash-merged branch whose remote branch was deleted reports unpushed-commits.",
+          "An adopted Pane (panes adopt) keeps its worktree unless --remove-worktree is passed. `panes restore` does not recreate a removed adopted worktree; the local branch is kept, so `git worktree add <path> <branch>` brings it back.",
+          "With --session --merged, each item has outcome archived, would-archive (dry run), skipped (with skipped.code and skipped.message), or failed.",
           "Archiving a main-repo Pane (no Pane-managed worktree) always succeeds immediately since nothing is deleted from disk.",
           "Undo an archive with `runpane panes restore --pane <pane-id> --yes`, which recreates the worktree. `runpane links create --pane <pane-id>` gives the user a link to review the Pane first."
         ]

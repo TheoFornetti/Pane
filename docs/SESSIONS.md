@@ -181,7 +181,7 @@ Use one durable, named watcher per Session, scoped to every associated Pane:
 
 ```text
 runpane watch --as session-<session-id> --follow --pane <pane-id> \
-  --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone \
+  --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,agent.report \
   --settle 180000 --blocked-settle 30000 --min-interval 600000 \
   --idle-backoff --json
 ```
@@ -193,6 +193,46 @@ the current Pane set. On restart, retain the `session-<session-id>` cursor and
 capture a fresh output baseline before interpreting notifications. Return
 blocked and decision findings to the Session conversation. Terminal idle or
 exit remains activity evidence only.
+
+## Worker reports
+
+Workers hand back a structured report when they finish or get blocked. Every
+worker prompt ends with:
+
+```text
+When finished or blocked, run
+runpane report --state <ready|blocked|failed|done> --pr <number> --head <sha> --summary-file <path>
+(add --question "<question>" when blocked).
+```
+
+Inside a Pane terminal `runpane report` finds its own panel through
+`PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`.
+`--question` is required with `--state blocked`, `--pr` is a positive integer,
+and `--head` is 7 to 40 hex characters.
+
+The daemon then:
+
+- keeps the latest report in the panel's custom state, so it survives a
+  restart: `{ state, pr, head, summary, summaryPath, question, reportedAt }`,
+  with up to 16,000 characters of summary (a longer one ends with a truncation
+  marker and sets `summaryTruncated`);
+- journals an `agent.report` entry with the same fields (summary cut to 2,000
+  characters), printed as `REPORT <pane-name> pane <pane-id> panel <panel-id>
+  ready pr#747 fc5dce9` or `... blocked: <question>`. It skips the
+  `--min-interval` batch. Only watchers that list `agent.report` in `--kinds`
+  receive it, because released CLIs reject journal kinds they don't know;
+- appends a `report` activity (with the worker's `paneId` and `panelId`) to
+  every Session the Pane is associated with, which makes an older Session
+  report stale;
+- shows the report in `agents status`, `panels list`, and `sessions overview`,
+  where `panes[].report` is the newest report among the Pane's panels, with its
+  `panelId`.
+
+The orchestrator treats REPORT as the completion signal. A READY without a
+report means look, and maybe nudge: `runpane panels last-message --panel
+<panel-id> --json` returns the agent's last reply from its Claude or Codex
+transcript (never the screen; `transcript-unavailable` otherwise), and the
+worker can be asked to run `runpane report`.
 
 ## Skill contract
 

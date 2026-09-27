@@ -490,6 +490,9 @@ When a pane finishes something a human will read, have it run the
    progress returns to this conversation. Prefer \`--as-file-pointer\` for
    long prompts (\`panes create\`, \`panels submit\`, \`agents send\`): Pane
    writes the prompt to a private file and submits one line pointing at it.
+   End every worker prompt with: "When finished or blocked, run
+   \`runpane report --state <ready|blocked|failed|done> --pr <number> --head <sha> --summary-file <path>\`
+   (add \`--question \"<question>\"\` when blocked)."
 5. Keep the Session's own agent, profile, and tool configuration as they are.
 
 Never edit project implementation files from the Session. A Session can stay
@@ -575,7 +578,7 @@ The daemon owns liveness. Never write or run an ad-hoc watcher.
 Arm at session start:
 
     runpane watch --self-test
-    runpane watch --as session-<session-id> --follow --pane <pane-id> --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff --json
+    runpane watch --as session-<session-id> --follow --pane <pane-id> --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,agent.report --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff --json
 
 Scope the watcher to the Session's Panes:
 
@@ -597,10 +600,18 @@ keeps overnight runs inside the usage cap. Keep the flags as written.
 
 What each line means:
 
+- REPORT (\`agent.report\`): a worker ran \`runpane report\`. This is the
+  completion signal. It arrives at once and skips the batch, carrying the
+  state (ready, blocked, failed, or done), PR number, head commit, summary,
+  and a blocked worker's question. Read the full report with
+  \`runpane agents status --panel <panel-id> --json\` or the Session overview
+  (\`panes[].report\`) instead of scraping the screen.
 - READY: the turn ended and stayed quiet for 3 minutes. It arrives with the
   next batch, so up to ~13min after the turn ended. The settle hides the
   status flips a delegated pane makes while it waits on subagents or Codex
-  dispatches.
+  dispatches. A READY with no REPORT means look, and maybe nudge: read
+  \`runpane panels last-message --panel <panel-id> --json\`, then ask the
+  worker to run \`runpane report\` if it finished.
 - BLOCKED: the agent is waiting on a human. It arrives within 30 seconds and
   skips the batch.
 - IDLE: nothing is dispatched. It repeats after 10 minutes, 30 minutes, 1

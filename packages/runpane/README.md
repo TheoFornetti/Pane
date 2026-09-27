@@ -160,6 +160,14 @@ pane-orchestrator skill, so you only need them for your own scripts. Filter
 non-zero exit or a `WATCH ERROR` line, not by silence. `runpane agent-context
 --command watch --json` lists every flag with its default.
 
+Workers can hand back a structured report with `runpane report --state
+ready|blocked|failed|done [--pr <n>] [--head <sha>] [--summary-file <path>]
+[--question <text>]`. Watchers receive it as `agent.report`
+(`REPORT <pane> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`) only
+when `--kinds` lists it, and it skips the `--min-interval` batch.
+`runpane panels last-message --panel <panel-id>` reads an agent's last reply
+from its transcript.
+
 ## Attribution
 
 npm package downloads use `source=npm` when requesting release artifacts from

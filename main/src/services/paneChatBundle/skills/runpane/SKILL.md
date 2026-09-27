@@ -8,8 +8,8 @@ description: Drive Pane through the runpane CLI. Covers dispatching work to agen
 Use RunPane as the control plane. Keep every authorized workstream moving until
 its pull request is ready to merge or it reaches a real blocker: a missing
 decision, a scope question, or a hard stop. Advance every step that is ready,
-then yield to the watcher; a READY, BLOCKED, or IDLE line is the cue to check
-on an agent.
+then yield to the watcher; a REPORT, READY, BLOCKED, or IDLE line is the cue
+to check on an agent.
 
 `pane-orchestrator` says what a Pane Session does and when; `orchestrate-sessions`
 covers routing work to planning, implementation, and bug-report sessions. This
@@ -112,8 +112,13 @@ in every implementation prompt:
 
 - The ticket is the plan. Its acceptance criteria are the agreed behaviors and
   test seams, so `tdd` starts from them; review checks against them.
-- Questions for the user come back to this Session: stop and state the
-  question, and it arrives here as BLOCKED.
+- Questions for the user come back to this Session: stop and run
+  `runpane report --state blocked --question "<question>"`, and it arrives
+  here as a REPORT with the question.
+- End every worker prompt with: "When finished or blocked, run
+  `runpane report --state <ready|blocked|failed|done> --pr <number> --head <sha> --summary-file <path>`
+  (add `--question "<question>"` when blocked)." Inside a Pane terminal the
+  report finds its own panel; the worker needs no ids.
 - Save pages and records to Grain when connected, otherwise as `page`
   describes.
 - Review and QA post nothing. They render their findings as a page (see
@@ -246,6 +251,28 @@ in its Pane. When a fix changes the head, the PR goes back
 through review, QA, and required checks. When feedback needs only an
 authorized reply or resolution, post it, read it back, and continue. Keep
 working while a review is pending.
+
+## Worker reports
+
+A worker's `runpane report` is its hand-back, like a background subagent's
+result. Watch for it by adding `agent.report` to `--kinds`; watchers that
+don't list it never receive it. Each REPORT line
+(`REPORT <pane> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`, or
+`... blocked: <question>`) arrives at once, skipping the `--min-interval`
+batch.
+
+- Treat a REPORT as the completion signal. Read the whole report (state, PR,
+  head, summary up to 16,000 characters, `summaryPath`, question) with
+  `runpane agents status --panel <panel-id> --json`, or from
+  `sessions overview` under `panes[].report`, instead of scraping the screen.
+- A report is a claim. Check it as the PR-ready check says before you
+  advance the workstream: the PR, head, and checks must match.
+- `blocked` carries the worker's question; answer it or take it to the user.
+  `failed` means the worker gave up; read its summary before retrying.
+- A READY without a report means look, and maybe nudge. Read the worker's last
+  reply with `runpane panels last-message --panel <panel-id> --json` (from its
+  transcript; `transcript-unavailable` means fall back to `panels screen`),
+  then, if it finished, ask it to run `runpane report`.
 
 ## Monitor and report
 

@@ -5,15 +5,16 @@ import { PANE_LINK_REGEX, parsePaneLink } from '../paneLink';
 export function createPaneLinkProvider(config: LinkProviderConfig): ILinkProvider {
   return {
     provideLinks(lineNumber: number, callback: (links: ILink[] | undefined) => void) {
-      const line = config.terminal.buffer.active.getLine(lineNumber);
+      const rowIndex = lineNumber - 1;
+      const line = config.terminal.buffer.active.getLine(rowIndex);
       if (!line) {
         callback(undefined);
         return;
       }
       const buffer = config.terminal.buffer.active;
-      let firstLine = lineNumber;
+      let firstLine = rowIndex;
       while (firstLine > 0 && buffer.getLine(firstLine)?.isWrapped) firstLine--;
-      let lastLine = lineNumber;
+      let lastLine = rowIndex;
       while (buffer.getLine(lastLine + 1)?.isWrapped) lastLine++;
       let text = '';
       for (let row = firstLine; row <= lastLine; row++) {
@@ -31,7 +32,8 @@ export function createPaneLinkProvider(config: LinkProviderConfig): ILinkProvide
           x: (offset % cols) + 1,
           y: firstLine + Math.floor(offset / cols) + 1,
         });
-        if (Math.floor(start / cols) + firstLine !== lineNumber) continue;
+        if (firstLine + Math.floor(start / cols) > rowIndex
+          || firstLine + Math.floor((end - 1) / cols) < rowIndex) continue;
         links.push({
           range: {
             start: position(start),

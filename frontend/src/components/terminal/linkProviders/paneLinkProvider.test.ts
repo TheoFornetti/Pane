@@ -22,7 +22,7 @@ describe('Pane terminal link provider', () => {
       onHideTooltip: vi.fn(),
       onShowFilePopover: vi.fn(),
     });
-    provider.provideLinks(0, links => {
+    provider.provideLinks(1, links => {
       expect(links).toHaveLength(1);
       expect(links?.[0].text).toBe(url);
       // SAFETY: This provider's activate callback does not read the event.
@@ -44,7 +44,7 @@ describe('Pane terminal link provider', () => {
       onHideTooltip: vi.fn(),
       onShowFilePopover: vi.fn(),
     });
-    provider.provideLinks(0, links => {
+    provider.provideLinks(2, links => {
       expect(links?.[0].text).toBe(url);
       expect(links?.[0].range.start).toEqual({ x: 7, y: 1 });
       expect(links?.[0].range.end.y).toBe(3);

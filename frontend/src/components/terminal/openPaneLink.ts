@@ -1,13 +1,9 @@
-import { panelApi } from '../../services/panelApi';
-import { useNavigationStore } from '../../stores/navigationStore';
-import { usePanelStore } from '../../stores/panelStore';
-import { useSessionStore } from '../../stores/sessionStore';
-
 import { parsePaneLink } from './paneLink';
 
 export async function openPaneLink(uri: string): Promise<void> {
-  const target = parsePaneLink(uri);
-  if (target) await openPaneTarget(target);
+  if (!parsePaneLink(uri)) return;
+  const result: { success: boolean; error?: string } = await window.electronAPI.invoke('runpane:links:open', uri);
+  if (!result.success) throw new Error(result.error ?? 'Failed to open Pane link');
 }
 
 /** Opens a Pane, and optionally one of its panels, when the active host has it. */

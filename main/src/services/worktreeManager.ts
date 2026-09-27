@@ -9,6 +9,7 @@ import { commitGitMessage } from '../utils/gitCommit';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { worktreePoolManager } from './worktreePoolManager';
 import { ensureFastGitConfig, forceRemoveWorktree } from './gitPerformanceConfig';
+import { removeWorktreeViaTrash, sweepWorktreeTrash, type WorktreeRemovalOutcome } from './worktreeTrash';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 type WorktreeAuditSource = 'session-delete' | 'project-delete' | 'create-cleanup';
@@ -219,6 +220,8 @@ export class WorktreeManager {
   async initializeProject(projectPath: string, worktreeFolder: string | undefined, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<void> {
     const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
     void ensureFastGitConfig(projectPath, commandRunner);
+    // Finish deleting worktrees that an earlier run moved to the trash.
+    void sweepWorktreeTrash(projectPath, pathResolver, commandRunner);
     try {
       await mkdir(pathResolver.toFileSystem(baseDir), { recursive: true });
     } catch (error) {
@@ -423,23 +426,34 @@ export class WorktreeManager {
     return { worktreePath: projectPath, baseCommit, baseBranch: detectedBranch };
   }
 
-  async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<void> {
-    return await withLock(`worktree-remove-${projectPath}-${name}`, async () => {
-      const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
-      const worktreePath = pathResolver.join(baseDir, name);
+  async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<WorktreeRemovalOutcome> {
+    const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
+    return this.removeWorktreeAtPath(projectPath, pathResolver.join(baseDir, name), sessionCreatedAt, pathResolver, commandRunner, auditContext);
+  }
+
+  /**
+   * Removes the linked worktree at `worktreePath`, keeping its branch. Large
+   * worktrees finish deleting in the background (`queued`). Adopted worktrees
+   * can live outside the project's worktree folder, so callers pass the
+   * stored path rather than a name.
+   */
+  async removeWorktreeAtPath(projectPath: string, worktreePath: string, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<WorktreeRemovalOutcome> {
+    return await withLock(`worktree-remove-${projectPath}-${worktreePath}`, async () => {
       const auditDetails = {
         source: auditContext?.source,
         sessionId: auditContext?.sessionId,
         projectId: auditContext?.projectId,
         projectPath,
-        worktreeName: name,
+        worktreeName: worktreePath.replace(/\\/g, '/').split('/').pop(),
         worktreePath,
       };
 
       try {
         logWorktreeAudit('remove_started', auditDetails);
-        await forceRemoveWorktree(worktreePath, projectPath, commandRunner);
-        logWorktreeAudit('remove_succeeded', auditDetails);
+        const outcome = await removeWorktreeViaTrash(worktreePath, projectPath, pathResolver, commandRunner, {
+          label: auditContext?.sessionId,
+        });
+        logWorktreeAudit('remove_succeeded', { ...auditDetails, reason: outcome });
 
         // Track worktree cleanup
         if (this.analyticsManager && sessionCreatedAt) {
@@ -448,6 +462,7 @@ export class WorktreeManager {
             session_age_days: sessionAgeDays
           });
         }
+        return outcome;
       } catch (error: unknown) {
         const err = decodeBoundary(error, commandErrorSchema);
         const errorMessage = err.stderr || err.stdout || err.message || String(err);
@@ -460,7 +475,7 @@ export class WorktreeManager {
             ...auditDetails,
             reason: errorMessage,
           });
-          return;
+          return 'removed';
         }
 
         logWorktreeAudit('remove_failed', {

@@ -84,6 +84,11 @@ type DatabaseSession = {
   created_at?: string | null;
 };
 
+interface SessionDeleteOptions {
+  /** Also remove an adopted (externally owned) worktree. Pane-managed worktrees are always removed. */
+  removeExternalWorktree?: boolean;
+}
+
 export function registerSessionHandlers(
   ipcMain: IpcMain,
   services: AppServices,
@@ -341,14 +346,18 @@ export function registerSessionHandlers(
     }
   });
 
-  commandRegistry.register('sessions:delete', async (sessionId: string) => {
+  commandRegistry.register('sessions:delete', async (sessionId: string, options?: SessionDeleteOptions) => {
     try {
       // Get database session details before archiving (includes worktree_name and project_id)
       const dbSession = databaseService.getSession(sessionId);
       if (!dbSession) {
         return { success: false, error: 'Session not found' };
       }
-      
+      const isExternalWorktree = dbSession.worktree_ownership === 'external';
+      // Adopted worktrees are only removed when the caller opts in (`runpane panes archive --remove-worktree`).
+      const removesWorktree = Boolean(dbSession.worktree_name && dbSession.project_id && !dbSession.is_main_repo)
+        && (!isExternalWorktree || options?.removeExternalWorktree === true);
+
       // Check if session is already archived
       if (dbSession.archived) {
         return { success: false, error: 'Session is already archived' };
@@ -428,7 +437,7 @@ export function registerSessionHandlers(
         }
 
         // Clean up the worktree if session has one (but not for main repo sessions)
-        if (dbSession.worktree_name && dbSession.project_id && !dbSession.is_main_repo && dbSession.worktree_ownership !== 'external') {
+        if (removesWorktree && dbSession.worktree_name && dbSession.project_id) {
           const project = databaseService.getProject(dbSession.project_id);
           if (project) {
             const ctx = sessionManager.getProjectContextByProjectId(dbSession.project_id);
@@ -489,13 +498,20 @@ export function registerSessionHandlers(
                 // Pass session creation date for analytics tracking
                 const sessionCreatedAt = dbSession.created_at ? new Date(dbSession.created_at) : undefined;
                 console.log(`[WorktreeAudit] remove_requested source="session-delete" sessionId=${JSON.stringify(sessionId)} projectId=${dbSession.project_id} projectPath=${JSON.stringify(project.path)} worktreeName=${JSON.stringify(dbSession.worktree_name)} worktreePath=${JSON.stringify(dbSession.worktree_path || '')}`);
-                await worktreeManager.removeWorktree(project.path, dbSession.worktree_name, project.worktree_folder || undefined, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner, {
-                  source: 'session-delete',
+                const auditContext = {
+                  source: 'session-delete' as const,
                   sessionId,
                   projectId: dbSession.project_id,
-                });
+                };
+                // An adopted worktree can live anywhere, so remove it by its stored path.
+                const removal = isExternalWorktree && dbSession.worktree_path
+                  ? await worktreeManager.removeWorktreeAtPath(project.path, dbSession.worktree_path, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner, auditContext)
+                  : await worktreeManager.removeWorktree(project.path, dbSession.worktree_name, project.worktree_folder || undefined, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner, auditContext);
+                archiveProgressManager?.setWorktreeCleanup(sessionId, removal);
 
-                cleanupMessage += `\x1b[32m✓ Worktree removed successfully\x1b[0m\r\n`;
+                cleanupMessage += removal === 'queued'
+                  ? `\x1b[32m✓ Worktree removed (files are being deleted in the background)\x1b[0m\r\n`
+                  : `\x1b[32m✓ Worktree removed successfully\x1b[0m\r\n`;
               } catch (worktreeError) {
                 // Log the error but don't fail
                 console.error(`[Main] Failed to remove worktree ${dbSession.worktree_name}:`, worktreeError);
@@ -576,7 +592,7 @@ export function registerSessionHandlers(
       };
 
       // Queue the cleanup task if we have worktree cleanup to do
-      if (dbSession.worktree_name && dbSession.project_id && !dbSession.is_main_repo && dbSession.worktree_ownership !== 'external') {
+      if (removesWorktree && dbSession.worktree_name && dbSession.project_id) {
         const project = databaseService.getProject(dbSession.project_id);
         if (project && archiveProgressManager) {
           console.log(`[ArchiveCleanup] archive_queued sessionId=${sessionId} sessionName=${JSON.stringify(dbSession.name)} worktreeName=${JSON.stringify(dbSession.worktree_name)} projectName=${JSON.stringify(project.name)}`);

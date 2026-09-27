@@ -22,6 +22,8 @@ export interface ArchiveTask {
   startTime: Date;
   endTime?: Date;
   error?: string;
+  /** How the worktree was removed: gone, or detached with its files still being deleted. */
+  worktreeCleanup?: 'removed' | 'queued';
   executeCallback?: () => Promise<void>;
 }
 
@@ -35,6 +37,7 @@ export interface SerializedArchiveTask {
   startTime: string;
   endTime?: string;
   error?: string;
+  worktreeCleanup?: 'removed' | 'queued';
 }
 
 export class ArchiveProgressManager extends EventEmitter {
@@ -133,6 +136,11 @@ export class ArchiveProgressManager extends EventEmitter {
     }
   }
 
+  setWorktreeCleanup(sessionId: string, worktreeCleanup: 'removed' | 'queued'): void {
+    const task = this.activeTasks.get(sessionId);
+    if (task) task.worktreeCleanup = worktreeCleanup;
+  }
+
   getActiveTasks(): SerializedArchiveTask[] {
     // Return a serializable version without the executeCallback
     return Array.from(this.activeTasks.values()).map(task => ({
@@ -143,7 +151,8 @@ export class ArchiveProgressManager extends EventEmitter {
       status: task.status,
       startTime: task.startTime.toISOString(),
       endTime: task.endTime?.toISOString(),
-      error: task.error
+      error: task.error,
+      worktreeCleanup: task.worktreeCleanup,
     }));
   }
 

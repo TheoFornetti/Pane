@@ -406,3 +406,29 @@ PRs touch the same files, though:
 | #790 `audit-fix/terminal-lifecycle`, #760 `audit-fix/workspace-journal` | `workspaceJournal.ts` and journal bootstrap | PR2 and PR4 rebase after them. |
 | #762 `audit-fix/wrapper-requests` | adopt request parsing | PR3 rebases after it. |
 | #788 `audit-fix/cli-dispatch`, #791, #795 | contract-driven CLI dispatch and Python parity | PR1 adds commands and flags the way #788 does, once it merges. |
+
+## 7. Implementation PRs (2026-09-27, all draft)
+
+| Plan PR | GitHub | Branch | Base |
+|---|---|---|---|
+| PR1 quick fixes | #829 | `pane-session-management-improvements` | `main` |
+| PR2 wrapper agent identity | #831 | `runpane/wrapper-agent-identity` | `main` |
+| PR3 create/adopt | #830 | `runpane/create-branch-adopt-prompt` | `main` |
+| PR4 Session watch | #833 | `runpane/session-watch` | #829 |
+| PR5a intact delivery | #836 | `runpane/intact-delivery` | #831 |
+| PR5b delivery state | #837 | `runpane/delivery-state` | #836 |
+| PR6 reports | #839 | `runpane/worker-reports` | #837 |
+| PR7 archive | #832 | `runpane/archive-remove-worktree` | `main` |
+| PR8 locks | #834 | `runpane/named-locks` | `main` |
+| PR9 work items | deferred (D6) | | |
+| PR10 PR events | #835 | `runpane/pr-watch-events` | #833 |
+
+Suggested merge order:
+1. #780, #771 and #818 first.
+2. Then #829 → #833 → #835.
+3. Then #831 → #836 → #837 → #839.
+4. #830, #832 and #834 can merge whenever they're ready.
+
+Every PR edits `contract.json` and `runpane.ts`. Resolve conflicts by regenerating the contract, and
+reconcile the lists of opt-in journal kinds from #833, #835 and #839. Each PR's body has its own
+merge notes.

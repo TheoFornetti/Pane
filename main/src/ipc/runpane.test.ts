@@ -18,6 +18,8 @@ import { databaseService as panelDatabase } from '../services/database';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
+import { NamedLockService } from '../services/namedLockService';
+import { NamedLockStore } from '../services/namedLockStore';
 import { usageManager } from '../services/usage/usageManager';
 import { CommandRunner } from '../utils/commandRunner';
 import { PathResolver } from '../utils/pathResolver';
@@ -4111,6 +4113,192 @@ describe('runpane IPC handlers', () => {
 
       expect(window.show).not.toHaveBeenCalled();
       expect(window.webContents.send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('runpane:locks', () => {
+    const otherPane: Session = { ...session, id: 'session-2', name: 'issue-253' };
+    const otherPanel: ToolPanel = { ...terminalPanel, id: 'panel-2', sessionId: otherPane.id };
+    const orchestrationSession = {
+      id: 'orch-1',
+      name: 'Release QA',
+      internalSessionId: '__orchestration_session_release__',
+      associations: [{ paneId: session.id, panelIds: [], attachedAt: '2026-01-01T00:00:00.000Z' }],
+    };
+
+    function createLockServices(overrides: Partial<AppServices> = {}) {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-runpane-locks-'));
+      tempDirs.push(directory);
+      const namedLockService = new NamedLockService(new NamedLockStore(path.join(directory, 'locks.json')));
+      const base = createServices();
+      vi.mocked(base.sessionManager.getSession).mockImplementation((paneId: string) =>
+        [session, otherPane].find(pane => pane.id === paneId)
+      );
+      const orchestrationSessionManager = {
+        sessionIdForPane: vi.fn(async (paneId: string) => (paneId === session.id ? orchestrationSession.id : undefined)),
+        get: vi.fn(async (selector: { sessionId?: string }) => {
+          if (selector.sessionId !== orchestrationSession.id && selector.sessionId !== orchestrationSession.name) {
+            throw new Error(`Session ${selector.sessionId} not found`);
+          }
+          return orchestrationSession;
+        }),
+        overview: vi.fn(async () => ({
+          session: orchestrationSession,
+          status: 'idle',
+          panes: [],
+          activity: [],
+          refreshedAt: '2026-01-01T00:00:00.000Z',
+        })),
+      };
+      return createServices({
+        namedLockService,
+        sessionManager: base.sessionManager,
+        // SAFETY: The stub implements the three manager methods the lock and overview handlers call.
+        orchestrationSessionManager: orchestrationSessionManager as never,
+        ...overrides,
+      });
+    }
+
+    beforeEach(() => {
+      vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) =>
+        [terminalPanel, otherPanel].find(panel => panel.id === panelId)
+      );
+    });
+
+    it('scopes a Session member\'s lock to its Session and refuses a second owner', async () => {
+      const registry = createRegistry(createLockServices());
+
+      const acquired = await registry.invoke('runpane:locks:acquire', [{
+        name: 'testing-account',
+        ttlMs: 1_800_000,
+        note: ' call QA ',
+        owner: { paneId: session.id, panelId: terminalPanel.id },
+      }]);
+      expect(acquired).toMatchObject({
+        ok: true,
+        acquired: true,
+        renewed: false,
+        lock: {
+          name: 'testing-account',
+          scope: 'session',
+          sessionId: orchestrationSession.id,
+          owner: { kind: 'pane', paneId: session.id, panelId: terminalPanel.id },
+          note: 'call QA',
+        },
+      });
+
+      const external = await registry.invoke('runpane:locks:acquire', [{
+        name: 'testing-account',
+        ttlMs: 60_000,
+        owner: { label: 'nightly QA script' },
+      }]);
+      expect(external).toMatchObject({ ok: true, lock: { scope: 'global', owner: { kind: 'external', label: 'nightly QA script' } } });
+
+      const contended = await registry.invoke('runpane:locks:acquire', [{
+        name: 'testing-account',
+        ttlMs: 60_000,
+        owner: { paneId: session.id },
+      }]);
+      expect(contended).toMatchObject({
+        ok: false,
+        heldBy: { kind: 'pane', paneId: session.id, panelId: terminalPanel.id },
+        lock: { sessionId: orchestrationSession.id },
+      });
+    });
+
+    it('resolves the owner Pane from a panel id and reports the holder to a contender', async () => {
+      const registry = createRegistry(createLockServices());
+      await registry.invoke('runpane:locks:acquire', [{ name: 'staging-db', ttlMs: 60_000, owner: { panelId: otherPanel.id } }]);
+
+      const contended = await registry.invoke('runpane:locks:acquire', [{
+        name: 'staging-db',
+        ttlMs: 60_000,
+        owner: { label: 'human' },
+      }]);
+      expect(contended).toMatchObject({
+        ok: false,
+        acquired: false,
+        timedOut: false,
+        heldBy: { kind: 'pane', paneId: otherPane.id, panelId: otherPanel.id },
+      });
+    });
+
+    it('rejects unknown owners and callers with no identity', async () => {
+      const registry = createRegistry(createLockServices());
+      await expect(registry.invoke('runpane:locks:acquire', [{ name: 'x', ttlMs: 60_000, owner: {} }]))
+        .rejects.toThrow(/pass --note/);
+      await expect(registry.invoke('runpane:locks:acquire', [{ name: 'x', ttlMs: 60_000, owner: { paneId: 'missing' } }]))
+        .rejects.toThrow(/No Pane pane found/);
+      await expect(registry.invoke('runpane:locks:acquire', [{ name: 'x', ttlMs: 60_000, owner: { paneId: session.id, panelId: otherPanel.id } }]))
+        .rejects.toThrow(/does not belong to Pane/);
+      await expect(registry.invoke('runpane:locks:acquire', [{ name: 'bad name', ttlMs: 60_000, owner: { label: 'me' } }]))
+        .rejects.toThrow(/Lock names/);
+    });
+
+    it('releases only for the owner unless forced, including from outside the Session', async () => {
+      const registry = createRegistry(createLockServices());
+      const owner = { paneId: session.id, panelId: terminalPanel.id };
+      await registry.invoke('runpane:locks:acquire', [{ name: 'testing-account', ttlMs: 60_000, owner }]);
+
+      await expect(registry.invoke('runpane:locks:release', [{
+        name: 'testing-account',
+        sessionId: orchestrationSession.name,
+        owner: { label: 'human' },
+      }])).resolves.toMatchObject({ ok: false, reason: 'not-owner', heldBy: { paneId: session.id } });
+
+      await expect(registry.invoke('runpane:locks:release', [{
+        name: 'testing-account',
+        sessionId: orchestrationSession.name,
+        force: true,
+        owner: {},
+      }])).resolves.toMatchObject({ ok: true, released: true, forced: true });
+
+      await registry.invoke('runpane:locks:acquire', [{ name: 'testing-account', ttlMs: 60_000, owner }]);
+      await expect(registry.invoke('runpane:locks:release', [{ name: 'testing-account', owner }]))
+        .resolves.toMatchObject({ ok: true, released: true, forced: false });
+    });
+
+    it('waits in the daemon and is granted the lock when the holder releases', async () => {
+      const registry = createRegistry(createLockServices());
+      await registry.invoke('runpane:locks:acquire', [{ name: 'testing-account', ttlMs: 60_000, owner: { label: 'first' } }]);
+
+      const waiting = registry.invoke('runpane:locks:acquire', [{
+        name: 'testing-account',
+        ttlMs: 60_000,
+        waitMs: 30_000,
+        owner: { label: 'second' },
+      }]);
+      await registry.invoke('runpane:locks:release', [{ name: 'testing-account', owner: { label: 'first' } }]);
+
+      await expect(waiting).resolves.toMatchObject({ ok: true, acquired: true, lock: { owner: { label: 'second' } } });
+    });
+
+    it('lists all locks or one Session\'s locks, and shows them in the Session overview', async () => {
+      const registry = createRegistry(createLockServices());
+      await registry.invoke('runpane:locks:acquire', [{ name: 'testing-account', ttlMs: 60_000, owner: { paneId: session.id } }]);
+      await registry.invoke('runpane:locks:acquire', [{ name: 'staging-db', ttlMs: 60_000, owner: { paneId: otherPane.id } }]);
+
+      await expect(registry.invoke('runpane:locks:list', [{}])).resolves.toMatchObject({
+        ok: true,
+        locks: [{ name: 'staging-db', scope: 'global' }, { name: 'testing-account', scope: 'session' }],
+      });
+      await expect(registry.invoke('runpane:locks:list', [{ sessionId: orchestrationSession.name }])).resolves.toEqual({
+        ok: true,
+        locks: [expect.objectContaining({ name: 'testing-account', sessionId: orchestrationSession.id })],
+      });
+      await expect(registry.invoke('runpane:sessions:overview', [{ sessionId: orchestrationSession.id }])).resolves.toMatchObject({
+        ok: true,
+        locks: [{ name: 'testing-account', owner: { paneId: session.id } }],
+      });
+      await expect(registry.invoke('runpane:locks:list', [{ sessionId: 'nope' }])).rejects.toThrow(/not found/);
+    });
+
+    it('exposes the lock channels to runpane doctor', async () => {
+      const registry = createRegistry(createLockServices());
+      const result = await registry.invoke('runpane:doctor');
+      // SAFETY: The doctor result carries a daemon.channels string array.
+      const daemon = (result as { daemon: { channels: string[] } }).daemon;
+      expect(daemon.channels).toEqual(expect.arrayContaining(['runpane:locks:acquire', 'runpane:locks:release', 'runpane:locks:list']));
     });
   });
 });

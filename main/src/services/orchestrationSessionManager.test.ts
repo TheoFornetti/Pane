@@ -661,6 +661,18 @@ describe('OrchestrationSessionManager', () => {
     expect(reassigned.associations).toEqual([expect.objectContaining({ paneId: pane.id, panelIds: [] })]);
   });
 
+  it('finds the Session a Pane belongs to for Session-scoped locks', async () => {
+    const fixture = createFixture();
+    const pane = paneFixture(fixture, 'pane-1', { name: 'Feature Pane' });
+    paneFixture(fixture, 'pane-2', { name: 'Loose Pane' });
+    const named = await fixture.manager.create({ name: 'Lock Owner' });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: pane.id });
+
+    await expect(fixture.manager.sessionIdForPane(pane.id)).resolves.toBe(named.session.id);
+    await expect(fixture.manager.sessionIdForPane(named.internalSession.id, named.panel.id)).resolves.toBe(named.session.id);
+    await expect(fixture.manager.sessionIdForPane('pane-2')).resolves.toBeUndefined();
+  });
+
   it('separates live activity from completion and marks evidence-backed reports stale after later activity', async () => {
     const fixture = createFixture();
     const named = await fixture.manager.create({ name: 'Verification', goal: 'Verify the implementation.' });

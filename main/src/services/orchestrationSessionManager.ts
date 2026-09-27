@@ -372,6 +372,21 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
+  /**
+   * The Session a Pane belongs to: the Session whose orchestrator panel or
+   * hidden terminal owner this is, or the Session it is associated with.
+   */
+  async sessionIdForPane(paneId: string, panelId?: string): Promise<string | undefined> {
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const sessions = this.store.read().sessions;
+      const byPanel = panelId ? sessions.find(session => Object.values(session.panelIds).includes(panelId)) : undefined;
+      return (byPanel
+        ?? sessions.find(session => session.internalSessionId === paneId)
+        ?? sessions.find(session => session.associations.some(association => association.paneId === paneId)))?.id;
+    });
+  }
+
   /** Persist meaningful live state transitions and notify visible overviews. */
   async notifyLiveActivity(panelId: string, state: AgentState): Promise<void> {
     await withLock('orchestration-sessions', async () => {

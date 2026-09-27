@@ -1469,6 +1469,10 @@ if (launchRemoteSetup) {
     // Stop resource monitoring
     resourceMonitorService.stop();
 
+    // Terminals exiting because Pane is quitting are not owners releasing their
+    // named locks; resumed agents still hold them after the restart.
+    paneDaemonHost?.services.namedLockService?.suspendAutoRelease();
+
     // Phase 1: Send Ctrl+C to all terminals to gracefully exit Claude instances
     // Claude needs to exit cleanly so it releases the session ID lock, allowing
     // us to resume with --resume <panelId> on next launch.

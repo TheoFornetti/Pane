@@ -31,6 +31,100 @@ export interface RunpaneSessionResult {
 
 export interface RunpaneSessionOverviewResult extends OrchestrationSessionOverview {
   ok: true;
+  /** Named locks scoped to this Session or held by one of its Panes. */
+  locks: RunpaneLockRecord[];
+}
+
+/**
+ * Who holds a named lock. A Pane owner is the calling Pane and, usually, its
+ * panel; an external owner is a caller outside any Pane, identified by the
+ * `--note` text it acquired with.
+ */
+export interface RunpaneLockOwner {
+  kind: 'pane' | 'external';
+  paneId?: string;
+  panelId?: string;
+  label?: string;
+}
+
+export interface RunpaneLockRecord {
+  name: string;
+  /** `session` when the owner Pane belonged to a Session at acquire time; otherwise `global`. */
+  scope: 'session' | 'global';
+  sessionId?: string;
+  owner: RunpaneLockOwner;
+  note?: string;
+  acquiredAt: string;
+  expiresAt: string;
+  ttlMs: number;
+}
+
+export interface RunpaneLockOwnerInput {
+  paneId?: string;
+  panelId?: string;
+  label?: string;
+}
+
+export interface RunpaneLockAcquireRequest {
+  name: string;
+  ttlMs: number;
+  /** Block in the daemon for up to this long (clamped per call) while another owner holds the lock. */
+  waitMs?: number;
+  note?: string;
+  owner: RunpaneLockOwnerInput;
+}
+
+export type RunpaneLockAcquireResult =
+  | {
+      ok: true;
+      acquired: true;
+      renewed: boolean;
+      waitedMs: number;
+      lock: RunpaneLockRecord;
+    }
+  | {
+      ok: false;
+      acquired: false;
+      /** True when the call waited its whole wait window without the lock coming free. */
+      timedOut: boolean;
+      waitedMs: number;
+      heldBy: RunpaneLockOwner;
+      expiresAt: string;
+      lock: RunpaneLockRecord;
+    };
+
+export interface RunpaneLockReleaseRequest {
+  name: string;
+  force?: boolean;
+  /** Session selector (id or exact name) to release a Session-scoped lock from outside that Session. */
+  sessionId?: string;
+  owner: RunpaneLockOwnerInput;
+}
+
+export type RunpaneLockReleaseResult =
+  | {
+      ok: true;
+      released: boolean;
+      forced: boolean;
+      lock?: RunpaneLockRecord;
+    }
+  | {
+      ok: false;
+      released: false;
+      reason: 'not-owner';
+      heldBy: RunpaneLockOwner;
+      expiresAt: string;
+      lock: RunpaneLockRecord;
+    };
+
+export interface RunpaneLockListRequest {
+  /** Session selector (id or exact name); limits the list to that Session's locks. */
+  sessionId?: string;
+}
+
+export interface RunpaneLockListResult {
+  ok: true;
+  locks: RunpaneLockRecord[];
 }
 
 export type RunpaneWorkspaceEntryKind =

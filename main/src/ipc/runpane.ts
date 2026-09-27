@@ -101,6 +101,14 @@ import type {
   RunpaneSessionResult,
   RunpaneSessionOverviewResult,
   RunpaneSessionSelector,
+  RunpaneLockAcquireRequest,
+  RunpaneLockAcquireResult,
+  RunpaneLockListRequest,
+  RunpaneLockListResult,
+  RunpaneLockOwner,
+  RunpaneLockOwnerInput,
+  RunpaneLockReleaseRequest,
+  RunpaneLockReleaseResult,
 } from '../../../shared/types/runpaneOrchestration';
 import type {
   OrchestrationAssociationInput,
@@ -119,6 +127,8 @@ import {
 import { WatchCadence, type WatchCadenceOptions } from '../services/workspaceWatchCadence';
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
+import { NamedLockService } from '../services/namedLockService';
+import { NamedLockStore } from '../services/namedLockStore';
 import { usageManager } from '../services/usage/usageManager';
 import { parseWSLPath } from '../utils/wslUtils';
 import {
@@ -140,6 +150,9 @@ const RUNPANE_CHANNELS = [
   'runpane:sessions:associate',
   'runpane:sessions:detach',
   'runpane:sessions:overview',
+  'runpane:locks:acquire',
+  'runpane:locks:release',
+  'runpane:locks:list',
   'runpane:panes:list',
   'runpane:panes:cost',
   'runpane:panes:create',
@@ -180,6 +193,8 @@ const DEFAULT_WORKSPACE_WAIT_TIMEOUT_MS = 60_000;
 const MAX_WORKSPACE_WAIT_TIMEOUT_MS = 120_000;
 const DEFAULT_WORKSPACE_WAIT_LIMIT = 256;
 const WORKSPACE_CONSUMER_PATTERN = /^[A-Za-z0-9._-]{1,64}$/u;
+/** One daemon call waits at most this long for a lock; the CLI chains calls for longer waits. */
+const MAX_LOCK_WAIT_PER_CALL_MS = 120_000;
 const MUTATING_RUNPANE_ACTIONS = new Set([
   'panes:create',
   'panes:adopt',
@@ -241,6 +256,27 @@ const orchestrationSessionUpdateSchema = boundary.object({
   expectedRevision: boundary.optional(boundary.number),
   source: boundary.optional(boundary.enumeration('user', 'agent')),
 });
+const lockOwnerInputSchema = boundary.object({
+  paneId: boundary.optional(boundary.nonEmptyString),
+  panelId: boundary.optional(boundary.nonEmptyString),
+  label: boundary.optional(boundary.string),
+});
+const lockAcquireRequestSchema = boundary.object({
+  name: boundary.nonEmptyString,
+  ttlMs: boundary.number,
+  waitMs: boundary.optional(boundary.number),
+  note: boundary.optional(boundary.string),
+  owner: lockOwnerInputSchema,
+});
+const lockReleaseRequestSchema = boundary.object({
+  name: boundary.nonEmptyString,
+  force: boundary.optional(boundary.boolean),
+  sessionId: boundary.optional(boundary.nonEmptyString),
+  owner: lockOwnerInputSchema,
+});
+const lockListRequestSchema = boundary.object({
+  sessionId: boundary.optional(boundary.nonEmptyString),
+});
 
 export function registerRunpaneHandlers(
   _ipcMain: IpcMain,
@@ -257,7 +293,9 @@ export function registerRunpaneHandlers(
   const workspaceCursorStore = services.workspaceCursorStore ?? new WorkspaceCursorStore(
     path.join(getAppDirectory(), 'workspace-cursors.json'),
   );
+  const namedLocks = services.namedLockService ?? createNamedLockService(services);
   const consumerRuntime = new Map<string, { lastReadAt?: number; cadence?: WatchCadence }>();
+  services.namedLockService = namedLocks;
   services.workspaceJournal = workspaceJournal;
   services.workspaceStateReader = workspaceStateReader;
   services.workspaceCursorStore = workspaceCursorStore;
@@ -446,8 +484,44 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'sessions:overview', {}, async () => {
       const manager = requireOrchestrationSessionManager(services);
       const overview = await manager.overview(parseOrchestrationSessionSelector(request));
-      return { ok: true, ...overview };
+      const locks = namedLocks.list(sessionLockFilter(overview.session));
+      return { ok: true, ...overview, locks };
     }, result => ({ resultCount: result.panes.length }));
+  });
+
+  commandRegistry.register('runpane:locks:acquire', async (request: PaneCommandValue): Promise<RunpaneLockAcquireResult> => {
+    return withRunpaneAction(services, 'locks:acquire', {}, async () => {
+      const normalized: RunpaneLockAcquireRequest = decodeBoundary(request, lockAcquireRequestSchema);
+      const { owner, sessionId } = await resolveLockOwner(services, normalized.owner);
+      return namedLocks.acquire({
+        name: normalized.name,
+        ttlMs: normalized.ttlMs,
+        waitMs: Math.min(Math.max(0, normalized.waitMs ?? 0), MAX_LOCK_WAIT_PER_CALL_MS),
+        note: optionalLockText(normalized.note),
+        owner,
+        sessionId,
+      });
+    }, result => ({ paneId: result.lock.owner.paneId, panelId: result.lock.owner.panelId, timedOut: result.ok ? undefined : result.timedOut }));
+  });
+
+  commandRegistry.register('runpane:locks:release', async (request: PaneCommandValue): Promise<RunpaneLockReleaseResult> => {
+    return withRunpaneAction(services, 'locks:release', {}, async () => {
+      const normalized: RunpaneLockReleaseRequest = decodeBoundary(request, lockReleaseRequestSchema);
+      const resolved = await resolveLockOwner(services, normalized.owner, normalized.force === true);
+      const sessionId = normalized.sessionId
+        ? (await requireOrchestrationSessionManager(services).get({ sessionId: normalized.sessionId })).id
+        : resolved.sessionId;
+      return namedLocks.release({ name: normalized.name, owner: resolved.owner, sessionId, force: normalized.force === true });
+    }, result => ({ resultCount: result.released ? 1 : 0 }));
+  });
+
+  commandRegistry.register('runpane:locks:list', async (request: PaneCommandValue = {}): Promise<RunpaneLockListResult> => {
+    return withRunpaneAction(services, 'locks:list', {}, async () => {
+      const normalized: RunpaneLockListRequest = decodeBoundary(request, lockListRequestSchema);
+      if (!normalized.sessionId) return { ok: true, locks: namedLocks.list() };
+      const session = await requireOrchestrationSessionManager(services).get({ sessionId: normalized.sessionId });
+      return { ok: true, locks: namedLocks.list(sessionLockFilter(session)) };
+    }, result => ({ resultCount: result.locks.length }));
   });
 
   commandRegistry.register('runpane:panes:list', async (request: PaneCommandValue = {}): Promise<RunpanePaneListResult> => {
@@ -2455,6 +2529,62 @@ function parsePaneListRequest(value: PaneCommandValue): RunpanePaneListRequest {
 
   return {
     repo: parseRepoSelector(value.repo),
+  };
+}
+
+function createNamedLockService(services: AppServices): NamedLockService {
+  return new NamedLockService(new NamedLockStore(path.join(getAppDirectory(), 'locks.json')), {
+    isOwnerLive: owner => isLockOwnerLive(services, owner),
+    log: (message, error) => console.warn(message, error),
+  });
+}
+
+/** A Pane owner is live while its Pane exists unarchived and, when named, its panel still exists. */
+export function isLockOwnerLive(services: Pick<AppServices, 'sessionManager'>, owner: RunpaneLockOwner): boolean {
+  if (owner.kind !== 'pane' || !owner.paneId) return true;
+  const pane = services.sessionManager.getSession(owner.paneId);
+  if (!pane || pane.archived) return false;
+  return !owner.panelId || panelManager.getPanel(owner.panelId)?.sessionId === owner.paneId;
+}
+
+/**
+ * Resolve who is calling. A Pane caller (from PANE_SESSION_ID/PANE_PANEL_ID or
+ * --pane/--panel) owns the lock and scopes it to its Session when it has one;
+ * a caller outside Pane is an external owner named by its --note.
+ */
+async function resolveLockOwner(
+  services: AppServices,
+  input: RunpaneLockOwnerInput,
+  allowAnonymous = false,
+): Promise<{ owner: RunpaneLockOwner; sessionId?: string }> {
+  const panel = input.panelId ? panelManager.getPanel(input.panelId) : undefined;
+  if (input.panelId && !panel) throw new Error(`No Pane panel found with id ${input.panelId}. Run \`runpane panels list --pane <pane-id>\` to see panel ids.`);
+  const paneId = input.paneId ?? panel?.sessionId;
+  if (paneId) {
+    const pane = services.sessionManager.getSession(paneId);
+    if (!pane) throw new Error(`No Pane pane found with id ${paneId}. Run \`runpane panes list\` to see Pane ids.`);
+    if (pane.archived) throw new Error(`Pane ${paneId} is archived and cannot hold locks.`);
+    if (panel && panel.sessionId !== paneId) throw new Error(`Panel ${input.panelId} does not belong to Pane ${paneId}.`);
+    const owner: RunpaneLockOwner = { kind: 'pane', paneId };
+    if (input.panelId) owner.panelId = input.panelId;
+    const sessionId = await services.orchestrationSessionManager?.sessionIdForPane(paneId, input.panelId);
+    return { owner, sessionId };
+  }
+  const label = optionalLockText(input.label);
+  if (label) return { owner: { kind: 'external', label } };
+  if (allowAnonymous) return { owner: { kind: 'external', label: '' } };
+  throw new Error('Outside a Pane terminal, pass --note <text> to say who holds the lock (or --pane/--panel to act for a Pane).');
+}
+
+function optionalLockText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function sessionLockFilter(session: { id: string; internalSessionId: string; associations: readonly { paneId: string }[] }) {
+  return {
+    sessionId: session.id,
+    paneIds: [session.internalSessionId, ...session.associations.map(association => association.paneId)],
   };
 }
 

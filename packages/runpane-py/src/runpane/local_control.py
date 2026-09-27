@@ -244,11 +244,13 @@ def run_watch(parsed: Any) -> int:
     )
     cadence_value_flag_present = has_cadence_value_flag(parsed)
     # Cadence state lives in the daemon per named consumer, so an anonymous follower names itself.
+    # A Session watch is named after the Session, so it survives an orchestrator agent switch.
     watch_as = parsed.watch_as
     if watch_as is None and parsed.follow:
+        session_cursor = session_watch_cursor_name(parsed.session_id) if parsed.session_id else None
         panel_id = os.environ.get("PANE_PANEL_ID")
         panel_cursor = derived_watch_cursor_name("panel", panel_id) if panel_id else None
-        watch_as = panel_cursor or (f"follow-{os.getpid()}" if cadence_value_flag_present else None)
+        watch_as = session_cursor or panel_cursor or (f"follow-{os.getpid()}" if cadence_value_flag_present else None)
     # --quiet drops lines that only prove liveness; --self-test still prints its WATCH OK result.
     quiet = bool(parsed.quiet)
     request: Dict[str, Any] = {
@@ -259,6 +261,8 @@ def run_watch(parsed: Any) -> int:
         **optional_value("limit", parsed.limit),
         **optional_value("kinds", parsed.watch_kinds or None),
         **optional_value("paneIds", parsed.watch_pane_ids or None),
+        # The daemon resolves the Session (id or exact name) and re-reads its Panes on every read.
+        **optional_value("session", parsed.session_id),
         **optional_value("excludePaneIds", parsed.watch_exclude_pane_ids or None),
         **optional_value("repo", parsed.repo),
         **optional_value("nameContains", parsed.name_contains),
@@ -319,6 +323,15 @@ def run_watch(parsed: Any) -> int:
                 failing_code = code
                 time.sleep(1)
                 continue
+            if request.get("session") and not result.get("session"):
+                # An older daemon ignores the unknown field and would watch every Pane instead.
+                return emit_watch_failure(
+                    RuntimeError(
+                        "This Pane daemon does not support runpane watch --session; "
+                        "update Pane, or pass one --pane per Session Pane."
+                    ),
+                    output_format,
+                )
             if failing_code:
                 if not quiet:
                     emit_watch_non_entry("_reconnected", output_format, generation=result.get("generation"))
@@ -369,6 +382,15 @@ def derived_watch_cursor_name(prefix: str, name: str) -> str:
     if PORTABLE_WATCH_CURSOR_PATTERN.fullmatch(name):
         return name
     return f"{prefix}-{hashlib.sha256(name.encode('utf-8')).hexdigest()[:12]}"
+
+
+def session_watch_cursor_name(session: str) -> str:
+    """Default cursor for `watch --session`: `session-<uuid>` for a Session id, `session-<name>` for a name.
+
+    Shortened like any derived name when it is longer than 64 characters or has other characters.
+    """
+    match = re.fullmatch(r"__orchestration_session_(.+)__", session)
+    return derived_watch_cursor_name("session", f"session-{match.group(1) if match else session}")
 
 
 def effective_watch_heartbeat_ms(seconds: float) -> float:
@@ -1038,6 +1060,8 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
         return f"EXIT {name} {pane}{panel} code {code}"
     if kind in {"pane.created", "pane.gone"}:
         return f"{workspace_label(kind)} {name} {pane}"
+    if kind in {"pane.associated", "pane.detached"}:
+        return f"{workspace_label(kind)} {name} {pane} session {sanitize_watch_value(entry.get('sessionId') or '')}"
     return f"{workspace_label(kind)} {name} {pane}{panel}"
 
 
@@ -1076,6 +1100,8 @@ def workspace_label(kind: Any) -> str:
         "pane.created": "NEW",
         "pane.gone": "GONE",
         "panel.exited": "EXIT",
+        "pane.associated": "JOINED",
+        "pane.detached": "LEFT",
     }.get(kind, str(kind).upper())
 
 

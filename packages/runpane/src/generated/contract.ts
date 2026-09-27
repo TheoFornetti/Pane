@@ -284,7 +284,7 @@ export const RUNPANE_CONTRACT = {
       "name": "watch",
       "summary": "Wait for workspace agent and Pane transitions using a daemon-held cursor.",
       "usage": [
-        "runpane watch [--as <name>|--since <generation>] [--follow] [--format <lines|json>] [--heartbeat <seconds>] [--idle-after <ms>] [--settle <ms>] [--blocked-settle <ms>] [--min-interval <ms>] [--idle-backoff] [--all-managed|--pane <id>] [--include-shells] [--self-test] [--quiet] [--kinds <kind,...>] [--repo <selector>] [--name-contains <text>] [--timeout-ms <ms>] [--from <now|earliest>] [--json] [--pane-dir <path>]"
+        "runpane watch [--as <name>|--since <generation>] [--follow] [--format <lines|json>] [--heartbeat <seconds>] [--idle-after <ms>] [--settle <ms>] [--blocked-settle <ms>] [--min-interval <ms>] [--idle-backoff] [--all-managed|--pane <id>|--session <id|name>] [--include-shells] [--self-test] [--quiet] [--kinds <kind,...>] [--repo <selector>] [--name-contains <text>] [--timeout-ms <ms>] [--from <now|earliest>] [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
         "agents"
@@ -1803,6 +1803,7 @@ export const RUNPANE_CONTRACT = {
         "  --no-control-lines             Alias for --quiet",
         "  --kinds <kind,...>             Limit event kinds",
         "  --pane <id>                    Limit to a Pane; repeatable",
+        "  --session <id|name>            Follow every Pane in a named Session; associate/detach apply live",
         "  --repo <selector>              Limit to a saved repository",
         "  --name-contains <text>         Limit by Pane name substring",
         "  --timeout-ms <ms>              Wait timeout; 0 polls once",
@@ -1816,6 +1817,7 @@ export const RUNPANE_CONTRACT = {
         "Defaults are responsive: no settle, no batching, all kinds, IDLE every --idle-after. BUSY carries no action; drop it with --kinds.",
         "Unattended (Pane Chat default): --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "User present: the same kinds with --settle 60000 --blocked-settle 15000 --min-interval 120000 and no --idle-backoff",
+        "Session orchestrator: runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "Pane Chat arms those flags itself through its skill; pass them only for your own scripts.",
         "STUCK means real unsubmitted composer text; an agent prompt suggestion never counts.",
         "Dead watch: HEARTBEAT is proof of life only (--quiet drops it). Judge death by a non-zero exit or a WATCH ERROR line, not by silence."
@@ -2753,6 +2755,7 @@ export const RUNPANE_CONTRACT = {
         "  --no-control-lines             Alias for --quiet",
         "  --kinds <kind,...>",
         "  --pane <id>                    Repeatable",
+        "  --session <id|name>            Follow a named Session's Panes; no re-arm",
         "  --repo <selector>",
         "  --name-contains <text>",
         "  --timeout-ms <ms>              0 polls once",
@@ -2766,6 +2769,7 @@ export const RUNPANE_CONTRACT = {
         "Defaults are responsive: no settle, no batching, all kinds, IDLE every --idle-after. BUSY carries no action; drop it with --kinds.",
         "Unattended (Pane Chat default): --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "User present: the same kinds with --settle 60000 --blocked-settle 15000 --min-interval 120000 and no --idle-backoff",
+        "Session orchestrator: runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "Pane Chat arms those flags itself through its skill; pass them only for your own scripts.",
         "STUCK means real unsubmitted composer text; an agent prompt suggestion never counts.",
         "Dead watch: HEARTBEAT is proof of life only (--quiet drops it). Judge death by a non-zero exit or a WATCH ERROR line, not by silence."
@@ -3481,6 +3485,7 @@ export const RUNPANE_CONTRACT = {
       "runpane watch --self-test",
       "runpane watch --follow",
       "runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
+      "runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
       "runpane sessions list [--json] [--pane-dir <path>]",
       "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
       "runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
@@ -3526,7 +3531,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane panes create --prompt` is an alias for `--initial-input`; request JSON and daemon payloads should use the canonical `initialInput` field.",
       "If composer submission cannot be verified without risking a duplicate, the create item is unsuccessful with `initialInput.staged`, `initialInput.attempts`, `initialInput.blocked.kind: submission_unverified`, and an actionable `nextCommand`. The CLI-facing `--prompt` alias maps to this canonical `initialInput` result.",
       "When running from WSL while Pane is installed on Windows, the Linux wrapper may look for a missing `/tmp/pane-daemon.../daemon.sock` or resolve to a Windows shim such as Volta. In that case invoke the Windows wrapper through PowerShell from a Windows cwd, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.",
-      "`runpane watch` waits for workspace transitions from the daemon journal without polling. `--follow` keeps waiting and prints one line per event: READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, plus HEARTBEAT every 60 seconds as proof of life. Defaults are responsive: no settle, no batching, all kinds, IDLE every `--idle-after`. Expensive consumers opt into `--kinds` (drop `agent.busy`; BUSY carries no action), `--settle <ms>` (READY only after a quiet window; a BUSY inside it cancels the line), `--blocked-settle <ms>`, `--min-interval <ms>` (batch non-urgent lines; BLOCKED bypasses it), and `--idle-backoff` (10m, 30m, 1h, 3h, then daily). Two profiles cover orchestrators. Unattended: `runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff`, which budgets about 6 wake-ups per active pane per hour worst case, usually 1-3, and can deliver READY up to about 13 minutes late. User present: the same kinds with `--settle 60000 --blocked-settle 15000 --min-interval 120000` and no `--idle-backoff`, so READY arrives within about 3 minutes. Pane Chat arms it automatically through its skill; only your own scripts need the flags. STUCK means real unsubmitted composer text, never an agent prompt suggestion. `--quiet` (alias `--no-control-lines`) drops the WATCH OK, HEARTBEAT, and WATCH RECONNECTED control lines (`_ok`, `_heartbeat`, `_reconnected` in JSON); WATCH ERROR, RESET, and DROPPED (`_error`, `_reset`, `_dropped`) always print. Judge a dead watch by a non-zero exit or a WATCH ERROR line, not by silence.",
+      "`runpane watch` waits for workspace transitions from the daemon journal without polling. `--follow` keeps waiting and prints one line per event: READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, plus HEARTBEAT every 60 seconds as proof of life. Defaults are responsive: no settle, no batching, all kinds, IDLE every `--idle-after`. Expensive consumers opt into `--kinds` (drop `agent.busy`; BUSY carries no action), `--settle <ms>` (READY only after a quiet window; a BUSY inside it cancels the line), `--blocked-settle <ms>`, `--min-interval <ms>` (batch non-urgent lines; BLOCKED bypasses it), and `--idle-backoff` (10m, 30m, 1h, 3h, then daily). Two profiles cover orchestrators. Unattended: `runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff`, which budgets about 6 wake-ups per active pane per hour worst case, usually 1-3, and can deliver READY up to about 13 minutes late. User present: the same kinds with `--settle 60000 --blocked-settle 15000 --min-interval 120000` and no `--idle-backoff`, so READY arrives within about 3 minutes. Pane Chat arms it automatically through its skill; only your own scripts need the flags. STUCK means real unsubmitted composer text, never an agent prompt suggestion. `--quiet` (alias `--no-control-lines`) drops the WATCH OK, HEARTBEAT, and WATCH RECONNECTED control lines (`_ok`, `_heartbeat`, `_reconnected` in JSON); WATCH ERROR, RESET, and DROPPED (`_error`, `_reset`, `_dropped`) always print. Judge a dead watch by a non-zero exit or a WATCH ERROR line, not by silence. `--session <id|name>` follows every Pane associated with a named Session and re-reads membership on every read, so associate and detach need no re-arm; JOINED and LEFT (`pane.associated`, `pane.detached`) report membership changes. In JSON, an entry with `replay: true` restates current state after a reset and is never READY.",
       "`sessions list` list durable named orchestration Sessions.",
       "`sessions create` create a durable named orchestration Session and its hidden terminal owner.",
       "`sessions get` read one durable named orchestration Session.",
@@ -4080,6 +4085,26 @@ export const RUNPANE_CONTRACT = {
         "--follow",
         "--no-control-lines",
         "--all-managed"
+      ],
+      [
+        "watch",
+        "--session",
+        "__orchestration_session_1b4e28ba-2fa1-11d2-883f-0016d3cca427__",
+        "--follow",
+        "--quiet",
+        "--json",
+        "--kinds",
+        "agent.ready,agent.blocked,pane.associated,pane.detached",
+        "--settle",
+        "180000"
+      ],
+      [
+        "watch",
+        "--session=Release train",
+        "--as",
+        "release-watch",
+        "--exclude-pane",
+        "pane-old"
       ],
       [
         "agent-context",
@@ -5600,7 +5625,9 @@ export const RUNPANE_CONTRACT = {
             "agent.idle",
             "pane.created",
             "pane.gone",
-            "panel.exited"
+            "panel.exited",
+            "pane.associated",
+            "pane.detached"
           ]
         },
         "paneId": {
@@ -5678,8 +5705,19 @@ export const RUNPANE_CONTRACT = {
         "baseline": {
           "const": true
         },
+        "replay": {
+          "const": true,
+          "description": "Set on baseline entries delivered after a reset. A replayed entry restates current state and is never a new transition: a replayed agent.ready is not READY."
+        },
         "changedWhileAway": {
           "type": "boolean"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Named Session of a pane.associated or pane.detached entry."
+        },
+        "sessionName": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -5716,6 +5754,10 @@ export const RUNPANE_CONTRACT = {
           "items": {
             "type": "string"
           }
+        },
+        "session": {
+          "type": "string",
+          "description": "Named Session id or exact name. Limits the wait to the Session's associated Panes, resolved on every read, and implies pane.associated/pane.detached entries. Cannot be combined with paneIds."
         },
         "excludePaneIds": {
           "type": "array",
@@ -5856,6 +5898,23 @@ export const RUNPANE_CONTRACT = {
                 "cursor-truncated",
                 "unknown-consumer"
               ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "session": {
+          "type": "object",
+          "description": "The Session a session request resolved to. A client that sent session and gets no session back is talking to a daemon that ignored it.",
+          "required": [
+            "id",
+            "name"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -7892,9 +7951,10 @@ export const RUNPANE_CONTRACT = {
         },
         {
           "name": "watch",
-          "summary": "Wait for workspace transitions (READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT) from the daemon journal without polling; responsive by default, with opt-in cadence flags for expensive consumers.",
+          "summary": "Wait for workspace transitions (READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, JOINED, LEFT) from the daemon journal without polling; responsive by default, with opt-in cadence flags for expensive consumers.",
           "arguments": [
             "--follow",
+            "--session <id|name>",
             "--self-test",
             "--kinds <kind,...>",
             "--settle <ms>",
@@ -9434,7 +9494,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--as",
             "value": "<consumer-name>",
             "required": false,
-            "description": "Use a persisted named cursor (at-least-once delivery): 1-128 letters, numbers, dots, underscores, or hyphens (daemons before this release accept 64). Default under --follow: PANE_PANEL_ID when set, shortened to panel-<sha256 prefix> when it is longer than 64 characters; otherwise anonymous."
+            "description": "Use a persisted named cursor (at-least-once delivery): 1-128 letters, numbers, dots, underscores, or hyphens (daemons before this release accept 64). Default under --follow: session-<uuid> with --session (session-<name> for a name; shortened to session-<sha256 prefix> when longer than 64 characters), else PANE_PANEL_ID when set, shortened to panel-<sha256 prefix> when it is longer than 64 characters; otherwise anonymous."
           },
           {
             "name": "--since",
@@ -9498,13 +9558,19 @@ export const RUNPANE_CONTRACT = {
             "name": "--kinds",
             "required": false,
             "value": "<kind,...>",
-            "description": "Limit event kinds: agent.ready, agent.busy, agent.blocked, agent.unknown, agent.idle, pane.created, pane.gone, panel.exited. Default all. Drop agent.busy for any consumer that acts on lines; BUSY carries no action."
+            "description": "Limit event kinds: agent.ready, agent.busy, agent.blocked, agent.unknown, agent.idle, pane.created, pane.gone, panel.exited, pane.associated, pane.detached. Default all, except that pane.associated and pane.detached arrive only when listed here or implied by --session. Drop agent.busy for any consumer that acts on lines; BUSY carries no action."
           },
           {
             "name": "--pane",
             "required": false,
             "value": "<pane-id>",
-            "description": "Limit to a Pane; repeatable. Default all managed panes."
+            "description": "Limit to a Pane; repeatable. Default all managed panes. Cannot be combined with --session."
+          },
+          {
+            "name": "--session",
+            "required": false,
+            "value": "<id|name>",
+            "description": "Follow every Pane associated with a named Session (id or exact name). The daemon re-reads membership on every read, so a Pane associated after arming is included and a detached or archived Pane drops out without a re-arm. The Session's own orchestrator panels are never reported. Cannot be combined with --pane or --all-managed; an unknown Session fails."
           },
           {
             "name": "--exclude-pane",
@@ -9599,7 +9665,9 @@ export const RUNPANE_CONTRACT = {
           "runpane watch --follow",
           "runpane watch --as monitor --follow --quiet --json",
           "runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
-          "runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 60000 --blocked-settle 15000 --min-interval 120000"
+          "runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 60000 --blocked-settle 15000 --min-interval 120000",
+          "runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
+          "runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 60000 --blocked-settle 15000 --min-interval 120000"
         ],
         "notes": [
           "Defaults stay responsive: no settle, no batching, all kinds, IDLE every --idle-after. Cadence flags are opt-in for expensive consumers and require --follow.",
@@ -9613,7 +9681,10 @@ export const RUNPANE_CONTRACT = {
           "The daemon treats omitted idleAfterMs as disabled so older clients never receive agent.idle unexpectedly.",
           "Control lines are not journal entries. JSON kinds and their lines-format text: _ok (WATCH OK, once when armed), _heartbeat (HEARTBEAT, every --heartbeat seconds), _reconnected (WATCH RECONNECTED, after a retried daemon error), _error (WATCH ERROR, a daemon error; the process exits 2 unless --follow retries it), _reset (RESET, the journal restarted or the cursor fell behind; a fresh baseline follows), and _dropped (DROPPED, entries lost to journal truncation). --quiet drops _ok, _heartbeat, and _reconnected; _error, _reset, and _dropped always print.",
           "Under --follow, JSON entries for panels holding unsubmitted composer text carry heldInputPresent: true, the JSON equivalent of the STUCK line. --no-held-input turns this off.",
-          "--session is not supported by watch yet and fails instead of being ignored; pass one --pane per Session Pane."
+          "--session <id|name> scopes the watch to a named Session. The daemon resolves the Session once per request and its associated Panes on every read, so sessions associate and sessions detach take effect without a re-arm; archived and detached Panes drop out, and the Session's own orchestrator panels are excluded. Cadence state is keyed by the Session, not its current Panes, so membership changes keep held lines. A detached Pane's held lines are dropped.",
+          "Under --session, pane.associated (JOINED <pane-name> pane <pane-id> session <session-id>) and pane.detached (LEFT ...) report membership changes; list them in --kinds next to the agent kinds. Other consumers receive them only when --kinds lists them, so older clients never see an unknown kind.",
+          "A daemon that predates --session returns no session field; runpane then fails with WATCH ERROR instead of watching every Pane.",
+          "Replay: after a reset (RESET/_reset), the baseline restates current state. In JSON, those entries carry replay: true (and changedWhileAway: true after an epoch change). A replayed agent.ready is never READY: re-read runpane sessions overview instead of acting on it. Lines mode prints only CHANGED for them."
         ]
       },
       "panes git-status": {

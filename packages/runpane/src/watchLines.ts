@@ -17,6 +17,7 @@ interface WatchEntry {
   exitCode?: number;
   baseline?: true;
   changedWhileAway?: boolean;
+  sessionId?: string;
   idleMs?: number;
   idleCount?: number;
 }
@@ -56,6 +57,8 @@ function formatEntryLine(entry: WatchEntry): string | undefined {
     }
     case 'pane.created': return `NEW ${name} ${pane}`;
     case 'pane.gone': return `GONE ${name} ${pane}`;
+    case 'pane.associated': return `JOINED ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
+    case 'pane.detached': return `LEFT ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
     case 'panel.exited': return `EXIT ${name} ${pane}${panel} code ${entry.exitCode ?? 'unknown'}`;
     default: return `UNKNOWN ${name} ${pane}${panel}`;
   }

@@ -523,6 +523,26 @@
       "--all-managed"
     ],
     [
+      "watch",
+      "--session",
+      "__orchestration_session_1b4e28ba-2fa1-11d2-883f-0016d3cca427__",
+      "--follow",
+      "--quiet",
+      "--json",
+      "--kinds",
+      "agent.ready,agent.blocked,pane.associated,pane.detached",
+      "--settle",
+      "180000"
+    ],
+    [
+      "watch",
+      "--session=Release train",
+      "--as",
+      "release-watch",
+      "--exclude-pane",
+      "pane-old"
+    ],
+    [
       "agent-context",
       "--command",
       "panes create",

@@ -190,8 +190,11 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   if (parsed.command === 'watch' && parsed.follow && parsed.timeoutMs === 0) {
     throw new Error('--timeout-ms must be greater than 0 with --follow.');
   }
-  if (parsed.command === 'watch' && parsed.sessionId !== undefined) {
-    throw new Error('runpane watch --session is not supported yet. Pass one --pane per Pane from `runpane sessions overview --session <id|name> --json`.');
+  if (parsed.command === 'watch' && parsed.sessionId !== undefined && parsed.watchPaneIds?.length) {
+    throw new Error('runpane watch accepts either --session or --pane, not both; --session already follows every Pane in the Session.');
+  }
+  if (parsed.command === 'watch' && parsed.sessionId !== undefined && parsed.allManaged) {
+    throw new Error('runpane watch accepts either --session or --all-managed, not both.');
   }
   if (parsed.command === 'watch' && parsed.allManaged && parsed.watchPaneIds?.length) {
     throw new Error('runpane watch accepts either --all-managed or --pane, not both.');

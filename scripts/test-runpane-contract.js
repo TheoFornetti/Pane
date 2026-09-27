@@ -184,6 +184,8 @@ print(json.dumps([effective_watch_heartbeat_ms(180), effective_watch_heartbeat_m
     ['pane.created', 'NEW Issue 538 pane pane-1'],
     ['pane.gone', 'GONE Issue 538 pane pane-1'],
     ['panel.exited', 'EXIT Issue 538 pane pane-1 panel panel-1 code 3', { exitCode: 3 }],
+    ['pane.associated', 'JOINED Issue 538 pane pane-1 session session-9', { sessionId: 'session-9' }],
+    ['pane.detached', 'LEFT Issue 538 pane pane-1 session session-9', { sessionId: 'session-9' }],
   ];
   for (const [kind, line, extra = {}] of expected) {
     assert.deepStrictEqual(
@@ -194,6 +196,13 @@ print(json.dumps([effective_watch_heartbeat_ms(180), effective_watch_heartbeat_m
   assert.deepStrictEqual(
     lines.formatWaitResult({ epoch: 'epoch-1', generation: 7, entries: [{ ...base, kind: 'agent.ready', baseline: true }] }, 'lines'),
     [],
+  );
+  // A replayed baseline entry keeps its replay flag in JSON and prints nothing in lines mode.
+  const replayed = { ...base, kind: 'agent.ready', baseline: true, replay: true };
+  assert.deepStrictEqual(lines.formatWaitResult({ epoch: 'epoch-1', generation: 7, entries: [replayed] }, 'lines'), []);
+  assert.deepStrictEqual(
+    lines.formatWaitResult({ epoch: 'epoch-1', generation: 7, entries: [replayed] }, 'json').map(JSON.parse),
+    [replayed],
   );
   assert.deepStrictEqual(
     lines.formatWaitResult({
@@ -561,12 +570,64 @@ async function checkWatchStreamParity() {
       const expectedCursor = `panel-${require('crypto').createHash('sha256').update(longPanelId).digest('hex').slice(0, 12)}`;
       assert.strictEqual(jsonRequests[0].as, expectedCursor, `${runtime} must shorten a long derived cursor name`);
 
+      // --session forwards the selector to the daemon, names its cursor session-<uuid>, and prints JOINED/LEFT.
+      const sessionId = `__orchestration_session_${'b'.repeat(8)}-2fa1-11d2-883f-0016d3cca427__`;
+      const sessionRequests = [];
+      const sessionFollow = await withFakeDaemon(
+        paneDir,
+        (frame) => {
+          sessionRequests.push(frame.args[0]);
+          return { result: {
+            ...watchResult(12),
+            session: { id: sessionId, name: 'Release' },
+            entries: [
+              { gen: 12, at: '2026-09-27T00:00:00.000Z', kind: 'pane.associated', paneId: 'pane-2', paneName: 'Worker', source: 'session', sessionId, sessionName: 'Release' },
+              { gen: 13, at: '2026-09-27T00:00:00.000Z', kind: 'pane.detached', paneId: 'pane-2', paneName: 'Worker', source: 'session', sessionId, sessionName: 'Release' },
+            ],
+          } };
+        },
+        () => runWatchCli(
+          runtime,
+          ['watch', '--session', sessionId, '--follow', '--quiet', '--idle-after', '0', '--no-held-input'],
+          paneDir,
+          stdout => stdout.includes('LEFT Worker pane pane-2'),
+          8_000,
+          { PANE_PANEL_ID: 'panel-orchestrator' },
+        ),
+      );
+      assertIncludes(sessionFollow.stdout, `JOINED Worker pane pane-2 session ${sessionId}`);
+      assert.strictEqual(sessionRequests[0].session, sessionId, `${runtime} must forward --session to the daemon`);
+      assert.strictEqual(sessionRequests[0].paneIds, undefined);
+      assert.strictEqual(sessionRequests[0].as, 'session-bbbbbbbb-2fa1-11d2-883f-0016d3cca427', `${runtime} must default the cursor to session-<uuid>`);
+
+      const namedSessionRequests = [];
+      const namedSession = await withFakeDaemon(
+        paneDir,
+        (frame) => {
+          namedSessionRequests.push(frame.args[0]);
+          return { result: { ...watchResult(14), session: { id: sessionId, name: 'Release train' } } };
+        },
+        () => runWatchCli(runtime, ['watch', '--session', 'Release train', '--follow', '--json'], paneDir, stdout => stdout.includes('"kind":"_ok"')),
+      );
+      assertIncludes(namedSession.stdout, '"kind":"_ok"');
+      const expectedNamedCursor = `session-${require('crypto').createHash('sha256').update('session-Release train').digest('hex').slice(0, 12)}`;
+      assert.strictEqual(namedSessionRequests[0].as, expectedNamedCursor, `${runtime} must shorten a Session name that is not a portable cursor`);
+
+      const oldDaemon = await withFakeDaemon(
+        paneDir,
+        () => ({ result: watchResult(15) }),
+        () => runWatchCli(runtime, ['watch', '--session', sessionId, '--follow'], paneDir, stdout => stdout.includes('WATCH ERROR')),
+      );
+      assertIncludes(oldDaemon.stdout, 'does not support runpane watch --session');
+      assert.ok(!oldDaemon.stdout.includes('WATCH OK'), `${runtime} must not arm a --session watch on a daemon that ignores it`);
+
       for (const badWatchArgs of [
         ['watch', '--heartbeat', 'nope'],
         ['watch', '--follow', '--settle', 'nope'],
         ['watch', '--settle', '5'],
         ['watch', '--follow', '--since', '42', '--settle', '180000'],
-        ['watch', '--follow', '--session', 'my-session'],
+        ['watch', '--follow', '--session', 'my-session', '--pane', 'pane-1'],
+        ['watch', '--follow', '--session', 'my-session', '--all-managed'],
       ]) {
         const badWatch = spawnWatchCli(runtime, badWatchArgs);
         assert.strictEqual(badWatch.status, 2, `${badWatchArgs.join(' ')} must fail`);
@@ -642,6 +703,7 @@ function compareParserParity() {
       watchFrom: parsed.watchFrom ?? null,
       watchKinds: parsed.watchKinds ?? [],
       watchPaneIds: parsed.watchPaneIds ?? [],
+      sessionId: parsed.sessionId ?? null,
       watchExcludePaneIds: parsed.watchExcludePaneIds ?? [],
       nameContains: parsed.nameContains ?? null,
       follow: parsed.follow ?? false,
@@ -732,6 +794,7 @@ for args in samples:
         "watchFrom": parsed.watch_from,
         "watchKinds": parsed.watch_kinds,
         "watchPaneIds": parsed.watch_pane_ids,
+        "sessionId": parsed.session_id,
         "watchExcludePaneIds": parsed.watch_exclude_pane_ids,
         "nameContains": parsed.name_contains,
         "follow": parsed.follow,

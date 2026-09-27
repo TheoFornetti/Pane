@@ -484,11 +484,13 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     parse_flags(args, parsed)
     if parsed.command == "watch" and parsed.follow and parsed.timeout_ms == 0:
         raise ValueError("--timeout-ms must be greater than 0 with --follow.")
-    if parsed.command == "watch" and parsed.session_id is not None:
+    if parsed.command == "watch" and parsed.session_id is not None and parsed.watch_pane_ids:
         raise ValueError(
-            "runpane watch --session is not supported yet. "
-            "Pass one --pane per Pane from `runpane sessions overview --session <id|name> --json`."
+            "runpane watch accepts either --session or --pane, not both; "
+            "--session already follows every Pane in the Session."
         )
+    if parsed.command == "watch" and parsed.session_id is not None and parsed.all_managed:
+        raise ValueError("runpane watch accepts either --session or --all-managed, not both.")
     if parsed.command == "watch" and parsed.all_managed and parsed.watch_pane_ids:
         raise ValueError("runpane watch accepts either --all-managed or --pane, not both.")
     if parsed.command == "watch" and parsed.json and parsed.watch_format == "lines":

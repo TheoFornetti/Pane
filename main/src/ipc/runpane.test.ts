@@ -16,6 +16,7 @@ import { panelManager as terminalPanelStore } from '../test/setup';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { databaseService as panelDatabase } from '../services/database';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
+import { removeWorktreeViaTrash, waitForPendingWorktreeTrash } from '../services/worktreeTrash';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { usageManager } from '../services/usage/usageManager';
@@ -263,20 +264,20 @@ function registerSessionsDeleteStub(
   registry: PaneCommandRegistry,
   services: AppServices,
   options: {
-    onArchive?: () => Promise<void> | void;
+    onArchive?: (sessionId: string) => Promise<void> | void;
     result?: { success: boolean; error?: string };
   } = {},
 ): ReturnType<typeof vi.fn> {
-  const handler = vi.fn(async (sessionId: string) => {
+  const handler = vi.fn(async (sessionId: string, _options?: { removeExternalWorktree?: boolean }) => {
     if (options.result) {
       return options.result;
     }
     if (services.archiveProgressManager) {
       services.archiveProgressManager.addTask(sessionId, 'issue-252', 'issue-252-worktree', 'Pane', async () => {
-        await options.onArchive?.();
+        await options.onArchive?.(sessionId);
       });
     } else {
-      setImmediate(() => options.onArchive?.());
+      setImmediate(() => options.onArchive?.(sessionId));
     }
     return { success: true };
   });
@@ -3550,7 +3551,7 @@ describe('runpane IPC handlers', () => {
         paneId: session.id,
         archived: true,
         forced: false,
-        worktreeCleanup: 'completed',
+        worktreeCleanup: 'removed',
         worktreePath: repoPath,
         safetyCheck: {
           performed: true,
@@ -3658,7 +3659,7 @@ describe('runpane IPC handlers', () => {
       expect(result).toMatchObject({
         ok: true,
         forced: true,
-        worktreeCleanup: 'completed',
+        worktreeCleanup: 'removed',
         safetyCheck: {
           performed: true,
           hasUncommittedChanges: true,
@@ -3854,7 +3855,7 @@ describe('runpane IPC handlers', () => {
       expect(sessionsDelete).toHaveBeenCalledWith(session.id);
       expect(result).toMatchObject({
         ok: true,
-        worktreeCleanup: 'completed',
+        worktreeCleanup: 'removed',
         safetyCheck: {
           performed: true,
           hasUpstream: true,
@@ -3979,7 +3980,357 @@ describe('runpane IPC handlers', () => {
 
       expect(result).toMatchObject({
         ok: true,
-        worktreeCleanup: 'completed',
+        worktreeCleanup: 'removed',
+      });
+    });
+
+    it('reports queued cleanup as a successful archive while a large worktree is still deleting', async () => {
+      const repoPath = createTempGitRepo('queued-cleanup-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      const queuedSession: Session = { ...session, worktreePath: repoPath };
+      const archiveProgressManager = new ArchiveProgressManager();
+      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+      const services = createServices({
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        sessionManager: {
+          ...createServices().sessionManager,
+          getSession: vi.fn(() => queuedSession),
+        } as never,
+        archiveProgressManager,
+      } as never);
+      const registry = createRegistry(services);
+      registerSessionsDeleteStub(registry, services, {
+        onArchive: (sessionId) => archiveProgressManager.setWorktreeCleanup(sessionId, 'queued'),
+      });
+
+      const result = await registry.invoke('runpane:panes:archive', [{ paneId: session.id }]);
+
+      expect(result).toMatchObject({ ok: true, archived: true, worktreeCleanup: 'queued' });
+    });
+
+    describe('adopted worktrees with --remove-worktree', () => {
+      function createRepoWithLinkedWorktree(name: string) {
+        const repoPath = createTempGitRepo(name);
+        execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+        const worktreePath = path.join(path.dirname(repoPath), `${name}-adopted`);
+        execFileSync('git', ['worktree', 'add', '-q', '-b', 'adopted-feature', worktreePath], { cwd: repoPath, stdio: 'ignore' });
+        return { repoPath, worktreePath };
+      }
+
+      function createAdoptedServices(repoPath: string, adopted: Session): AppServices {
+        const commandRunner = new CommandRunner({ path: repoPath });
+        const archiveProgressManager = new ArchiveProgressManager();
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        return createServices({
+          // SAFETY: This test fixture intentionally supplies the minimal session manager surface exercised by archive.
+          sessionManager: {
+            ...createServices().sessionManager,
+            getSession: vi.fn(() => adopted),
+            getProjectForSession: vi.fn(() => ({ ...project, path: repoPath })),
+            getProjectContext: vi.fn(() => ({ commandRunner })),
+          } as never,
+          // SAFETY: This test fixture intentionally supplies the minimal worktree manager surface exercised by archive.
+          worktreeManager: {
+            getUpstream: vi.fn(async () => null),
+            getSessionComparisonBranch: vi.fn(async () => 'main'),
+          } as never,
+          archiveProgressManager,
+        } as never);
+      }
+
+      it('evaluates safety and removes an adopted worktree into the trash, keeping its branch', async () => {
+        const { repoPath, worktreePath } = createRepoWithLinkedWorktree('adopted-clean');
+        const adopted: Session = { ...session, worktreePath, worktreeOwnership: 'external' };
+        const services = createAdoptedServices(repoPath, adopted);
+        const registry = createRegistry(services);
+        const commandRunner = new CommandRunner({ path: repoPath });
+        const sessionsDelete = registerSessionsDeleteStub(registry, services, {
+          // Mirror sessions:delete, which removes the worktree and records the outcome.
+          onArchive: async (sessionId) => {
+            const outcome = await removeWorktreeViaTrash(worktreePath, repoPath, new PathResolver({ path: repoPath }), commandRunner);
+            services.archiveProgressManager?.setWorktreeCleanup(sessionId, outcome);
+          },
+        });
+
+        const result = await registry.invoke('runpane:panes:archive', [{ paneId: session.id, removeWorktree: true }]);
+        await waitForPendingWorktreeTrash();
+
+        expect(sessionsDelete).toHaveBeenCalledWith(session.id, { removeExternalWorktree: true });
+        expect(result).toMatchObject({
+          ok: true,
+          archived: true,
+          worktreeCleanup: 'removed',
+          worktreePath,
+          safetyCheck: {
+            performed: true,
+            hasUncommittedChanges: false,
+            hasUntrackedFiles: false,
+            unpushedCommits: 0,
+          },
+        });
+        expect(fs.existsSync(worktreePath)).toBe(false);
+        expect(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath, encoding: 'utf8' })).not.toContain('adopted-clean-adopted');
+        expect(execFileSync('git', ['branch', '--list', 'adopted-feature'], { cwd: repoPath, encoding: 'utf8' })).toContain('adopted-feature');
+        expect(fs.readdirSync(path.join(repoPath, '.git', 'pane-trash'))).toEqual([]);
+      });
+
+      it('blocks an adopted worktree with uncommitted work and keeps --remove-worktree in the next command', async () => {
+        const { repoPath, worktreePath } = createRepoWithLinkedWorktree('adopted-dirty');
+        fs.writeFileSync(path.join(worktreePath, 'draft.txt'), 'unsaved work');
+        const adopted: Session = { ...session, worktreePath, worktreeOwnership: 'external' };
+        const services = createAdoptedServices(repoPath, adopted);
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const result = await registry.invoke('runpane:panes:archive', [{ paneId: session.id, removeWorktree: true }]);
+
+        expect(sessionsDelete).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          ok: false,
+          blocked: { code: 'uncommitted-changes', safetyCheck: { performed: true, hasUntrackedFiles: true } },
+          nextCommand: `runpane panes archive --pane ${session.id} --remove-worktree --force --yes --json`,
+        });
+        expect(fs.existsSync(worktreePath)).toBe(true);
+      });
+
+      it('refuses to remove an adopted path that is the repository main checkout', async () => {
+        const { repoPath } = createRepoWithLinkedWorktree('adopted-main');
+        const adopted: Session = { ...session, worktreePath: repoPath, worktreeOwnership: 'external' };
+        const services = createAdoptedServices(repoPath, adopted);
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        await expect(registry.invoke('runpane:panes:archive', [{ paneId: session.id, removeWorktree: true }]))
+          .rejects.toThrow(/main checkout/);
+        expect(sessionsDelete).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('merged pull request evidence', () => {
+      function createFeatureBranchRepo(name: string) {
+        const repoPath = createTempGitRepo(name);
+        execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+        execFileSync('git', ['checkout', '-q', '-b', 'feature'], { cwd: repoPath, stdio: 'ignore' });
+        execFileSync('git', ['commit', '--allow-empty', '-m', 'squash-merged work'], { cwd: repoPath, stdio: 'ignore' });
+        const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoPath, encoding: 'utf8' }).trim();
+        return { repoPath, head };
+      }
+
+      type GhResponse = { stdout: string } | Error;
+
+      /** A real CommandRunner whose `gh` calls return a canned response; git runs for real. */
+      function createRunnerWithGh(repoPath: string, gh: GhResponse) {
+        const commandRunner = new CommandRunner({ path: repoPath });
+        const realExecFile = commandRunner.execFile.bind(commandRunner);
+        const ghCalls: string[][] = [];
+        vi.spyOn(commandRunner, 'execFile').mockImplementation(async (file, args, cwd, options) => {
+          if (file !== 'gh') return realExecFile(file, args, cwd, options);
+          ghCalls.push([...args]);
+          if (gh instanceof Error) throw gh;
+          return { stdout: gh.stdout, stderr: '', exitCode: 0 };
+        });
+        return { commandRunner, ghCalls };
+      }
+
+      function createMergedServices(featureSession: Session, commandRunner: CommandRunner, upstream: string | null = null): AppServices {
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        return createServices({
+          // SAFETY: This test fixture intentionally supplies the minimal session manager surface exercised by archive.
+          sessionManager: {
+            ...createServices().sessionManager,
+            getSession: vi.fn(() => featureSession),
+            getProjectContext: vi.fn(() => ({ commandRunner })),
+          } as never,
+          // SAFETY: This test fixture intentionally supplies the minimal worktree manager surface exercised by archive.
+          worktreeManager: {
+            getUpstream: vi.fn(async () => upstream),
+            getSessionComparisonBranch: vi.fn(async () => 'main'),
+          } as never,
+          archiveProgressManager: new ArchiveProgressManager(),
+        } as never);
+      }
+
+      it('counts a squash-merged branch with no upstream as safe when a merged PR has HEAD as its head', async () => {
+        const { repoPath, head } = createFeatureBranchRepo('squash-merged-repo');
+        const { commandRunner, ghCalls } = createRunnerWithGh(repoPath, {
+          stdout: JSON.stringify([{ number: 7, headRefOid: 'a'.repeat(40) }, { number: 42, headRefOid: head }]),
+        });
+        const services = createMergedServices({ ...session, worktreePath: repoPath }, commandRunner);
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const result = await registry.invoke('runpane:panes:archive', [{ paneId: session.id, dryRun: true }]);
+
+        expect(sessionsDelete).not.toHaveBeenCalled();
+        expect(ghCalls).toEqual([['pr', 'list', '--head', 'feature', '--state', 'merged', '--json', 'number,headRefOid', '--limit', '20']]);
+        expect(result).toMatchObject({
+          ok: true,
+          wouldArchive: true,
+          safetyCheck: {
+            performed: true,
+            hasUpstream: false,
+            unpushedCommits: 0,
+            unpushedCommitDetails: [],
+            mergedViaPr: { number: 42, headOid: head },
+          },
+        });
+        expect(JSON.parse(JSON.stringify(result))).not.toHaveProperty('blocked');
+      });
+
+      it('treats an upstream deleted on the remote as gone and archives with merged PR evidence', async () => {
+        const { repoPath, head } = createFeatureBranchRepo('upstream-gone-repo');
+        const remotePath = path.join(path.dirname(repoPath), 'upstream-gone-remote.git');
+        execFileSync('git', ['init', '--bare', '-q', remotePath], { stdio: 'ignore' });
+        execFileSync('git', ['remote', 'add', 'origin', remotePath], { cwd: repoPath, stdio: 'ignore' });
+        execFileSync('git', ['push', '-q', '-u', 'origin', 'feature'], { cwd: repoPath, stdio: 'ignore' });
+        // GitHub deletes the head branch after merging; the local tracking ref goes stale.
+        execFileSync('git', ['update-ref', '-d', 'refs/heads/feature'], { cwd: remotePath, stdio: 'ignore' });
+        const { commandRunner } = createRunnerWithGh(repoPath, {
+          stdout: JSON.stringify([{ number: 42, headRefOid: head }]),
+        });
+        const services = createMergedServices({ ...session, worktreePath: repoPath }, commandRunner, 'origin/feature');
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const result = await registry.invoke('runpane:panes:archive', [{ paneId: session.id }]);
+
+        expect(sessionsDelete).toHaveBeenCalledWith(session.id);
+        expect(result).toMatchObject({
+          ok: true,
+          archived: true,
+          safetyCheck: {
+            performed: true,
+            hasUpstream: true,
+            upstream: 'origin/feature',
+            upstreamGone: true,
+            unpushedCommits: 0,
+            mergedViaPr: { number: 42, headOid: head },
+          },
+        });
+      });
+
+      it('finds no evidence when gh is missing or no merged PR head matches HEAD', async () => {
+        const { repoPath } = createFeatureBranchRepo('no-evidence-repo');
+        for (const gh of [
+          new Error('spawn gh ENOENT'),
+          { stdout: JSON.stringify([{ number: 42, headRefOid: 'b'.repeat(40) }]) },
+          { stdout: 'not json' },
+        ]) {
+          const { commandRunner } = createRunnerWithGh(repoPath, gh);
+          const services = createMergedServices({ ...session, worktreePath: repoPath }, commandRunner);
+          const registry = createRegistry(services);
+          const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+          const result = await registry.invoke('runpane:panes:archive', [{ paneId: session.id }]);
+
+          expect(sessionsDelete).not.toHaveBeenCalled();
+          expect(result).toMatchObject({
+            ok: false,
+            blocked: {
+              code: 'unpushed-commits',
+              safetyCheck: { unpushedCommits: 1, unpushedCommitDetails: [{ subject: 'squash-merged work' }] },
+            },
+          });
+          expect(JSON.parse(JSON.stringify(result))).not.toHaveProperty('blocked.safetyCheck.mergedViaPr');
+        }
+      });
+    });
+
+    describe('--session --merged', () => {
+      function createBulkServices(panes: Session[], associations: string[]) {
+        const byId = new Map(panes.map(pane => [pane.id, pane]));
+        const get = vi.fn(async () => ({
+          id: 'orchestration-1',
+          name: 'refactor',
+          associations: associations.map(paneId => ({ paneId, panelIds: [], attachedAt: '2026-01-01T00:00:00.000Z' })),
+        }));
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        const services = createServices({
+          // SAFETY: This test fixture intentionally supplies the minimal session manager surface exercised by archive.
+          sessionManager: {
+            ...createServices().sessionManager,
+            getSession: vi.fn((paneId: string) => byId.get(paneId)),
+            getProjectContext: vi.fn(() => ({ commandRunner: new CommandRunner({ path: os.tmpdir() }) })),
+          } as never,
+          // SAFETY: This test fixture intentionally supplies the minimal Sessions manager surface exercised by archive.
+          orchestrationSessionManager: { get } as never,
+          archiveProgressManager: new ArchiveProgressManager(),
+        } as never);
+        return { services, get };
+      }
+
+      function createBulkPanes(): Session[] {
+        const cleanRepo = createTempGitRepo('bulk-clean');
+        execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: cleanRepo, stdio: 'ignore' });
+        const dirtyRepo = createTempGitRepo('bulk-dirty');
+        execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: dirtyRepo, stdio: 'ignore' });
+        fs.writeFileSync(path.join(dirtyRepo, 'draft.txt'), 'unsaved work');
+        return [
+          { ...session, id: 'pane-clean', name: 'clean', worktreePath: cleanRepo },
+          { ...session, id: 'pane-dirty', name: 'dirty', worktreePath: dirtyRepo },
+          { ...session, id: 'pane-archived', name: 'archived', archived: true },
+          { ...session, id: 'pane-main', name: 'main', isMainRepo: true },
+        ];
+      }
+
+      it('dry-runs the Session archive and reports a reason for every skipped Pane', async () => {
+        const panes = createBulkPanes();
+        const { services, get } = createBulkServices(panes, ['pane-clean', 'pane-dirty', 'pane-archived', 'pane-main', 'pane-missing', 'pane-clean']);
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const result = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true, dryRun: true }]);
+
+        expect(get).toHaveBeenCalledWith({ sessionId: 'refactor' });
+        expect(sessionsDelete).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          ok: true,
+          sessionId: 'orchestration-1',
+          merged: true,
+          dryRun: true,
+          removeWorktree: false,
+          archived: 1,
+          skipped: 4,
+          failed: 0,
+          items: [
+            { paneId: 'pane-clean', name: 'clean', outcome: 'would-archive', safetyCheck: { performed: true, unpushedCommits: 0 } },
+            { paneId: 'pane-dirty', outcome: 'skipped', skipped: { code: 'uncommitted-changes' }, safetyCheck: { hasUntrackedFiles: true } },
+            { paneId: 'pane-archived', outcome: 'skipped', skipped: { code: 'already-archived' } },
+            { paneId: 'pane-main', outcome: 'skipped', skipped: { code: 'main-repo' } },
+            { paneId: 'pane-missing', outcome: 'skipped', skipped: { code: 'missing-pane' } },
+          ],
+        });
+      });
+
+      it('archives only the safe Panes of the Session', async () => {
+        const panes = createBulkPanes();
+        const { services } = createBulkServices(panes, ['pane-clean', 'pane-dirty']);
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const result = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true }]);
+
+        expect(sessionsDelete).toHaveBeenCalledTimes(1);
+        expect(sessionsDelete).toHaveBeenCalledWith('pane-clean');
+        expect(result).toMatchObject({
+          ok: true,
+          archived: 1,
+          skipped: 1,
+          items: [
+            { paneId: 'pane-clean', outcome: 'archived', worktreeCleanup: 'removed' },
+            { paneId: 'pane-dirty', outcome: 'skipped', skipped: { code: 'uncommitted-changes' } },
+          ],
+        });
+      });
+
+      it('rejects a Session archive without --merged or with --force', async () => {
+        const { services } = createBulkServices([], []);
+        const registry = createRegistry(services);
+        registerSessionsDeleteStub(registry, services);
+
+        await expect(registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor' }])).rejects.toThrow(/merged/);
+        await expect(registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true, force: true }])).rejects.toThrow(/force/);
+        await expect(registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true, paneId: 'pane-clean' }])).rejects.toThrow(/either paneId or sessionId/);
       });
     });
   });

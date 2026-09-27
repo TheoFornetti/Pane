@@ -451,9 +451,27 @@ export interface RunpanePaneArchiveRequest {
   force?: boolean;
   source?: RunpanePanelCreateSource;
   dryRun?: boolean;
+  /** Also check and remove an adopted (externally owned) worktree. Pane-managed worktrees are always removed. */
+  removeWorktree?: boolean;
 }
 
-export type RunpaneWorktreeCleanupState = 'completed' | 'failed' | 'timeout' | 'not-applicable';
+/** Archives every Pane associated with a named Session whose work is safe to discard locally. */
+export interface RunpanePaneArchiveBulkRequest {
+  sessionId: string;
+  /** The only bulk filter today: Panes that are clean and pushed, or merged via a pull request. */
+  merged: true;
+  source?: RunpanePanelCreateSource;
+  dryRun?: boolean;
+  removeWorktree?: boolean;
+}
+
+/**
+ * - `removed`: the worktree directory is gone.
+ * - `queued`: the worktree is detached from git and its files are being deleted in the background.
+ * - `failed`: removal failed; the worktree may still be on disk.
+ * - `not-applicable`: nothing was removed (a main-repo Pane, or an adopted worktree without `removeWorktree`).
+ */
+export type RunpaneWorktreeCleanupState = 'removed' | 'queued' | 'failed' | 'not-applicable';
 
 export type RunpanePaneArchiveBlockCode =
   | 'uncommitted-changes'
@@ -470,6 +488,15 @@ export interface RunpanePaneArchiveSafetyCheck {
   upstreamRefreshed?: boolean;
   unpushedCommits?: number;
   unpushedCommitDetails?: RunpanePaneArchiveCommit[];
+  /** The branch had an upstream that no longer exists on the remote. */
+  upstreamGone?: boolean;
+  /** A merged pull request whose head is exactly this worktree's HEAD; its commits do not count as unpushed. */
+  mergedViaPr?: RunpanePaneArchiveMergedPr;
+}
+
+export interface RunpanePaneArchiveMergedPr {
+  number: number;
+  headOid: string;
 }
 
 export interface RunpanePaneArchiveCommit {
@@ -516,6 +543,35 @@ export type RunpanePaneArchiveResult =
   | RunpanePaneArchiveSuccessResult
   | RunpanePaneArchiveBlockedResult
   | RunpanePaneArchiveDryRunResult;
+
+export type RunpanePaneArchiveBulkSkipCode =
+  | RunpanePaneArchiveBlockCode
+  | 'missing-pane'
+  | 'already-archived'
+  | 'main-repo';
+
+export interface RunpanePaneArchiveBulkItem {
+  paneId: string;
+  name?: string;
+  outcome: 'archived' | 'would-archive' | 'skipped' | 'failed';
+  skipped?: { code: RunpanePaneArchiveBulkSkipCode; message: string };
+  error?: string;
+  safetyCheck?: RunpanePaneArchiveSafetyCheck;
+  worktreeCleanup?: RunpaneWorktreeCleanupState;
+  worktreePath?: string;
+}
+
+export interface RunpanePaneArchiveBulkResult {
+  ok: boolean;
+  sessionId: string;
+  merged: true;
+  dryRun?: true;
+  removeWorktree: boolean;
+  archived: number;
+  skipped: number;
+  failed: number;
+  items: RunpanePaneArchiveBulkItem[];
+}
 
 export interface RunpanePanelSummary {
   id: string;

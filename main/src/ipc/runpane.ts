@@ -18,6 +18,7 @@ import { projectWorkspaceEntry } from '../services/workspaceJournal';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
 import { CODEX_LOADING_HEADER, getManifestForAgent } from '../services/agentStatus/manifests';
 import type { ArchiveProgressManager, SerializedArchiveTask } from '../services/archiveProgressManager';
+import { classifyWorktree } from '../services/worktreeTrash';
 import type { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
@@ -37,6 +38,10 @@ import type {
   RunpaneInitialInputDeliveryResult,
   RunpanePaneArchiveBlockCode,
   RunpanePaneArchiveBlockedResult,
+  RunpanePaneArchiveBulkItem,
+  RunpanePaneArchiveBulkRequest,
+  RunpanePaneArchiveBulkResult,
+  RunpanePaneArchiveMergedPr,
   RunpanePaneArchiveRequest,
   RunpanePaneArchiveResult,
   RunpanePaneArchiveSafetyCheck,
@@ -176,6 +181,7 @@ const MAX_CREATE_SUBMIT_ATTEMPTS = 3;
 const CREATE_SUBMIT_CONFIRMATION_DELAY_MS = 400;
 const DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS = 30_000;
 const DEFAULT_ARCHIVE_CLEANUP_POLL_INTERVAL_MS = 200;
+const GH_PR_LOOKUP_TIMEOUT_MS = 10_000;
 const DEFAULT_WORKSPACE_WAIT_TIMEOUT_MS = 60_000;
 const MAX_WORKSPACE_WAIT_TIMEOUT_MS = 120_000;
 const DEFAULT_WORKSPACE_WAIT_LIMIT = 256;
@@ -784,7 +790,12 @@ export function registerRunpaneHandlers(
     }, result => ({ repoId: result.repo.id, resultCount: result.items.length }));
   });
 
-  commandRegistry.register('runpane:panes:archive', async (request: PaneCommandValue): Promise<RunpanePaneArchiveResult> => {
+  commandRegistry.register('runpane:panes:archive', async (request: PaneCommandValue): Promise<RunpanePaneArchiveResult | RunpanePaneArchiveBulkResult> => {
+    if (isRecord(request) && request.sessionId !== undefined) {
+      return withRunpaneAction(services, 'panes:archive', {}, async () => {
+        return archiveSessionPanes(services, commandRegistry, parsePaneArchiveBulkRequest(request));
+      }, result => ({ resultCount: result.items.length, ok: result.ok }));
+    }
     return withRunpaneAction(services, 'panes:archive', {}, async () => {
       const normalized = parsePaneArchiveRequest(request);
       const pane = resolvePane(sessionManager, normalized.paneId);
@@ -793,9 +804,9 @@ export function registerRunpaneHandlers(
         throw new Error(`Pane ${normalized.paneId} is already archived`);
       }
 
-      const worktreeCleanupApplicable = Boolean(pane.projectId)
-        && !pane.isMainRepo
-        && pane.worktreeOwnership !== 'external';
+      const removeWorktree = Boolean(normalized.removeWorktree);
+      await assertRemovableWorktree(services, pane, removeWorktree);
+      const worktreeCleanupApplicable = removesPaneWorktree(pane, removeWorktree);
       const safetyCheck = worktreeCleanupApplicable
         ? await computeArchiveSafety(services, pane)
         : { performed: false };
@@ -829,38 +840,15 @@ export function registerRunpaneHandlers(
               message: describeArchiveBlock(blockCode, safetyCheck),
               safetyCheck: toPublicSafetyCheck(safetyCheck),
             },
-            nextCommand: `runpane panes archive --pane ${normalized.paneId} --force --yes --json`,
+            nextCommand: `runpane panes archive --pane ${normalized.paneId}${removeWorktree ? ' --remove-worktree' : ''} --force --yes --json`,
           };
           return blocked;
         }
       }
 
-      const cleanupWait = worktreeCleanupApplicable && services.archiveProgressManager
-        ? waitForArchiveProgressCompletion(services.archiveProgressManager, normalized.paneId, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS)
-        : null;
-
-      const deleteResult = decodeBoundary(
-        await commandRegistry.invoke('sessions:delete', [normalized.paneId]),
-        boundary.object({
-          success: boundary.boolean,
-          error: boundary.optional(boundary.string),
-        }),
-      );
-      if (!deleteResult.success) {
-        throw new Error(deleteResult.error ?? `Failed to archive pane ${normalized.paneId}`);
-      }
-
-      let worktreeCleanup: RunpaneWorktreeCleanupState;
-      if (!worktreeCleanupApplicable) {
-        worktreeCleanup = 'not-applicable';
-      } else if (cleanupWait) {
-        worktreeCleanup = await cleanupWait;
-      } else {
-        worktreeCleanup = await waitForWorktreeRemovalByPolling(pane.worktreePath, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS);
-      }
-
+      const worktreeCleanup = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, worktreeCleanupApplicable);
       const success: RunpanePaneArchiveSuccessResult = {
-        ok: worktreeCleanup === 'completed' || worktreeCleanup === 'not-applicable',
+        ok: worktreeCleanup !== 'failed',
         paneId: normalized.paneId,
         archived: true,
         forced: Boolean(normalized.force),
@@ -3031,6 +3019,7 @@ async function computeArchiveSafety(services: AppServices, pane: Session): Promi
     const hasUntrackedFiles = workingDirectory.hasUntracked;
 
     const upstream = await services.worktreeManager.getUpstream(pane.worktreePath, ctx.commandRunner);
+    let upstreamGone = false;
     if (upstream) {
       const remote = await resolveUpstreamRemote(pane.worktreePath, upstream, ctx.commandRunner);
       await ctx.commandRunner.execAsync(
@@ -3038,44 +3027,237 @@ async function computeArchiveSafety(services: AppServices, pane: Session): Promi
         pane.worktreePath,
         { timeout: 30000 },
       );
-      const unpushedCommitDetails = await listCommitsAhead(
-        pane.worktreePath,
-        upstream,
-        ctx.commandRunner.wslContext,
-      );
-      return {
-        performed: true,
-        hasUncommittedChanges,
-        hasUntrackedFiles,
-        hasUpstream: true,
-        upstream,
-        upstreamRefreshed: true,
-        unpushedCommits: unpushedCommitDetails.length,
-        unpushedCommitDetails,
-      };
+      // `--prune` deletes the tracking ref when the remote branch was deleted,
+      // which GitHub does after merging a PR. Fall through to the no-upstream path.
+      upstreamGone = !await refExists(pane.worktreePath, upstream, ctx.commandRunner);
+      if (!upstreamGone) {
+        const unpushedCommitDetails = await listCommitsAhead(
+          pane.worktreePath,
+          upstream,
+          ctx.commandRunner.wslContext,
+        );
+        return {
+          performed: true,
+          hasUncommittedChanges,
+          hasUntrackedFiles,
+          hasUpstream: true,
+          upstream,
+          upstreamRefreshed: true,
+          unpushedCommits: unpushedCommitDetails.length,
+          unpushedCommitDetails,
+        };
+      }
     }
 
-    // No upstream at all (never pushed, or detached HEAD): the branch's own
-    // commits ahead of its base/comparison branch are the closest proxy for
-    // "unpushed work".
+    // No upstream (never pushed, detached HEAD, or the remote branch is gone):
+    // the branch's own commits ahead of its base/comparison branch are the
+    // closest proxy for "unpushed work".
     const comparisonBranch = await services.worktreeManager.getSessionComparisonBranch(pane, ctx);
     const unpushedCommitDetails = await listCommitsAhead(
       pane.worktreePath,
       comparisonBranch,
       ctx.commandRunner.wslContext,
     );
+    // A squash or rebase merge leaves those commits outside the base branch.
+    // A merged PR whose head is exactly HEAD proves they reached the remote.
+    const mergedViaPr = unpushedCommitDetails.length > 0
+      ? await findMergedPullRequestForHead(pane.worktreePath, ctx.commandRunner)
+      : undefined;
     return {
       performed: true,
       hasUncommittedChanges,
       hasUntrackedFiles,
-      hasUpstream: false,
-      upstreamRefreshed: false,
-      unpushedCommits: unpushedCommitDetails.length,
-      unpushedCommitDetails,
+      hasUpstream: Boolean(upstream),
+      upstream: upstream ?? undefined,
+      upstreamRefreshed: Boolean(upstream),
+      upstreamGone: upstreamGone || undefined,
+      unpushedCommits: mergedViaPr ? 0 : unpushedCommitDetails.length,
+      unpushedCommitDetails: mergedViaPr ? [] : unpushedCommitDetails,
+      mergedViaPr,
     };
   } catch {
     return { performed: false, reasonUnavailable: 'git-status-error' };
   }
+}
+
+async function refExists(worktreePath: string, ref: string, commandRunner: CommandRunner): Promise<boolean> {
+  try {
+    await commandRunner.execAsync(`git rev-parse --verify --quiet ${escapeShellArg(`${ref}^{commit}`)}`, worktreePath, { silent: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const mergedPullRequestListSchema = boundary.array(boundary.object({
+  number: boundary.number,
+  headRefOid: boundary.string,
+}));
+
+/**
+ * The merged pull request whose head commit is this worktree's HEAD, if any.
+ * Missing, unauthenticated, or offline `gh` means no evidence, never an error.
+ */
+async function findMergedPullRequestForHead(
+  worktreePath: string,
+  commandRunner: CommandRunner,
+): Promise<RunpanePaneArchiveMergedPr | undefined> {
+  try {
+    const [branchResult, headResult] = await Promise.all([
+      commandRunner.execFile('git', ['branch', '--show-current'], worktreePath, { silent: true, timeout: 10_000 }),
+      commandRunner.execFile('git', ['rev-parse', 'HEAD'], worktreePath, { silent: true, timeout: 10_000 }),
+    ]);
+    const branch = branchResult.stdout.trim();
+    const head = headResult.stdout.trim();
+    if (!branch || !head) return undefined;
+    const { stdout } = await commandRunner.execFile(
+      'gh',
+      ['pr', 'list', '--head', branch, '--state', 'merged', '--json', 'number,headRefOid', '--limit', '20'],
+      worktreePath,
+      { silent: true, timeout: GH_PR_LOOKUP_TIMEOUT_MS },
+    );
+    const pullRequests = decodeBoundary(JSON.parse(stdout.trim() || '[]'), mergedPullRequestListSchema);
+    const match = pullRequests.find(pullRequest => pullRequest.headRefOid === head);
+    return match ? { number: match.number, headOid: match.headRefOid } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether archiving removes the Pane's worktree: always a Pane-managed one, an adopted one only on request. */
+function removesPaneWorktree(pane: Session, removeWorktree: boolean): boolean {
+  return Boolean(pane.projectId)
+    && !pane.isMainRepo
+    && (pane.worktreeOwnership !== 'external' || removeWorktree);
+}
+
+/** `--remove-worktree` never deletes an adopted path that is the repository's main checkout or another repository. */
+async function assertRemovableWorktree(services: AppServices, pane: Session, removeWorktree: boolean): Promise<void> {
+  if (!removeWorktree || pane.worktreeOwnership !== 'external' || !removesPaneWorktree(pane, removeWorktree)) return;
+  const repo = services.sessionManager.getProjectForSession(pane.id);
+  const ctx = services.sessionManager.getProjectContext(pane.id);
+  if (!repo || !ctx) return;
+  const worktree = await classifyWorktree(pane.worktreePath, repo.path, ctx.commandRunner);
+  if (worktree.kind === 'main') {
+    throw new Error(`Pane ${pane.id} is the repository's main checkout (${pane.worktreePath}); --remove-worktree only removes linked worktrees.`);
+  }
+  if (worktree.kind === 'foreign') {
+    throw new Error(`Pane ${pane.id} is a checkout of a different repository (${pane.worktreePath}); --remove-worktree will not delete it.`);
+  }
+}
+
+/**
+ * Archives the Pane through `sessions:delete`, exactly like the UI, and waits
+ * for its worktree to be removed. Large worktrees report `queued`: git has
+ * forgotten them and their files are being deleted in the background.
+ */
+async function archivePaneAndRemoveWorktree(
+  services: AppServices,
+  commandRegistry: PaneCommandRegistry,
+  pane: Session,
+  removesWorktree: boolean,
+): Promise<RunpaneWorktreeCleanupState> {
+  const cleanupWait = removesWorktree && services.archiveProgressManager
+    ? waitForArchiveProgressCompletion(services.archiveProgressManager, pane.id, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS)
+    : null;
+
+  const deleteArgs: PaneCommandValue[] = removesWorktree && pane.worktreeOwnership === 'external'
+    ? [pane.id, { removeExternalWorktree: true }]
+    : [pane.id];
+  const deleteResult = decodeBoundary(
+    await commandRegistry.invoke('sessions:delete', deleteArgs),
+    boundary.object({
+      success: boundary.boolean,
+      error: boundary.optional(boundary.string),
+    }),
+  );
+  if (!deleteResult.success) {
+    throw new Error(deleteResult.error ?? `Failed to archive pane ${pane.id}`);
+  }
+
+  if (!removesWorktree) return 'not-applicable';
+  if (cleanupWait) return cleanupWait;
+  return waitForWorktreeRemovalByPolling(pane.worktreePath, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS);
+}
+
+/**
+ * `runpane panes archive --session <id|name> --merged`: archives every Pane
+ * associated with the Session whose work is already safe on the remote (clean
+ * and pushed, or merged via a PR whose head is HEAD). Everything else is
+ * skipped with the same block code a single archive would report.
+ */
+async function archiveSessionPanes(
+  services: AppServices,
+  commandRegistry: PaneCommandRegistry,
+  request: RunpanePaneArchiveBulkRequest,
+): Promise<RunpanePaneArchiveBulkResult> {
+  const record = await requireOrchestrationSessionManager(services).get({ sessionId: request.sessionId });
+  const removeWorktree = Boolean(request.removeWorktree);
+  const paneIds = [...new Set(record.associations.map(association => association.paneId))];
+  const items: RunpanePaneArchiveBulkItem[] = [];
+
+  for (const paneId of paneIds) {
+    const pane = services.sessionManager.getSession(paneId);
+    if (!pane) {
+      items.push({ paneId, outcome: 'skipped', skipped: { code: 'missing-pane', message: 'Pane no longer exists.' } });
+      continue;
+    }
+    const base = { paneId, name: pane.name, worktreePath: pane.worktreePath };
+    if (pane.archived) {
+      items.push({ ...base, outcome: 'skipped', skipped: { code: 'already-archived', message: 'Pane is already archived.' } });
+      continue;
+    }
+    if (pane.isMainRepo || !pane.projectId) {
+      items.push({ ...base, outcome: 'skipped', skipped: { code: 'main-repo', message: 'Pane runs in the repository checkout, not a worktree; archive it by --pane.' } });
+      continue;
+    }
+
+    try {
+      await assertRemovableWorktree(services, pane, removeWorktree);
+      const removesWorktree = removesPaneWorktree(pane, removeWorktree);
+      // Evaluate every Pane, including adopted ones that keep their worktree:
+      // --merged selects by evidence, not by what archiving deletes.
+      const safetyCheck = await computeArchiveSafety(services, pane);
+      const publicSafetyCheck = toPublicSafetyCheck(safetyCheck);
+      const blockCode = classifyArchiveBlock(safetyCheck, true);
+      if (blockCode) {
+        items.push({
+          ...base,
+          outcome: 'skipped',
+          skipped: { code: blockCode, message: describeArchiveBlock(blockCode, safetyCheck) },
+          safetyCheck: publicSafetyCheck,
+        });
+        continue;
+      }
+      if (request.dryRun) {
+        items.push({ ...base, outcome: 'would-archive', safetyCheck: publicSafetyCheck });
+        continue;
+      }
+      const worktreeCleanup = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, removesWorktree);
+      items.push({
+        ...base,
+        outcome: worktreeCleanup === 'failed' ? 'failed' : 'archived',
+        error: worktreeCleanup === 'failed' ? 'Pane was archived but its worktree could not be removed.' : undefined,
+        safetyCheck: publicSafetyCheck,
+        worktreeCleanup,
+      });
+    } catch (error) {
+      items.push({ ...base, outcome: 'failed', error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  const failed = items.filter(item => item.outcome === 'failed').length;
+  return {
+    ok: failed === 0,
+    sessionId: record.id,
+    merged: true,
+    dryRun: request.dryRun ? true : undefined,
+    removeWorktree,
+    archived: items.filter(item => item.outcome === 'archived' || item.outcome === 'would-archive').length,
+    skipped: items.filter(item => item.outcome === 'skipped').length,
+    failed,
+    items,
+  };
 }
 
 async function resolveUpstreamRemote(
@@ -3138,6 +3320,8 @@ function toPublicSafetyCheck(check: ArchiveSafetyCheck): RunpanePaneArchiveSafet
     upstreamRefreshed: check.upstreamRefreshed,
     unpushedCommits: check.unpushedCommits,
     unpushedCommitDetails: check.unpushedCommitDetails,
+    upstreamGone: check.upstreamGone,
+    mergedViaPr: check.mergedViaPr,
   };
 }
 
@@ -3159,14 +3343,16 @@ function waitForArchiveProgressCompletion(
     const onProgress = (payload: { tasks: SerializedArchiveTask[] }) => {
       const task = payload.tasks.find(candidate => candidate.sessionId === paneId);
       if (task?.status === 'completed') {
-        finish('completed');
+        finish(task.worktreeCleanup ?? 'removed');
       } else if (task?.status === 'failed') {
         finish('failed');
       }
     };
 
     archiveProgressManager.on('archive-progress', onProgress);
-    const timer = setTimeout(() => finish('timeout'), timeoutMs);
+    // A slow archive script or removal keeps running in the background queue;
+    // the Pane is already archived, so report the removal as queued, not failed.
+    const timer = setTimeout(() => finish('queued'), timeoutMs);
   });
 }
 
@@ -3178,11 +3364,11 @@ async function waitForWorktreeRemovalByPolling(
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     if (!fs.existsSync(worktreePath)) {
-      return 'completed';
+      return 'removed';
     }
     await sleep(Math.min(intervalMs, Math.max(timeoutMs - (Date.now() - startedAt), 0)));
   }
-  return fs.existsSync(worktreePath) ? 'timeout' : 'completed';
+  return fs.existsSync(worktreePath) ? 'queued' : 'removed';
 }
 
 function parsePaneArchiveRequest(value: PaneCommandValue): RunpanePaneArchiveRequest {
@@ -3203,6 +3389,35 @@ function parsePaneArchiveRequest(value: PaneCommandValue): RunpanePaneArchiveReq
     force: optionalBoolean(value.force),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
     dryRun: optionalBoolean(value.dryRun),
+    removeWorktree: optionalBoolean(value.removeWorktree),
+  };
+}
+
+function parsePaneArchiveBulkRequest(value: Record<string, PaneCommandValue>): RunpanePaneArchiveBulkRequest {
+  const request = decodeBoundary(value, boundary.object({
+    sessionId: boundary.nonEmptyString,
+    merged: boundary.optional(boundary.boolean),
+    paneId: boundary.optional(boundary.string),
+    force: boundary.optional(boundary.boolean),
+    source: boundary.optional(boundary.enumeration('user', 'agent')),
+    dryRun: boundary.optional(boundary.boolean),
+    removeWorktree: boundary.optional(boundary.boolean),
+  }));
+  if (request.paneId !== undefined) {
+    throw new Error('Pane archive accepts either paneId or sessionId, not both');
+  }
+  if (request.merged !== true) {
+    throw new Error('Archiving a Session\'s Panes requires merged: true (--merged)');
+  }
+  if (request.force) {
+    throw new Error('Archiving a Session\'s Panes does not accept force; archive a Pane by paneId to discard its work');
+  }
+  return {
+    sessionId: request.sessionId.trim(),
+    merged: true,
+    source: request.source,
+    dryRun: request.dryRun,
+    removeWorktree: request.removeWorktree,
   };
 }
 

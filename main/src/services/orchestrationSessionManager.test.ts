@@ -661,6 +661,35 @@ describe('OrchestrationSessionManager', () => {
     expect(reassigned.associations).toEqual([expect.objectContaining({ paneId: pane.id, panelIds: [] })]);
   });
 
+  it('names the Panes each associate and detach changes, and reports live membership for Session watch', async () => {
+    const fixture = createFixture();
+    const pane = paneFixture(fixture, 'watch-pane', { name: 'Watched Pane' });
+    const otherPane = paneFixture(fixture, 'watch-pane-2', { name: 'Second Pane' });
+    await seedPanel(createPanel('watch-pane-tab', pane.id));
+    const named = await fixture.manager.create({ name: 'Watched' });
+    const changes: Array<{ kind: string; paneIds?: string[]; sessionName?: string }> = [];
+    fixture.manager.on('changed', event => changes.push(event));
+
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: pane.id });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: pane.id, panelIds: ['watch-pane-tab'] });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: otherPane.id });
+    const membership = fixture.manager.workspaceMembership(named.session.id);
+    expect(membership?.panes).toEqual(new Map([[pane.id, ['watch-pane-tab']], [otherPane.id, []]]));
+    expect(membership?.ownPaneIds).toEqual(new Set([named.session.internalSessionId]));
+    expect(membership?.ownPanelIds).toEqual(new Set(Object.values(named.session.panelIds)));
+
+    await fixture.manager.detach({ sessionId: named.session.id });
+    expect(changes).toEqual([
+      { sessionId: named.session.id, kind: 'associated', sessionName: 'Watched', paneIds: [pane.id] },
+      // Re-associating a member changes its panel scope but is not a new join.
+      { sessionId: named.session.id, kind: 'associated', sessionName: 'Watched', paneIds: [] },
+      { sessionId: named.session.id, kind: 'associated', sessionName: 'Watched', paneIds: [otherPane.id] },
+      { sessionId: named.session.id, kind: 'detached', sessionName: 'Watched', paneIds: [pane.id, otherPane.id] },
+    ]);
+    expect(fixture.manager.workspaceMembership(named.session.id)?.panes.size).toBe(0);
+    expect(fixture.manager.workspaceMembership('missing')).toBeUndefined();
+  });
+
   it('separates live activity from completion and marks evidence-backed reports stale after later activity', async () => {
     const fixture = createFixture();
     const named = await fixture.manager.create({ name: 'Verification', goal: 'Verify the implementation.' });

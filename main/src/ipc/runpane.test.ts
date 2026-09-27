@@ -843,6 +843,150 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  describe('workspace wait --session', () => {
+    const sessionRecord = { id: '__orchestration_session_s1__', name: 'Release' };
+    const sessionKinds = ['agent.ready', 'agent.blocked', 'pane.gone', 'pane.associated', 'pane.detached'];
+    const readyEntry = (paneId: string) => ({
+      kind: 'agent.ready' as const,
+      paneId,
+      paneName: paneId,
+      panelId: `${paneId}-panel`,
+      agentType: 'claude',
+      source: 'agent' as const,
+      from: 'working' as const,
+      to: 'idle' as const,
+    });
+
+    function sessionRegistry() {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-01T12:00:00.000Z'));
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-runpane-session-watch-test-'));
+      tempDirs.push(directory);
+      const members = new Map<string, readonly string[]>();
+      const orchestrationSessionManager = {
+        get: vi.fn(async (selector: { sessionId?: string }) => {
+          if (selector.sessionId !== sessionRecord.id && selector.sessionId !== sessionRecord.name) {
+            throw new Error(`Session ${selector.sessionId} not found`);
+          }
+          return sessionRecord;
+        }),
+        workspaceMembership: vi.fn((sessionId: string) => sessionId === sessionRecord.id
+          ? { panes: members, ownPaneIds: new Set<string>(), ownPanelIds: new Set<string>() }
+          : undefined),
+      };
+      const workspaceJournal = new WorkspaceJournal({
+        resolveSessionMembership: sessionId => orchestrationSessionManager.workspaceMembership(sessionId),
+      });
+      const workspaceCursorStore = new WorkspaceCursorStore(path.join(directory, 'workspace-cursors.json'));
+      const registry = createRegistry(createServices({
+        workspaceJournal,
+        workspaceCursorStore,
+        // SAFETY: The fake implements the two Session manager members a Session-scoped wait uses.
+        orchestrationSessionManager: orchestrationSessionManager as never,
+      }));
+      const membership = (kind: 'associated' | 'detached', paneId: string) => {
+        if (kind === 'associated') members.set(paneId, []);
+        else members.delete(paneId);
+        workspaceJournal.send('orchestration-sessions:changed', {
+          sessionId: sessionRecord.id,
+          kind,
+          sessionName: sessionRecord.name,
+          paneIds: [paneId],
+        });
+      };
+      return { workspaceJournal, workspaceCursorStore, registry, membership };
+    }
+
+    it('sees a Pane associated after arming and stops after detach, without re-arming', async () => {
+      const { workspaceJournal, registry, membership } = sessionRegistry();
+      const request = { as: 'session-s1', session: 'Release', timeoutMs: 0, kinds: sessionKinds };
+      const armed = await registry.invoke('runpane:workspace:wait', [request]);
+      expect(armed).toMatchObject({
+        reset: { reason: 'first-use' },
+        entries: [],
+        session: sessionRecord,
+        nextCommand: `runpane watch --as session-s1 --session ${sessionRecord.id}`,
+      });
+
+      workspaceJournal.append(readyEntry('outside'));
+      membership('associated', 'worker');
+      workspaceJournal.append(readyEntry('worker'));
+      const joined = await registry.invoke('runpane:workspace:wait', [request]);
+      expect(joined.entries.map((entry: { kind: string; paneId: string }) => [entry.kind, entry.paneId])).toEqual([
+        ['pane.associated', 'worker'],
+        ['agent.ready', 'worker'],
+      ]);
+      expect(joined.entries[0]).toMatchObject({ sessionId: sessionRecord.id, sessionName: 'Release' });
+
+      membership('detached', 'worker');
+      workspaceJournal.append(readyEntry('worker'));
+      const left = await registry.invoke('runpane:workspace:wait', [request]);
+      expect(left.entries.map((entry: { kind: string; paneId: string }) => [entry.kind, entry.paneId])).toEqual([
+        ['pane.detached', 'worker'],
+      ]);
+    });
+
+    it('keeps the cadence across membership changes and drops a detached Pane’s held READY', async () => {
+      const { workspaceJournal, registry, membership } = sessionRegistry();
+      const request = { as: 'session-s1', session: sessionRecord.id, timeoutMs: 0, idleAfterMs: 0, kinds: sessionKinds, settleMs: 60_000 };
+      await registry.invoke('runpane:workspace:wait', [request]);
+      membership('associated', 'worker');
+      workspaceJournal.append(readyEntry('worker'));
+      membership('associated', 'reviewer');
+      workspaceJournal.append(readyEntry('reviewer'));
+      const joined = await registry.invoke('runpane:workspace:wait', [request]);
+      expect(joined.entries.map((entry: { kind: string; paneId: string }) => [entry.kind, entry.paneId])).toEqual([
+        ['pane.associated', 'worker'],
+        ['pane.associated', 'reviewer'],
+      ]);
+
+      // A third Pane joins while both READY lines settle; the same cadence instance keeps them.
+      vi.setSystemTime(new Date('2026-01-01T12:00:30.000Z'));
+      membership('associated', 'late');
+      expect((await registry.invoke('runpane:workspace:wait', [request])).entries)
+        .toEqual([expect.objectContaining({ kind: 'pane.associated', paneId: 'late' })]);
+
+      membership('detached', 'reviewer');
+      vi.setSystemTime(new Date('2026-01-01T12:01:01.000Z'));
+      const settled = await registry.invoke('runpane:workspace:wait', [request]);
+      expect(settled.entries.map((entry: { kind: string; paneId: string }) => [entry.kind, entry.paneId])).toEqual([
+        ['pane.detached', 'reviewer'],
+        ['agent.ready', 'worker'],
+      ]);
+    });
+
+    it('marks baseline entries as replay after an epoch change and scopes them to the Session', async () => {
+      const { workspaceCursorStore, registry, membership } = sessionRegistry();
+      workspaceCursorStore.create('session-s1', 0, 'old-epoch');
+      membership('associated', session.id);
+
+      const result = await registry.invoke('runpane:workspace:wait', [{ as: 'session-s1', session: 'Release', timeoutMs: 0 }]);
+
+      expect(result).toMatchObject({ reset: { reason: 'epoch-changed' }, session: sessionRecord });
+      expect(result.entries).toContainEqual(expect.objectContaining({
+        kind: 'agent.ready',
+        paneId: session.id,
+        baseline: true,
+        replay: true,
+        changedWhileAway: true,
+      }));
+      expect(result.entries.every((entry: { replay?: true }) => entry.replay === true)).toBe(true);
+
+      membership('detached', session.id);
+      workspaceCursorStore.create('session-s1', 0, 'older-epoch');
+      const empty = await registry.invoke('runpane:workspace:wait', [{ as: 'session-s1', session: 'Release', timeoutMs: 0 }]);
+      expect(empty.entries).toEqual([]);
+    });
+
+    it('rejects --session with --pane and an unknown Session', async () => {
+      const { registry } = sessionRegistry();
+      await expect(registry.invoke('runpane:workspace:wait', [{ session: 'Release', paneIds: [session.id], timeoutMs: 0 }]))
+        .rejects.toThrow('cannot include both session and paneIds');
+      await expect(registry.invoke('runpane:workspace:wait', [{ session: 'Nope', timeoutMs: 0 }]))
+        .rejects.toThrow('Session Nope not found');
+    });
+  });
+
   it('announces an evicted named workspace cursor as unknown', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-runpane-cursor-test-'));
     tempDirs.push(directory);
@@ -953,7 +1097,11 @@ describe('runpane IPC handlers', () => {
     });
     expect(result.entries.length).toBeGreaterThan(0);
     expect(result.entries).toContainEqual(
-      expect.objectContaining({ kind: 'pane.created', baseline: true }),
+      expect.objectContaining({ kind: 'pane.created', baseline: true, replay: true }),
+    );
+    // A replayed agent.ready restates state; it is never READY.
+    expect(result.entries).toContainEqual(
+      expect.objectContaining({ kind: 'agent.ready', baseline: true, replay: true }),
     );
   });
 

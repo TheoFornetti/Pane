@@ -113,7 +113,6 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { collectRemoteDaemonExecutableHealthAsync } from '../daemon/remoteDaemonExecutableHealth';
 import {
   WorkspaceJournal,
-  matchesFilter,
   workspaceFilterKey,
   type WorkspaceJournalFilter,
 } from '../services/workspaceJournal';
@@ -1137,9 +1136,15 @@ export function registerRunpaneHandlers(
       const project = normalized.repo
         ? resolveRepoSelector(databaseService.getAllProjects(), normalized.repo)
         : undefined;
+      // Resolve the Session (id or exact name) once; its members are re-read on every journal read.
+      const sessionRecord = normalized.session
+        ? await requireOrchestrationSessionManager(services).get({ sessionId: normalized.session })
+        : undefined;
+      const session = sessionRecord ? { id: sessionRecord.id, name: sessionRecord.name } : undefined;
       const filter: WorkspaceJournalFilter = {
         kinds: normalized.kinds,
         paneIds: normalized.paneIds,
+        sessionId: session?.id,
         excludePaneIds: normalized.excludePaneIds,
         repoId: project?.id,
         nameContains: normalized.nameContains,
@@ -1168,11 +1173,13 @@ export function registerRunpaneHandlers(
         Date.now(),
         workspaceJournal.generation,
       )
-        .filter(entry => matchesFilter(entry, filter))
+        .filter(workspaceJournal.matcher(filter))
         .map(entry => projectWorkspaceEntry(entry, filter));
+      // Baseline entries restate current state after a reset; replay marks them so a consumer never
+      // reads a replayed agent.ready as a turn that just ended.
       const baselineEntries = (): RunpaneWorkspaceEntry[] => workspaceStateReader.read(project?.id).entries
-        .filter(entry => matchesFilter(entry, filter))
-        .map(entry => projectWorkspaceEntry(entry, filter));
+        .filter(workspaceJournal.matcher(filter))
+        .map(entry => ({ ...projectWorkspaceEntry(entry, filter), replay: true as const }));
 
       if (normalized.as) {
         const evicted = workspaceCursorStore.evictStale();
@@ -1207,7 +1214,8 @@ export function registerRunpaneHandlers(
           entries,
           timedOut: false,
           reset,
-          nextCommand: workspaceNextCommand(normalized, workspaceJournal.generation),
+          session,
+          nextCommand: workspaceNextCommand(normalized, workspaceJournal.generation, session),
         };
       }
 
@@ -1275,6 +1283,9 @@ export function registerRunpaneHandlers(
         }
         cadence.readCursor = cursor;
         entries = cadence.flush(now);
+        // Held lines are delivered under the Session's membership at flush time: a Pane detached
+        // while its READY settled drops out.
+        if (filter.sessionId !== undefined) entries = entries.filter(workspaceJournal.matcher(filter));
         if (entries.length > 0 || now >= deadlineAt) break;
       }
       if (cadence && !reset && readAny) {
@@ -1303,7 +1314,8 @@ export function registerRunpaneHandlers(
         timedOut: entries.length === 0 && (cadence !== undefined || waited.timedOut),
         dropped: waited.dropped,
         reset,
-        nextCommand: workspaceNextCommand(normalized, generation),
+        session,
+        nextCommand: workspaceNextCommand(normalized, generation, session),
       };
     }, result => ({ resultCount: result.entries.length, timedOut: result.timedOut }), result =>
       result.entries.length > 0 || result.reset !== undefined);
@@ -2576,6 +2588,11 @@ function parseWorkspaceWaitRequest(value: PaneCommandValue): RunpaneWorkspaceWai
   }
   const since = parseNonNegativeInteger(value.since, 'since');
   if (consumer && since !== undefined) throw new Error('Workspace wait request cannot include both as and since');
+  const session = optionalString(value.session)?.trim() || undefined;
+  const paneIds = parseStringArray(value.paneIds, 'paneIds');
+  if (session && paneIds?.length) {
+    throw new Error('Workspace wait request cannot include both session and paneIds; a Session scope already covers its Panes');
+  }
   if (value.from !== undefined && value.from !== 'now' && value.from !== 'earliest') {
     throw new Error('Workspace wait from must be now or earliest');
   }
@@ -2587,7 +2604,8 @@ function parseWorkspaceWaitRequest(value: PaneCommandValue): RunpaneWorkspaceWai
     timeoutMs: parseNonNegativeInteger(value.timeoutMs, 'timeoutMs'),
     limit: parsePositiveInteger(value.limit, 'limit'),
     kinds: parseWorkspaceKinds(value.kinds),
-    paneIds: parseStringArray(value.paneIds, 'paneIds'),
+    paneIds,
+    session,
     excludePaneIds: parseStringArray(value.excludePaneIds, 'excludePaneIds'),
     repo: value.repo === undefined || value.repo === null || value.repo === '' ? undefined : parseRepoSelector(value.repo),
     nameContains: optionalString(value.nameContains),
@@ -2613,6 +2631,8 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'pane.created',
   'pane.gone',
   'panel.exited',
+  'pane.associated',
+  'pane.detached',
 );
 
 function parseWorkspaceKinds(value: PaneCommandValue): RunpaneWorkspaceEntryKind[] | undefined {
@@ -3582,6 +3602,7 @@ function createWorkspaceJournal(services: AppServices): WorkspaceJournal {
         screenText: snapshot?.screenText,
       };
     },
+    resolveSessionMembership: sessionId => services.orchestrationSessionManager?.workspaceMembership(sessionId),
   });
   const sessions = services.sessionManager.getAllSessions();
   for (const session of sessions) {
@@ -3617,9 +3638,13 @@ function workspaceCadenceOptions(
   return { settleMs, blockedSettleMs, minIntervalMs, emitKinds: request.kinds, key };
 }
 
-function workspaceNextCommand(request: RunpaneWorkspaceWaitRequest, generation: number): string {
+function workspaceNextCommand(
+  request: RunpaneWorkspaceWaitRequest,
+  generation: number,
+  session: { id: string } | undefined,
+): string {
   const cursor = request.as ? `--as ${request.as}` : `--since ${generation}`;
-  return `runpane watch ${cursor}`;
+  return `runpane watch ${cursor}${session ? ` --session ${session.id}` : ''}`;
 }
 
 function workspaceIdleCandidates(

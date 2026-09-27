@@ -47,6 +47,7 @@ import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
+import type { WorkspaceSessionMembership } from './workspaceJournal';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
 const LEGACY_AGENT_SESSION_ID_PREFIX = `${LEGACY_ORCHESTRATION_SESSION_ID}-`;
@@ -311,6 +312,7 @@ export class OrchestrationSessionManager extends EventEmitter {
           throw new Error(`Pane ${pane.name} is already associated with Session ${other.name}`);
         }
       }
+      const joined = !current.associations.some(item => item.paneId === input.paneId);
       const association: OrchestrationAssociation = {
         paneId: input.paneId,
         panelIds,
@@ -325,7 +327,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       };
       trimActivity(nextRecord);
       this.store.write(replaceSession(data, nextRecord));
-      this.emitChanged(nextRecord, 'associated');
+      this.emitChanged(nextRecord, 'associated', false, joined ? [input.paneId] : []);
       return clone(nextRecord);
     });
   }
@@ -346,7 +348,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       };
       trimActivity(nextRecord);
       this.store.write(replaceSession(data, nextRecord));
-      this.emitChanged(nextRecord, 'detached');
+      this.emitChanged(nextRecord, 'detached', false, removed.map(item => item.paneId));
       return clone(nextRecord);
     });
   }
@@ -370,6 +372,20 @@ export class OrchestrationSessionManager extends EventEmitter {
         refreshedAt: new Date().toISOString(),
       };
     });
+  }
+
+  /**
+   * The Session's current members, for a Session-scoped `runpane watch`. The journal calls this on
+   * every read, so it reads the in-memory store without taking the Session lock.
+   */
+  workspaceMembership(sessionId: string): WorkspaceSessionMembership | undefined {
+    const record = this.store.read().sessions.find(session => session.id === sessionId);
+    if (!record) return undefined;
+    return {
+      panes: new Map(record.associations.map(association => [association.paneId, association.panelIds])),
+      ownPaneIds: new Set([record.internalSessionId]),
+      ownPanelIds: new Set(Object.values(record.panelIds)),
+    };
   }
 
   /** Persist meaningful live state transitions and notify visible overviews. */
@@ -832,8 +848,15 @@ export class OrchestrationSessionManager extends EventEmitter {
     return { id: randomUUID(), kind, message: message.slice(0, MAX_ORCHESTRATION_TEXT_LENGTH), at: new Date().toISOString(), source, paneId, panelId };
   }
 
-  private emitChanged(record: OrchestrationSessionRecord, kind: OrchestrationActivity['kind'] | 'selected', selectionChanged = false): void {
-    this.emit('changed', selectionChanged ? { sessionId: record.id, kind, selectionChanged: true } : { sessionId: record.id, kind });
+  /** `paneIds` names the Panes an associate or detach added or removed; the workspace journal records them. */
+  private emitChanged(
+    record: OrchestrationSessionRecord,
+    kind: OrchestrationActivity['kind'] | 'selected',
+    selectionChanged = false,
+    paneIds?: string[],
+  ): void {
+    const change = selectionChanged ? { sessionId: record.id, kind, selectionChanged: true } : { sessionId: record.id, kind };
+    this.emit('changed', paneIds ? { ...change, sessionName: record.name, paneIds } : change);
   }
 }
 

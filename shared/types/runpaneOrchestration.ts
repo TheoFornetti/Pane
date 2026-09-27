@@ -41,7 +41,11 @@ export type RunpaneWorkspaceEntryKind =
   | 'agent.idle'
   | 'pane.created'
   | 'pane.gone'
-  | 'panel.exited';
+  | 'panel.exited'
+  /** The Pane joined a Session (`sessions associate`). */
+  | 'pane.associated'
+  /** The Pane left a Session (`sessions detach`). */
+  | 'pane.detached';
 
 export interface RunpaneWorkspaceEntry {
   gen: number;
@@ -66,7 +70,15 @@ export interface RunpaneWorkspaceEntry {
   heldInputPresent?: boolean;
   exitCode?: number;
   baseline?: true;
+  /**
+   * Set on the baseline entries a wait delivers after a reset. A replayed entry restates current
+   * state; it is never a new transition, so a replayed `agent.ready` is not READY.
+   */
+  replay?: true;
   changedWhileAway?: boolean;
+  /** Named Session of a `pane.associated` or `pane.detached` entry. */
+  sessionId?: string;
+  sessionName?: string;
   panels?: RunpaneWorkspacePanelSummary[];
 }
 
@@ -85,6 +97,12 @@ export interface RunpaneWorkspaceWaitRequest {
   limit?: number;
   kinds?: RunpaneWorkspaceEntryKind[];
   paneIds?: string[];
+  /**
+   * Named Session id or exact name. Limits the wait to the Session's associated Panes, resolved
+   * on every read, and implies `pane.associated`/`pane.detached` entries. Cannot be combined with
+   * `paneIds`.
+   */
+  session?: string;
   excludePaneIds?: string[];
   repo?: RunpaneRepoSelector;
   nameContains?: string;
@@ -115,6 +133,8 @@ export interface RunpaneWorkspaceWaitResult {
   timedOut: boolean;
   dropped?: number;
   reset?: { reason: RunpaneWorkspaceResetReason };
+  /** The Session a `session` request resolved to; its absence tells a client the daemon ignored `session`. */
+  session?: { id: string; name: string };
   nextCommand: string;
 }
 

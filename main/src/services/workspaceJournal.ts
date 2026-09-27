@@ -30,6 +30,8 @@ interface WorkspacePanelMetadata {
 export interface WorkspaceJournalFilter {
   kinds?: readonly RunpaneWorkspaceEntryKind[];
   paneIds?: readonly string[];
+  /** Named Session id; membership is resolved on every read, so associate and detach apply at once. */
+  sessionId?: string;
   excludePaneIds?: readonly string[];
   repoId?: number;
   nameContains?: string;
@@ -53,11 +55,22 @@ interface WorkspaceWaiter {
   resolve(result: WorkspaceJournalReadResult & { timedOut: boolean }): void;
 }
 
+/** A named Session's current members, as a Session-scoped filter sees them. */
+export interface WorkspaceSessionMembership {
+  /** Associated Pane id to the panel ids its association is limited to (empty: every panel). */
+  panes: ReadonlyMap<string, readonly string[]>;
+  /** The Session's own hidden owner Pane and orchestrator panels, never reported. */
+  ownPaneIds: ReadonlySet<string>;
+  ownPanelIds: ReadonlySet<string>;
+}
+
 interface WorkspaceJournalOptions {
   capacity?: number;
   now?: () => number;
   resolvePane?: (paneId: string) => WorkspacePaneMetadata | undefined;
   resolvePanel?: (panelId: string) => WorkspacePanelMetadata | undefined;
+  /** Current members of a named Session; undefined when the Session no longer exists. */
+  resolveSessionMembership?: (sessionId: string) => WorkspaceSessionMembership | undefined;
 }
 
 const DEFAULT_CAPACITY = 4096;
@@ -76,6 +89,16 @@ const agentStatusEventSchema = boundary.object({
   state: agentStateSchema,
   reason: boundary.optional(boundary.nullable(boundary.string)),
 });
+const sessionMembershipEventSchema = boundary.object({
+  sessionId: boundary.string,
+  kind: boundary.string,
+  sessionName: boundary.optional(boundary.string),
+  paneIds: boundary.optional(boundary.array(boundary.string)),
+});
+/** Kinds only a consumer that asks for them (by `kinds`, or a Session scope) receives, so older clients never see them. */
+const OPT_IN_KINDS: readonly RunpaneWorkspaceEntryKind[] = ['pane.associated', 'pane.detached'];
+/** Pane-level kinds that carry no agent type and still pass `agentsOnly`. */
+const PANE_LIFECYCLE_KINDS: readonly RunpaneWorkspaceEntryKind[] = ['pane.created', 'pane.gone', ...OPT_IN_KINDS];
 const panelExitEventSchema = boundary.object({
   type: boundary.string,
   source: boundary.object({
@@ -100,6 +123,7 @@ export class WorkspaceJournal implements PaneEventSink {
   private readonly now: () => number;
   private readonly resolvePane?: WorkspaceJournalOptions['resolvePane'];
   private readonly resolvePanel?: WorkspaceJournalOptions['resolvePanel'];
+  private readonly resolveSessionMembership?: WorkspaceJournalOptions['resolveSessionMembership'];
   private nextGeneration = 0;
 
   constructor(options: WorkspaceJournalOptions = {}) {
@@ -107,6 +131,7 @@ export class WorkspaceJournal implements PaneEventSink {
     this.now = options.now ?? Date.now;
     this.resolvePane = options.resolvePane;
     this.resolvePanel = options.resolvePanel;
+    this.resolveSessionMembership = options.resolveSessionMembership;
   }
 
   get generation(): number {
@@ -141,8 +166,9 @@ export class WorkspaceJournal implements PaneEventSink {
     const firstAvailableCursor = this.oldestGeneration - 1;
     const dropped = cursor < firstAvailableCursor ? firstAvailableCursor - cursor : undefined;
     const effectiveCursor = Math.max(cursor, firstAvailableCursor);
+    const matches = this.matcher(filter);
     const matchingEntries = this.ring
-      .filter(entry => entry.gen > effectiveCursor && matchesFilter(entry, filter));
+      .filter(entry => entry.gen > effectiveCursor && matches(entry));
     const entries = matchingEntries
       .slice(0, Math.max(1, limit))
       .map(entry => projectWorkspaceEntry(entry, filter));
@@ -150,6 +176,16 @@ export class WorkspaceJournal implements PaneEventSink {
       ? entries.at(-1)?.gen ?? effectiveCursor
       : this.nextGeneration;
     return { entries, generation, dropped };
+  }
+
+  /**
+   * Returns a predicate for `filter`. A Session scope is resolved once, now, so each read sees the
+   * Session's current members: a Pane associated after the watch started is included, and a
+   * detached Pane drops out without the consumer re-arming.
+   */
+  matcher(filter: WorkspaceJournalFilter): (entry: RunpaneWorkspaceEntry) => boolean {
+    const membership = filter.sessionId === undefined ? undefined : this.resolveSessionMembership?.(filter.sessionId);
+    return entry => matchesFilter(entry, filter, membership);
   }
 
   waitAfter(
@@ -209,6 +245,17 @@ export class WorkspaceJournal implements PaneEventSink {
       if (!pane) return;
       this.append({ ...pane, kind: 'pane.gone', source: 'session' });
       this.paneById.delete(paneId);
+      return;
+    }
+
+    if (channel === 'orchestration-sessions:changed') {
+      const payload = decodeOptionalBoundary(args[0], sessionMembershipEventSchema);
+      if (!payload || (payload.kind !== 'associated' && payload.kind !== 'detached')) return;
+      const kind = payload.kind === 'associated' ? 'pane.associated' : 'pane.detached';
+      for (const paneId of payload.paneIds ?? []) {
+        const pane = this.lookupPane(paneId) ?? { paneId, paneName: paneId };
+        this.append({ ...pane, kind, source: 'session', sessionId: payload.sessionId, sessionName: payload.sessionName });
+      }
       return;
     }
 
@@ -340,6 +387,8 @@ export function workspaceFilterKey(filter: WorkspaceJournalFilter): string {
   return JSON.stringify({
     kinds: [...filter.kinds ?? []].sort(),
     paneIds: [...filter.paneIds ?? []].sort(),
+    // A Session scope keys on the Session, never its current Panes, so membership changes keep held state.
+    sessionId: filter.sessionId ?? null,
     excludePaneIds: [...filter.excludePaneIds ?? []].sort(),
     repoId: filter.repoId ?? null,
     nameContains: filter.nameContains ?? null,
@@ -349,14 +398,35 @@ export function workspaceFilterKey(filter: WorkspaceJournalFilter): string {
   });
 }
 
-export function matchesFilter(entry: RunpaneWorkspaceEntry, filter: WorkspaceJournalFilter): boolean {
+function matchesFilter(
+  entry: RunpaneWorkspaceEntry,
+  filter: WorkspaceJournalFilter,
+  membership?: WorkspaceSessionMembership,
+): boolean {
   if (filter.kinds && !filter.kinds.includes(entry.kind)) return false;
+  if (!filter.kinds && filter.sessionId === undefined && OPT_IN_KINDS.includes(entry.kind)) return false;
+  if (filter.sessionId !== undefined && !matchesSession(entry, filter.sessionId, membership)) return false;
   if (filter.paneIds && !filter.paneIds.includes(entry.paneId)) return false;
   if (filter.excludePaneIds && filter.excludePaneIds.includes(entry.paneId)) return false;
   if (filter.repoId !== undefined && entry.repoId !== filter.repoId) return false;
   if (filter.nameContains && !entry.paneName.toLocaleLowerCase().includes(filter.nameContains.toLocaleLowerCase())) return false;
-  if (filter.agentsOnly && !entry.agentType && entry.kind !== 'pane.created' && entry.kind !== 'pane.gone') return false;
+  if (filter.agentsOnly && !entry.agentType && !PANE_LIFECYCLE_KINDS.includes(entry.kind)) return false;
   return true;
+}
+
+function matchesSession(
+  entry: RunpaneWorkspaceEntry,
+  sessionId: string,
+  membership: WorkspaceSessionMembership | undefined,
+): boolean {
+  // Joining and leaving are about the Session itself, so they match even after the Pane left.
+  if (entry.kind === 'pane.associated' || entry.kind === 'pane.detached') return entry.sessionId === sessionId;
+  if (!membership) return false;
+  if (membership.ownPaneIds.has(entry.paneId)) return false;
+  if (entry.panelId && membership.ownPanelIds.has(entry.panelId)) return false;
+  const panelIds = membership.panes.get(entry.paneId);
+  if (!panelIds) return false;
+  return !entry.panelId || panelIds.length === 0 || panelIds.includes(entry.panelId);
 }
 
 export function projectWorkspaceEntry(

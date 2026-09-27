@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { WorkspaceJournal } from './workspaceJournal';
+import { WorkspaceJournal, workspaceFilterKey } from './workspaceJournal';
 
 describe('WorkspaceJournal', () => {
   it('appends gapless entries and filters reads', () => {
@@ -189,6 +189,86 @@ describe('WorkspaceJournal', () => {
       'pane.created',
       'agent.busy',
     ]);
+  });
+
+  describe('Session scope', () => {
+    const sessionId = '__orchestration_session_s1__';
+    function sessionJournal() {
+      const members = new Map<string, readonly string[]>([['one', []]]);
+      const journal = new WorkspaceJournal({
+        resolvePane: paneId => ({ paneId, paneName: paneId.toUpperCase() }),
+        resolveSessionMembership: id => id === sessionId
+          ? { panes: members, ownPaneIds: new Set(['owner']), ownPanelIds: new Set(['orchestrator']) }
+          : undefined,
+      });
+      const ready = (paneId: string, panelId: string) => journal.append({
+        kind: 'agent.ready', paneId, paneName: paneId, panelId, agentType: 'claude', source: 'agent',
+      });
+      return { journal, members, ready };
+    }
+
+    it('resolves membership on every read, so associate and detach need no re-arm', () => {
+      const { journal, members, ready } = sessionJournal();
+      const filter = { sessionId };
+      ready('one', 'p1');
+      ready('two', 'p2');
+      expect(journal.readAfter(0, filter).entries.map(entry => entry.paneId)).toEqual(['one']);
+
+      members.set('two', []);
+      expect(journal.readAfter(0, filter).entries.map(entry => entry.paneId)).toEqual(['one', 'two']);
+
+      members.delete('one');
+      ready('one', 'p1');
+      expect(journal.readAfter(2, filter).entries).toEqual([]);
+      expect(journal.readAfter(0, { sessionId: 'missing' }).entries).toEqual([]);
+    });
+
+    it('honors association panel limits and never reports the orchestrator itself', () => {
+      const { journal, members, ready } = sessionJournal();
+      members.set('one', ['p1']);
+      ready('one', 'p1');
+      ready('one', 'p-other');
+      ready('one', 'orchestrator');
+      ready('owner', 'p-owner');
+      journal.append({ kind: 'pane.gone', paneId: 'one', paneName: 'one', source: 'session' });
+
+      expect(journal.readAfter(0, { sessionId }).entries.map(entry => [entry.kind, entry.panelId])).toEqual([
+        ['agent.ready', 'p1'],
+        ['pane.gone', undefined],
+      ]);
+    });
+
+    it('records associate and detach as pane.associated and pane.detached for the Session', async () => {
+      const { journal, members } = sessionJournal();
+      const waiting = journal.waitAfter(0, { sessionId, agentsOnly: true }, 1000);
+      members.set('two', []);
+      journal.send('orchestration-sessions:changed', { sessionId, kind: 'associated', sessionName: 'Release', paneIds: ['two'] });
+      await expect(waiting).resolves.toMatchObject({
+        entries: [{ kind: 'pane.associated', paneId: 'two', paneName: 'TWO', sessionId, sessionName: 'Release', source: 'session' }],
+      });
+
+      members.delete('two');
+      journal.send('orchestration-sessions:changed', { sessionId, kind: 'detached', sessionName: 'Release', paneIds: ['two'] });
+      journal.send('orchestration-sessions:changed', { sessionId, kind: 'updated' });
+      // The Pane has left, but its LEFT entry still belongs to the Session.
+      expect(journal.readAfter(1, { sessionId }).entries).toMatchObject([{ kind: 'pane.detached', paneId: 'two' }]);
+      expect(journal.readAfter(0, { sessionId: 'other' }).entries).toEqual([]);
+      expect(journal.generation).toBe(2);
+    });
+
+    it('keeps membership kinds out of consumers that did not ask for them', () => {
+      const { journal } = sessionJournal();
+      journal.send('orchestration-sessions:changed', { sessionId, kind: 'associated', paneIds: ['two'] });
+
+      expect(journal.readAfter(0, {}).entries).toEqual([]);
+      expect(journal.readAfter(0, { kinds: ['pane.associated'], agentsOnly: true }).entries).toHaveLength(1);
+    });
+
+    it('keys a Session scope by the Session rather than its Panes', () => {
+      expect(workspaceFilterKey({ sessionId })).toBe(workspaceFilterKey({ sessionId }));
+      expect(workspaceFilterKey({ sessionId })).not.toBe(workspaceFilterKey({ sessionId: 'other' }));
+      expect(workspaceFilterKey({ sessionId })).not.toBe(workspaceFilterKey({}));
+    });
   });
 
   it('times out without inventing an entry', async () => {

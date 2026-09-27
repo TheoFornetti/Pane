@@ -260,6 +260,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
         heldInput: snapshot?.screenText ? extractWorkspaceHeldInput(snapshot.screenText) : undefined,
       };
     },
+    resolveSessionMembership: sessionId => orchestrationSessionManager.workspaceMembership(sessionId),
   });
   for (const session of sessionManager.getAllSessions()) {
     const project = sessionManager.getProjectForSession(session.id);

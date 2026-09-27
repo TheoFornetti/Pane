@@ -635,7 +635,10 @@ type WorkspaceEntryKind =
   | 'pane.gone'
   | 'panel.exited'
   | 'pane.associated'
-  | 'pane.detached';
+  | 'pane.detached'
+  | 'pr.conflicted'
+  | 'pr.checks'
+  | 'pr.merged';
 
 interface WorkspacePanelSummary {
   panelId: string;
@@ -658,7 +661,7 @@ interface WorkspaceEntry {
   agentType?: string;
   from?: 'blocked' | 'working' | 'idle' | 'unknown';
   to?: 'blocked' | 'working' | 'idle' | 'unknown';
-  source: 'agent' | 'exit' | 'session';
+  source: 'agent' | 'exit' | 'session' | 'github';
   reason?: string | null;
   settledMs?: number;
   idleMs?: number;
@@ -671,6 +674,9 @@ interface WorkspaceEntry {
   changedWhileAway?: boolean;
   sessionId?: string;
   sessionName?: string;
+  pr?: { number: number; url: string; headOid: string };
+  checks?: 'passed' | 'failed';
+  failingChecks?: string[];
   panels?: WorkspacePanelSummary[];
 }
 
@@ -1250,6 +1256,9 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'panel.exited',
   'pane.associated',
   'pane.detached',
+  'pr.conflicted',
+  'pr.checks',
+  'pr.merged',
 );
 const agentStateSchema = boundary.enumeration('blocked', 'working', 'idle', 'unknown');
 const workspacePanelSummarySchema: BoundarySchema<WorkspacePanelSummary> = boundary.object({
@@ -1272,7 +1281,7 @@ const workspaceEntrySchema: BoundarySchema<WorkspaceEntry> = boundary.object({
   agentType: boundary.optional(boundary.string),
   from: boundary.optional(agentStateSchema),
   to: boundary.optional(agentStateSchema),
-  source: boundary.enumeration('agent', 'exit', 'session'),
+  source: boundary.enumeration('agent', 'exit', 'session', 'github'),
   reason: boundary.optional(boundary.nullable(boundary.string)),
   settledMs: boundary.optional(boundary.number),
   idleMs: boundary.optional(boundary.number),
@@ -1285,6 +1294,9 @@ const workspaceEntrySchema: BoundarySchema<WorkspaceEntry> = boundary.object({
   changedWhileAway: boundary.optional(boundary.boolean),
   sessionId: boundary.optional(boundary.string),
   sessionName: boundary.optional(boundary.string),
+  pr: boundary.optional(boundary.object({ number: boundary.number, url: boundary.string, headOid: boundary.string })),
+  checks: boundary.optional(boundary.enumeration('passed', 'failed')),
+  failingChecks: boundary.optional(boundary.array(boundary.string)),
   panels: boundary.optional(boundary.array(workspacePanelSummarySchema)),
 });
 export const workspaceStateResultSchema: BoundarySchema<WorkspaceStateResult> = boundary.object({
@@ -2584,6 +2596,9 @@ function workspaceLabel(kind: WorkspaceEntryKind): string {
     'panel.exited': 'EXIT',
     'pane.associated': 'JOINED',
     'pane.detached': 'LEFT',
+    'pr.conflicted': 'PR CONFLICTED',
+    'pr.checks': 'PR CHECKS',
+    'pr.merged': 'PR MERGED',
   } satisfies Record<WorkspaceEntryKind, string>;
   return labels[kind];
 }

@@ -18,6 +18,9 @@ interface WatchEntry {
   baseline?: true;
   changedWhileAway?: boolean;
   sessionId?: string;
+  pr?: { number: number };
+  checks?: string;
+  failingChecks?: string[];
   idleMs?: number;
   idleCount?: number;
 }
@@ -60,8 +63,18 @@ function formatEntryLine(entry: WatchEntry): string | undefined {
     case 'pane.associated': return `JOINED ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
     case 'pane.detached': return `LEFT ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
     case 'panel.exited': return `EXIT ${name} ${pane}${panel} code ${entry.exitCode ?? 'unknown'}`;
+    case 'pr.conflicted': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} CONFLICTED`;
+    case 'pr.checks': return formatChecksLine(`PR ${name} ${pane} #${entry.pr?.number ?? '?'}`, entry);
+    case 'pr.merged': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} MERGED`;
     default: return `UNKNOWN ${name} ${pane}${panel}`;
   }
+}
+
+/** `CHECKS FAILED lint,test`: failing names are joined by commas, so their own spaces and commas become `_`. */
+function formatChecksLine(prefix: string, entry: WatchEntry): string {
+  if (entry.checks !== 'failed') return `${prefix} CHECKS PASSED`;
+  const names = (entry.failingChecks ?? []).map(check => sanitizeName(check).replace(/[ ,]/gu, '_'));
+  return `${prefix} CHECKS FAILED${names.length > 0 ? ` ${names.join(',')}` : ''}`;
 }
 
 export function formatWaitResult(result: WatchResult, format: WatchFormat): string[] {

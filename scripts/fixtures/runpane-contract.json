@@ -530,7 +530,7 @@
       "--quiet",
       "--json",
       "--kinds",
-      "agent.ready,agent.blocked,pane.associated,pane.detached",
+      "agent.ready,agent.blocked,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged",
       "--settle",
       "180000"
     ],

@@ -1388,7 +1388,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--min-interval",
         "value": "<milliseconds>",
-        "description": "Follow-only opt-in: hold non-urgent lines and flush them together at most once per interval; BLOCKED bypasses it."
+        "description": "Follow-only opt-in: hold non-urgent lines and flush them together at most once per interval; BLOCKED, PR CONFLICTED, and PR CHECKS FAILED bypass it."
       },
       {
         "name": "--body-file",
@@ -1792,7 +1792,7 @@ export const RUNPANE_CONTRACT = {
         "  --idle-after <ms>              Re-firing READY idle interval; defaults to 600000 under --follow",
         "  --settle <ms>                  Opt-in: emit READY only after this quiet window (--follow only)",
         "  --blocked-settle <ms>          Opt-in: emit BLOCKED only after this window (--follow only)",
-        "  --min-interval <ms>            Opt-in: batch non-urgent lines per interval; BLOCKED bypasses (--follow only)",
+        "  --min-interval <ms>            Opt-in: batch non-urgent lines per interval; BLOCKED and PR failures bypass (--follow only)",
         "  --idle-backoff                 Opt-in: IDLE at --idle-after, 30m, 1h, 3h, then daily (--follow only)",
         "  --all-managed                  Explicitly watch all managed panes",
         "  --include-shells               Include ordinary shell panels",
@@ -1817,7 +1817,7 @@ export const RUNPANE_CONTRACT = {
         "Defaults are responsive: no settle, no batching, all kinds, IDLE every --idle-after. BUSY carries no action; drop it with --kinds.",
         "Unattended (Pane Chat default): --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "User present: the same kinds with --settle 60000 --blocked-settle 15000 --min-interval 120000 and no --idle-backoff",
-        "Session orchestrator: runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
+        "Session orchestrator: runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "Pane Chat arms those flags itself through its skill; pass them only for your own scripts.",
         "STUCK means real unsubmitted composer text; an agent prompt suggestion never counts.",
         "Dead watch: HEARTBEAT is proof of life only (--quiet drops it). Judge death by a non-zero exit or a WATCH ERROR line, not by silence."
@@ -2744,7 +2744,7 @@ export const RUNPANE_CONTRACT = {
         "  --idle-after <ms>",
         "  --settle <ms>                  Opt-in READY quiet window (--follow only)",
         "  --blocked-settle <ms>          Opt-in BLOCKED window (--follow only)",
-        "  --min-interval <ms>            Opt-in batching; BLOCKED bypasses (--follow only)",
+        "  --min-interval <ms>            Opt-in batching; BLOCKED and PR failures bypass (--follow only)",
         "  --idle-backoff                 Opt-in IDLE backoff (--follow only)",
         "  --all-managed",
         "  --include-shells",
@@ -2769,7 +2769,7 @@ export const RUNPANE_CONTRACT = {
         "Defaults are responsive: no settle, no batching, all kinds, IDLE every --idle-after. BUSY carries no action; drop it with --kinds.",
         "Unattended (Pane Chat default): --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "User present: the same kinds with --settle 60000 --blocked-settle 15000 --min-interval 120000 and no --idle-backoff",
-        "Session orchestrator: runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
+        "Session orchestrator: runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "Pane Chat arms those flags itself through its skill; pass them only for your own scripts.",
         "STUCK means real unsubmitted composer text; an agent prompt suggestion never counts.",
         "Dead watch: HEARTBEAT is proof of life only (--quiet drops it). Judge death by a non-zero exit or a WATCH ERROR line, not by silence."
@@ -3485,7 +3485,7 @@ export const RUNPANE_CONTRACT = {
       "runpane watch --self-test",
       "runpane watch --follow",
       "runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
-      "runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
+      "runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
       "runpane sessions list [--json] [--pane-dir <path>]",
       "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
       "runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
@@ -3531,7 +3531,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane panes create --prompt` is an alias for `--initial-input`; request JSON and daemon payloads should use the canonical `initialInput` field.",
       "If composer submission cannot be verified without risking a duplicate, the create item is unsuccessful with `initialInput.staged`, `initialInput.attempts`, `initialInput.blocked.kind: submission_unverified`, and an actionable `nextCommand`. The CLI-facing `--prompt` alias maps to this canonical `initialInput` result.",
       "When running from WSL while Pane is installed on Windows, the Linux wrapper may look for a missing `/tmp/pane-daemon.../daemon.sock` or resolve to a Windows shim such as Volta. In that case invoke the Windows wrapper through PowerShell from a Windows cwd, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.",
-      "`runpane watch` waits for workspace transitions from the daemon journal without polling. `--follow` keeps waiting and prints one line per event: READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, plus HEARTBEAT every 60 seconds as proof of life. Defaults are responsive: no settle, no batching, all kinds, IDLE every `--idle-after`. Expensive consumers opt into `--kinds` (drop `agent.busy`; BUSY carries no action), `--settle <ms>` (READY only after a quiet window; a BUSY inside it cancels the line), `--blocked-settle <ms>`, `--min-interval <ms>` (batch non-urgent lines; BLOCKED bypasses it), and `--idle-backoff` (10m, 30m, 1h, 3h, then daily). Two profiles cover orchestrators. Unattended: `runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff`, which budgets about 6 wake-ups per active pane per hour worst case, usually 1-3, and can deliver READY up to about 13 minutes late. User present: the same kinds with `--settle 60000 --blocked-settle 15000 --min-interval 120000` and no `--idle-backoff`, so READY arrives within about 3 minutes. Pane Chat arms it automatically through its skill; only your own scripts need the flags. STUCK means real unsubmitted composer text, never an agent prompt suggestion. `--quiet` (alias `--no-control-lines`) drops the WATCH OK, HEARTBEAT, and WATCH RECONNECTED control lines (`_ok`, `_heartbeat`, `_reconnected` in JSON); WATCH ERROR, RESET, and DROPPED (`_error`, `_reset`, `_dropped`) always print. Judge a dead watch by a non-zero exit or a WATCH ERROR line, not by silence. `--session <id|name>` follows every Pane associated with a named Session and re-reads membership on every read, so associate and detach need no re-arm; JOINED and LEFT (`pane.associated`, `pane.detached`) report membership changes. In JSON, an entry with `replay: true` restates current state after a reset and is never READY.",
+      "`runpane watch` waits for workspace transitions from the daemon journal without polling. `--follow` keeps waiting and prints one line per event: READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, plus HEARTBEAT every 60 seconds as proof of life. Defaults are responsive: no settle, no batching, all kinds, IDLE every `--idle-after`. Expensive consumers opt into `--kinds` (drop `agent.busy`; BUSY carries no action), `--settle <ms>` (READY only after a quiet window; a BUSY inside it cancels the line), `--blocked-settle <ms>`, `--min-interval <ms>` (batch non-urgent lines; BLOCKED bypasses it), and `--idle-backoff` (10m, 30m, 1h, 3h, then daily). Two profiles cover orchestrators. Unattended: `runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff`, which budgets about 6 wake-ups per active pane per hour worst case, usually 1-3, and can deliver READY up to about 13 minutes late. User present: the same kinds with `--settle 60000 --blocked-settle 15000 --min-interval 120000` and no `--idle-backoff`, so READY arrives within about 3 minutes. Pane Chat arms it automatically through its skill; only your own scripts need the flags. STUCK means real unsubmitted composer text, never an agent prompt suggestion. `--quiet` (alias `--no-control-lines`) drops the WATCH OK, HEARTBEAT, and WATCH RECONNECTED control lines (`_ok`, `_heartbeat`, `_reconnected` in JSON); WATCH ERROR, RESET, and DROPPED (`_error`, `_reset`, `_dropped`) always print. Judge a dead watch by a non-zero exit or a WATCH ERROR line, not by silence. `--session <id|name>` follows every Pane associated with a named Session and re-reads membership on every read, so associate and detach need no re-arm; JOINED and LEFT (`pane.associated`, `pane.detached`) report membership changes. For Session members with an open PR, the daemon polls GitHub about every 3 minutes and reports `pr.conflicted` (`PR <pane-name> pane <pane-id> #<number> CONFLICTED`), `pr.checks` (`... CHECKS PASSED` or `... CHECKS FAILED <names>`), and `pr.merged` (`... MERGED`) on transitions only; list them in `--kinds`. In JSON, an entry with `replay: true` restates current state after a reset and is never READY.",
       "`sessions list` list durable named orchestration Sessions.",
       "`sessions create` create a durable named orchestration Session and its hidden terminal owner.",
       "`sessions get` read one durable named orchestration Session.",
@@ -4094,7 +4094,7 @@ export const RUNPANE_CONTRACT = {
         "--quiet",
         "--json",
         "--kinds",
-        "agent.ready,agent.blocked,pane.associated,pane.detached",
+        "agent.ready,agent.blocked,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged",
         "--settle",
         "180000"
       ],
@@ -5627,7 +5627,10 @@ export const RUNPANE_CONTRACT = {
             "pane.gone",
             "panel.exited",
             "pane.associated",
-            "pane.detached"
+            "pane.detached",
+            "pr.conflicted",
+            "pr.checks",
+            "pr.merged"
           ]
         },
         "paneId": {
@@ -5671,7 +5674,8 @@ export const RUNPANE_CONTRACT = {
           "enum": [
             "agent",
             "exit",
-            "session"
+            "session",
+            "github"
           ]
         },
         "reason": {
@@ -5718,6 +5722,41 @@ export const RUNPANE_CONTRACT = {
         },
         "sessionName": {
           "type": "string"
+        },
+        "pr": {
+          "type": "object",
+          "description": "PR of a pr.conflicted, pr.checks, or pr.merged entry.",
+          "required": [
+            "number",
+            "url",
+            "headOid"
+          ],
+          "properties": {
+            "number": {
+              "type": "number"
+            },
+            "url": {
+              "type": "string"
+            },
+            "headOid": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "checks": {
+          "enum": [
+            "passed",
+            "failed"
+          ],
+          "description": "Settled result of a pr.checks entry: every check on pr.headOid finished."
+        },
+        "failingChecks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Up to five failing check names of a failed pr.checks entry."
         }
       },
       "additionalProperties": false
@@ -5757,7 +5796,7 @@ export const RUNPANE_CONTRACT = {
         },
         "session": {
           "type": "string",
-          "description": "Named Session id or exact name. Limits the wait to the Session's associated Panes, resolved on every read, and implies pane.associated/pane.detached entries. Cannot be combined with paneIds."
+          "description": "Named Session id or exact name. Limits the wait to the Session's associated Panes, resolved on every read, and implies the opt-in pane.associated, pane.detached, and pr.* entries. Cannot be combined with paneIds."
         },
         "excludePaneIds": {
           "type": "array",
@@ -7951,7 +7990,7 @@ export const RUNPANE_CONTRACT = {
         },
         {
           "name": "watch",
-          "summary": "Wait for workspace transitions (READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, JOINED, LEFT) from the daemon journal without polling; responsive by default, with opt-in cadence flags for expensive consumers.",
+          "summary": "Wait for workspace transitions (READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, JOINED, LEFT, PR) from the daemon journal without polling; responsive by default, with opt-in cadence flags for expensive consumers.",
           "arguments": [
             "--follow",
             "--session <id|name>",
@@ -9547,7 +9586,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--min-interval",
             "value": "<milliseconds>",
             "required": false,
-            "description": "Opt-in (follow only): hold READY, IDLE, NEW, GONE, EXIT, and UNKNOWN lines and flush them together at most once per interval; BLOCKED bypasses it and carries the held lines with it. Default 0. The unattended orchestrator value is 600000, the user-present value 120000."
+            "description": "Opt-in (follow only): hold READY, IDLE, NEW, GONE, EXIT, and UNKNOWN lines and flush them together at most once per interval; BLOCKED, pr.conflicted, and failed pr.checks bypass it and carry the held lines with them. Default 0. The unattended orchestrator value is 600000, the user-present value 120000."
           },
           {
             "name": "--idle-backoff",
@@ -9558,7 +9597,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--kinds",
             "required": false,
             "value": "<kind,...>",
-            "description": "Limit event kinds: agent.ready, agent.busy, agent.blocked, agent.unknown, agent.idle, pane.created, pane.gone, panel.exited, pane.associated, pane.detached. Default all, except that pane.associated and pane.detached arrive only when listed here or implied by --session. Drop agent.busy for any consumer that acts on lines; BUSY carries no action."
+            "description": "Limit event kinds: agent.ready, agent.busy, agent.blocked, agent.unknown, agent.idle, pane.created, pane.gone, panel.exited, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged. Default all, except that pane.associated, pane.detached, and the pr.* kinds arrive only when listed here or implied by --session. Drop agent.busy for any consumer that acts on lines; BUSY carries no action."
           },
           {
             "name": "--pane",
@@ -9666,8 +9705,8 @@ export const RUNPANE_CONTRACT = {
           "runpane watch --as monitor --follow --quiet --json",
           "runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
           "runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 60000 --blocked-settle 15000 --min-interval 120000",
-          "runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
-          "runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 60000 --blocked-settle 15000 --min-interval 120000"
+          "runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
+          "runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 60000 --blocked-settle 15000 --min-interval 120000"
         ],
         "notes": [
           "Defaults stay responsive: no settle, no batching, all kinds, IDLE every --idle-after. Cadence flags are opt-in for expensive consumers and require --follow.",
@@ -9683,6 +9722,7 @@ export const RUNPANE_CONTRACT = {
           "Under --follow, JSON entries for panels holding unsubmitted composer text carry heldInputPresent: true, the JSON equivalent of the STUCK line. --no-held-input turns this off.",
           "--session <id|name> scopes the watch to a named Session. The daemon resolves the Session once per request and its associated Panes on every read, so sessions associate and sessions detach take effect without a re-arm; archived and detached Panes drop out, and the Session's own orchestrator panels are excluded. Cadence state is keyed by the Session, not its current Panes, so membership changes keep held lines. A detached Pane's held lines are dropped.",
           "Under --session, pane.associated (JOINED <pane-name> pane <pane-id> session <session-id>) and pane.detached (LEFT ...) report membership changes; list them in --kinds next to the agent kinds. Other consumers receive them only when --kinds lists them, so older clients never see an unknown kind.",
+          "PR events (decision D7): about every 3 minutes (jittered) the daemon runs gh pr view for Panes associated with a live Session whose PR Pane already knows to be open, and appends pr.conflicted (PR <pane-name> pane <pane-id> #<number> CONFLICTED: the PR now conflicts with its base), pr.checks (... CHECKS PASSED, or CHECKS FAILED <up to five names>: every check on the head commit finished), and pr.merged (... MERGED). Entries carry pr: {number, url, headOid}, plus checks and failingChecks for pr.checks. They fire on transitions only: the first poll of a PR after the daemon starts only records its state, so re-check conflicts after a restart with gh pr view. pr.conflicted and failed pr.checks bypass --min-interval like BLOCKED. Like JOINED/LEFT, they reach a consumer only under --session or when --kinds lists them. Without gh, or while it is signed out or rate limited, polling backs off (up to an hour) and no PR entries arrive.",
           "A daemon that predates --session returns no session field; runpane then fails with WATCH ERROR instead of watching every Pane.",
           "Replay: after a reset (RESET/_reset), the baseline restates current state. In JSON, those entries carry replay: true (and changedWhileAway: true after an epoch change). A replayed agent.ready is never READY: re-read runpane sessions overview instead of acting on it. Lines mode prints only CHANGED for them."
         ]

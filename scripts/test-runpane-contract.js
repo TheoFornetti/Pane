@@ -175,6 +175,7 @@ print(json.dumps([effective_watch_heartbeat_ms(180), effective_watch_heartbeat_m
     paneName: 'Issue\n538',
     panelId: 'panel-1',
   };
+  const pr = { number: 747, url: 'https://github.com/acme/app/pull/747', headOid: 'abc123' };
   const expected = [
     ['agent.ready', 'READY Issue 538 pane pane-1 panel panel-1'],
     ['agent.busy', 'BUSY Issue 538 pane pane-1 panel panel-1'],
@@ -186,6 +187,14 @@ print(json.dumps([effective_watch_heartbeat_ms(180), effective_watch_heartbeat_m
     ['panel.exited', 'EXIT Issue 538 pane pane-1 panel panel-1 code 3', { exitCode: 3 }],
     ['pane.associated', 'JOINED Issue 538 pane pane-1 session session-9', { sessionId: 'session-9' }],
     ['pane.detached', 'LEFT Issue 538 pane pane-1 session session-9', { sessionId: 'session-9' }],
+    ['pr.conflicted', 'PR Issue 538 pane pane-1 #747 CONFLICTED', { panelId: undefined, pr }],
+    ['pr.checks', 'PR Issue 538 pane pane-1 #747 CHECKS PASSED', { panelId: undefined, pr, checks: 'passed' }],
+    [
+      'pr.checks',
+      'PR Issue 538 pane pane-1 #747 CHECKS FAILED lint,unit_tests,e2e_a',
+      { panelId: undefined, pr, checks: 'failed', failingChecks: ['lint', 'unit tests', 'e2e\na'] },
+    ],
+    ['pr.merged', 'PR Issue 538 pane pane-1 #747 MERGED', { panelId: undefined, pr }],
   ];
   for (const [kind, line, extra = {}] of expected) {
     assert.deepStrictEqual(
@@ -583,6 +592,9 @@ async function checkWatchStreamParity() {
             entries: [
               { gen: 12, at: '2026-09-27T00:00:00.000Z', kind: 'pane.associated', paneId: 'pane-2', paneName: 'Worker', source: 'session', sessionId, sessionName: 'Release' },
               { gen: 13, at: '2026-09-27T00:00:00.000Z', kind: 'pane.detached', paneId: 'pane-2', paneName: 'Worker', source: 'session', sessionId, sessionName: 'Release' },
+              { gen: 14, at: '2026-09-27T00:00:00.000Z', kind: 'pr.conflicted', paneId: 'pane-3', paneName: 'Worker 3', source: 'github', pr: { number: 747, url: 'https://github.com/acme/app/pull/747', headOid: 'abc' } },
+              { gen: 15, at: '2026-09-27T00:00:00.000Z', kind: 'pr.checks', paneId: 'pane-3', paneName: 'Worker 3', source: 'github', pr: { number: 747, url: 'https://github.com/acme/app/pull/747', headOid: 'abc' }, checks: 'failed', failingChecks: ['lint', 'test'] },
+              { gen: 16, at: '2026-09-27T00:00:00.000Z', kind: 'pr.merged', paneId: 'pane-3', paneName: 'Worker 3', source: 'github', pr: { number: 747, url: 'https://github.com/acme/app/pull/747', headOid: 'abc' } },
             ],
           } };
         },
@@ -590,12 +602,16 @@ async function checkWatchStreamParity() {
           runtime,
           ['watch', '--session', sessionId, '--follow', '--quiet', '--idle-after', '0', '--no-held-input'],
           paneDir,
-          stdout => stdout.includes('LEFT Worker pane pane-2'),
+          stdout => stdout.includes('#747 MERGED'),
           8_000,
           { PANE_PANEL_ID: 'panel-orchestrator' },
         ),
       );
       assertIncludes(sessionFollow.stdout, `JOINED Worker pane pane-2 session ${sessionId}`);
+      assertIncludes(sessionFollow.stdout, 'LEFT Worker pane pane-2');
+      assertIncludes(sessionFollow.stdout, 'PR Worker 3 pane pane-3 #747 CONFLICTED');
+      assertIncludes(sessionFollow.stdout, 'PR Worker 3 pane pane-3 #747 CHECKS FAILED lint,test');
+      assertIncludes(sessionFollow.stdout, 'PR Worker 3 pane pane-3 #747 MERGED');
       assert.strictEqual(sessionRequests[0].session, sessionId, `${runtime} must forward --session to the daemon`);
       assert.strictEqual(sessionRequests[0].paneIds, undefined);
       assert.strictEqual(sessionRequests[0].as, 'session-bbbbbbbb-2fa1-11d2-883f-0016d3cca427', `${runtime} must default the cursor to session-<uuid>`);

@@ -1062,7 +1062,21 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
         return f"{workspace_label(kind)} {name} {pane}"
     if kind in {"pane.associated", "pane.detached"}:
         return f"{workspace_label(kind)} {name} {pane} session {sanitize_watch_value(entry.get('sessionId') or '')}"
+    if kind in {"pr.conflicted", "pr.checks", "pr.merged"}:
+        return format_pr_entry_line(kind, f"PR {name} {pane} #{(entry.get('pr') or {}).get('number', '?')}", entry)
     return f"{workspace_label(kind)} {name} {pane}{panel}"
+
+
+def format_pr_entry_line(kind: str, prefix: str, entry: Dict[str, Any]) -> str:
+    if kind == "pr.conflicted":
+        return f"{prefix} CONFLICTED"
+    if kind == "pr.merged":
+        return f"{prefix} MERGED"
+    if entry.get("checks") != "failed":
+        return f"{prefix} CHECKS PASSED"
+    # Failing names are joined by commas, so their own spaces and commas become underscores.
+    names = [re.sub(r"[ ,]", "_", sanitize_watch_value(check)) for check in entry.get("failingChecks") or []]
+    return f"{prefix} CHECKS FAILED" + (f" {','.join(names)}" if names else "")
 
 
 def emit_watch_non_entry(kind: str, output_format: str, **fields: Any) -> None:
@@ -1102,6 +1116,9 @@ def workspace_label(kind: Any) -> str:
         "panel.exited": "EXIT",
         "pane.associated": "JOINED",
         "pane.detached": "LEFT",
+        "pr.conflicted": "PR CONFLICTED",
+        "pr.checks": "PR CHECKS",
+        "pr.merged": "PR MERGED",
     }.get(kind, str(kind).upper())
 
 

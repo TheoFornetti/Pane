@@ -507,6 +507,35 @@
       "folder-9",
       "--yes",
       "--json"
+    ],
+    [
+      "panels",
+      "create",
+      "--pane",
+      "pane-1",
+      "--agent",
+      "codex",
+      "--tool-command",
+      "wrapper codex-run",
+      "--wait-ready",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panes",
+      "create",
+      "--repo",
+      "active",
+      "--name",
+      "farm",
+      "--tool-command",
+      "agent-farm run free-range",
+      "--agent",
+      "claude",
+      "--prompt",
+      "Plan",
+      "--yes",
+      "--json"
     ]
   ],
   "help": {

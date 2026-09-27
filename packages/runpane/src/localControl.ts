@@ -230,7 +230,7 @@ interface PaneCreateItem {
 
 type PaneToolSpec =
   | { agent: RunpaneAgent; title?: string; initialInput?: string }
-  | { command: string; title?: string; initialInput?: string };
+  | { command: string; agentType?: RunpaneAgent; title?: string; initialInput?: string };
 
 interface PaneCreateSuccessItem {
   /** False when the pane was created but did not become ready or take its initial input. */
@@ -285,6 +285,7 @@ interface PaneSummary {
   name: string;
   status: string;
   agentStatus: 'active' | 'idle';
+  agentState?: 'ready' | 'working' | 'blocked' | 'none';
   worktreePath: string;
   repoId: number;
   repoName?: string;
@@ -448,6 +449,8 @@ interface PanelSummary {
   active: boolean;
   initialized?: boolean;
   agentType?: string;
+  agentDetection?: 'declared' | 'command' | 'process' | 'screen';
+  launchCommand?: string;
   isCliPanel?: boolean;
   position?: number;
   createdAt?: string;
@@ -532,7 +535,7 @@ interface PanelStateSummary {
 }
 
 interface PanelBlockedState {
-  kind: 'codex-update' | 'agent-prompt' | 'submission_unverified' | 'unknown';
+  kind: 'codex-update' | 'agent-prompt' | 'submission_unverified' | 'composer-unknown' | 'unknown';
   message: string;
   suggestedCommand?: string;
 }
@@ -683,6 +686,7 @@ interface WorkspaceWaitResult extends WorkspaceStateResult {
 interface PaneToolInput {
   agent?: string;
   command?: string;
+  agentType?: string;
   title?: string;
   initialInput?: string;
 }
@@ -735,6 +739,7 @@ const paneSummarySchema: BoundarySchema<PaneSummary> = boundary.object({
   name: boundary.string,
   status: boundary.string,
   agentStatus: boundary.enumeration('active', 'idle'),
+  agentState: boundary.optional(boundary.enumeration('ready', 'working', 'blocked', 'none')),
   worktreePath: boundary.string,
   repoId: boundary.number,
   repoName: boundary.optional(boundary.string),
@@ -746,7 +751,7 @@ const paneSummarySchema: BoundarySchema<PaneSummary> = boundary.object({
   ownership: boundary.enumeration('pane', 'external'),
 });
 const panelBlockedSchema: BoundarySchema<PanelBlockedState> = boundary.object({
-  kind: boundary.enumeration('codex-update', 'agent-prompt', 'submission_unverified', 'unknown'),
+  kind: boundary.enumeration('codex-update', 'agent-prompt', 'submission_unverified', 'composer-unknown', 'unknown'),
   message: boundary.string,
   suggestedCommand: boundary.optional(boundary.string),
 });
@@ -810,6 +815,8 @@ const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   active: boundary.boolean,
   initialized: boundary.optional(boundary.boolean),
   agentType: boundary.optional(boundary.string),
+  agentDetection: boundary.optional(boundary.enumeration('declared', 'command', 'process', 'screen')),
+  launchCommand: boundary.optional(boundary.string),
   isCliPanel: boundary.optional(boundary.boolean),
   position: boundary.optional(boundary.number),
   createdAt: boundary.optional(boundary.string),
@@ -1299,6 +1306,7 @@ const repoSelectorSchema: BoundarySchema<PaneCreateRequest['repo']> = boundary.u
 const paneToolInputSchema: BoundarySchema<PaneToolInput> = boundary.object({
   agent: boundary.optional(boundary.string),
   command: boundary.optional(boundary.string),
+  agentType: boundary.optional(boundary.string),
   title: boundary.optional(boundary.string),
   initialInput: boundary.optional(boundary.string),
 });
@@ -2239,11 +2247,19 @@ async function confirmRepoAdd(parsed: ParsedArgs, request: RepoAddRequest): Prom
 }
 
 async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Promise<PaneToolSpec> {
-  if (parsed.agent && parsed.toolCommand) {
-    throw new Error('Use either --agent or --tool-command, not both.');
+  const initialInput = resolveInitialInput(parsed);
+
+  // With --tool-command, --agent names the agent the command runs (a wrapper
+  // such as `agent-farm run`); Pane launches the command unchanged.
+  if (parsed.toolCommand && parsed.agent) {
+    return {
+      command: parsed.toolCommand,
+      agentType: parsed.agent,
+      title: parsed.title,
+      initialInput,
+    };
   }
 
-  const initialInput = resolveInitialInput(parsed);
   let agent = parsed.agent;
 
   if (!agent && !parsed.toolCommand) {
@@ -2729,7 +2745,8 @@ function printPanelListResult(result: PanelListResult): void {
     const marker = panel.active ? '*' : ' ';
     const initialized = panel.initialized === undefined ? '' : panel.initialized ? ' initialized' : ' not-initialized';
     const agent = panel.agentType ? ` ${panel.agentType}` : '';
-    console.log(`${marker} ${panel.id}\t${panel.type}\t${panel.title}${initialized}${agent}`);
+    const detection = panel.agentDetection && panel.agentDetection !== 'command' ? ` (${panel.agentDetection})` : '';
+    console.log(`${marker} ${panel.id}\t${panel.type}\t${panel.title}${initialized}${agent}${detection}`);
   }
 }
 
@@ -2784,8 +2801,15 @@ function parsePaneToolSpecPayload(value: PaneToolInput, index: number): PaneTool
   }
 
   if (value.command !== undefined && value.command.trim().length > 0) {
+    let agentType: RunpaneAgent | undefined;
+    try {
+      agentType = value.agentType === undefined ? undefined : decodeBoundary(value.agentType, agentSchema);
+    } catch {
+      throw new Error(`--from-json pane ${index} includes an unsupported agentType.`);
+    }
     return {
       command: value.command,
+      agentType,
       title: value.title,
       initialInput: value.initialInput,
     };

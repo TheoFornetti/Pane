@@ -1754,6 +1754,93 @@ print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines(), "ref
   assert.strictEqual(python.pinConflictRefused, true);
 }
 
+async function checkWrapperAgentParity() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { runPanesCreate, runPanelsCreate, runPanelsList, runPanesAdopt } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const calls = [];
+  const stdout = [];
+  const panelList = {
+    ok: true,
+    paneId: 'session-1',
+    panels: [{
+      id: 'panel-1', panelId: 'panel-1', paneId: 'session-1', type: 'terminal', title: 'Claude Code', active: true,
+      initialized: true, agentType: 'claude', agentDetection: 'process', launchCommand: 'agent-farm run free-range', isCliPanel: true,
+    }],
+  };
+  daemonClient.invokeDaemon = async (channel, args) => {
+    calls.push({ channel, request: args[0] });
+    if (channel === 'runpane:panels:list') return panelList;
+    if (channel === 'runpane:panels:create') return { ok: true, paneId: 'session-1', panelId: 'panel-2', title: 'Claude Code', active: false, focused: false };
+    return { ok: true, repo: { id: 1, name: 'repo', path: '/repo', active: true, sessionCount: 1 }, items: [] };
+  };
+  console.log = (line) => stdout.push(String(line));
+  try {
+    await runPanesCreate(parseRunpaneArgs([
+      'panes', 'create', '--repo', 'active', '--name', 'farm', '--tool-command', 'agent-farm run free-range',
+      '--agent', 'claude', '--dry-run', '--yes', '--json'
+    ]));
+    await runPanelsCreate(parseRunpaneArgs([
+      'panels', 'create', '--pane', 'session-1', '--tool-command', 'agent-farm run free-range', '--agent', 'claude', '--yes', '--json'
+    ]));
+    await runPanelsList(parseRunpaneArgs(['panels', 'list', '--pane', 'session-1', '--json']));
+    await runPanelsList(parseRunpaneArgs(['panels', 'list', '--pane', 'session-1']));
+    await runPanesAdopt(parseRunpaneArgs([
+      'panes', 'adopt', '--repo', 'active', '--path', '/repo/wt', '--name', 'farm', '--tool-command', 'agent-farm run free-range',
+      '--agent', 'claude', '--launch', '--dry-run', '--yes', '--json'
+    ]));
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+
+  const wrappedTool = { command: 'agent-farm run free-range', agentType: 'claude' };
+  const wireCalls = JSON.parse(JSON.stringify(calls));
+  assert.deepStrictEqual(wireCalls[0].request.panes[0].tool, wrappedTool);
+  assert.deepStrictEqual(wireCalls[1].request.tool, wrappedTool);
+  assert.deepStrictEqual(JSON.parse(stdout[2]).panels[0], panelList.panels[0]);
+  assert.ok(stdout.includes('* panel-1\tterminal\tClaude Code initialized claude (process)'), stdout.join('\n'));
+  assert.deepStrictEqual(wireCalls[4].request.panes[0].tool, wrappedTool);
+
+  const pythonOutput = runPythonSnippet(`
+import contextlib
+import io
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+panel_list = json.loads(${JSON.stringify(JSON.stringify(panelList))})
+calls = []
+def fake_invoke(channel, args, **kwargs):
+    calls.append({"channel": channel, "request": args[0]})
+    if channel == "runpane:panels:list":
+        return panel_list
+    if channel == "runpane:panels:create":
+        return {"ok": True, "paneId": "session-1", "panelId": "panel-2", "title": "Claude Code", "active": False, "focused": False}
+    return {"ok": True, "repo": {"id": 1, "name": "repo", "path": "/repo", "active": True, "sessionCount": 1}, "items": []}
+
+local_control.invoke_daemon = fake_invoke
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    local_control.run_panes_create(parse_args([
+        "panes", "create", "--repo", "active", "--name", "farm", "--tool-command", "agent-farm run free-range",
+        "--agent", "claude", "--dry-run", "--yes", "--json"
+    ]))
+    local_control.run_panels_create(parse_args([
+        "panels", "create", "--pane", "session-1", "--tool-command", "agent-farm run free-range", "--agent", "claude", "--yes", "--json"
+    ]))
+    local_control.run_panels_list(parse_args(["panels", "list", "--pane", "session-1"]))
+
+print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines()}))
+`);
+  const python = JSON.parse(pythonOutput);
+  assert.deepStrictEqual(python.calls[0].request.panes[0].tool, wrappedTool);
+  assert.deepStrictEqual(python.calls[1].request.tool, wrappedTool);
+  assert.ok(python.stdout.includes('* panel-1\tterminal\tClaude Code initialized claude (process)'), python.stdout.join('\n'));
+}
+
 async function checkPanesCostParity() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -2727,6 +2814,7 @@ async function runChecks() {
   await checkFromJsonAcceptsBom();
   await checkPaneArchiveDryRunParity();
   await checkPanePinParity();
+  await checkWrapperAgentParity();
   await checkPaneCreateBlockedReadiness();
   await checkPanesCostParity();
   await checkPaneRenameParity();

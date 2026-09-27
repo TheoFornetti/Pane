@@ -782,10 +782,17 @@ def apply_pane_focus_options(parsed: Any, request: Dict[str, Any]) -> None:
 
 
 def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any]:
-    if parsed.agent and parsed.tool_command:
-        raise ValueError("Use either --agent or --tool-command, not both.")
-
     initial_input = resolve_initial_input(parsed)
+
+    # With --tool-command, --agent names the agent the command runs (a wrapper
+    # such as `agent-farm run`); Pane launches the command unchanged.
+    if parsed.tool_command and parsed.agent:
+        return {
+            "command": parsed.tool_command,
+            "agentType": parsed.agent,
+            **optional_value("title", parsed.title),
+            **optional_value("initialInput", initial_input),
+        }
     agent = parsed.agent
 
     if not agent and not parsed.tool_command:
@@ -1236,7 +1243,9 @@ def print_panel_list_result(result: Dict[str, Any]) -> None:
         if panel.get("initialized") is not None:
             initialized = " initialized" if panel.get("initialized") else " not-initialized"
         agent = f" {panel.get('agentType')}" if panel.get("agentType") else ""
-        print(f"{marker} {panel.get('id')}\t{panel.get('type')}\t{panel.get('title')}{initialized}{agent}")
+        detection = panel.get("agentDetection")
+        detection_label = f" ({detection})" if detection and detection != "command" else ""
+        print(f"{marker} {panel.get('id')}\t{panel.get('type')}\t{panel.get('title')}{initialized}{agent}{detection_label}")
 
 
 def optional_value(key: str, value: Any) -> Dict[str, Any]:

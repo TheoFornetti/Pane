@@ -159,8 +159,9 @@ Auto-resume:
   stopped, for example: "Your previous turn died: \`<signature>\`. Inspect
   your durable state and continue from where the work stopped."
 - Check the result. \`verifiedSubmitted: true\` means the agent took the
-  message. Otherwise read \`runpane panels screen\`: if the message is still in
-  the composer, run \`runpane panels submit-composer --panel <panel-id> --yes --json\`
+  message, or queued it behind its current turn (\`delivery.state\` says
+  which). Otherwise read \`runpane panels screen\`: if the message is still in
+  the composer (\`delivery.state: "in-composer"\`), run \`runpane panels submit-composer --panel <panel-id> --yes --json\`
   once, and if it is still held after that, report to the user. If
   \`blocked.kind\` is \`composer-unknown\`, Pane found no composer and typed
   nothing; read the screen and report to the user instead of retrying.

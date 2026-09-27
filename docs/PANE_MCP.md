@@ -47,7 +47,7 @@ The core set is built around the three jobs agents most often need, each finishe
 
 - `agents_start`: creates a Pane in a repository, starts the agent with the task, waits until it is ready, and returns the pane and panel ids and a `pane://` link.
 - `agents_status`: whether the agent is working, ready, blocked (waiting on a person), idle, or exited, plus its current screen.
-- `agents_send`: submits a follow-up and reports whether Pane saw it leave the composer.
+- `agents_send`: submits a follow-up and reports whether the agent took it or queued it behind its current turn (`delivery`), read from the agent's transcript where Pane can find it.
 
 ## Docs and links
 

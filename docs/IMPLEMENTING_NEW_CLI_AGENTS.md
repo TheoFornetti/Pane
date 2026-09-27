@@ -56,3 +56,33 @@ commands.
 A new built-in agent works with wrappers once its executable name is in
 `AGENT_EXECUTABLES`. Add a screen signature only if the agent's UI has a stable,
 distinctive frame.
+
+## Delivery state and ghost text
+
+`panels submit`, `panels submit-composer`, `agents send` and create prompts
+report `delivery: { state, evidence }` for Claude and Codex. The state comes
+from the agent's own transcript when Pane can find it
+(`main/src/services/agentTranscript/`):
+
+- Claude: `~/.claude/projects/<cwd, non-alphanumerics as '-'>/<session id>.jsonl`.
+  Pane picks the session id (`--session-id`), except for wrapped launches, where
+  it reads the worktree's recently written transcripts. A taken turn is a
+  `type: "user"` entry. A message sent while Claude works is first a
+  `queue-operation` `enqueue` entry, then a `user` entry once taken.
+- Codex: the newest rollout under `~/.codex/sessions/YYYY/MM/DD/` whose
+  `session_meta.cwd` is the worktree, or the rollout named by the thread id once
+  Pane knows it. A taken turn is a `response_item` user message. Codex writes a
+  queued message only once it takes it, so `queued` comes from its screen
+  (`Messages to be submitted after next tool call` / `↳ <message>`).
+
+The reader tails each file from a byte offset, so polling a long transcript
+stays cheap. Without a transcript, the screen decides: a steadily empty composer
+is `taken`, text still in it is `in-composer`.
+
+The terminal model splits each screen into typed cells and ghost cells: dim
+(SGR 2) or placeholder-grey text, which agents use for placeholders, prompt
+suggestions and queued-message lists (`TerminalStateEmulator.getScreenText`).
+Composer detection reads only typed cells; `panels screen` reports the ghost
+text in the composer as `composer.ghostText`. A new agent whose placeholder is
+neither dim nor mid-grey needs its own placeholder rule in
+`agentScreenSignature.ts`.

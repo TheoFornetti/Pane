@@ -124,13 +124,12 @@ in every implementation prompt:
 - The `reviewer` and `qa-and-verify` subagents exist only in Pane Chat. In
   another repository, run `review` or `pr-test-automation` directly.
 
-A stage has started when both hold:
+A stage has started when the result reports `delivery.state: "taken"`, or
+`"queued"` for an agent that was busy (it runs the message after its current
+turn); `verifiedSubmitted: true` means the same. See "Confirm delivery" below.
 
-- the result reports `verifiedSubmitted: true`
-- you have delivery evidence, as described under "Confirm delivery" below
-
-When the text is still in the composer (`panels screen` reports
-`composer.hasUndeliveredText: true`), run
+When the text is still in the composer (`delivery.state: "in-composer"`, or
+`panels screen` reports `composer.hasUndeliveredText: true`), run
 `runpane panels submit-composer --panel <panel-id> --strategy auto --yes --json`
 once, then check again.
 
@@ -150,14 +149,21 @@ After clearing a blocker, repeat the submit check.
 
 ### Confirm delivery
 
-`verifiedSubmitted` means the text left the composer. Delivery evidence shows
-the agent took the turn; either of these counts:
+For Claude and Codex, submit results carry `delivery`:
 
-- the instruction appears as a received turn in the agent's own session log,
-  where its harness keeps one
-- an activity transition or output change against your baseline
+- `state`: `taken` (the agent started a turn with the text), `queued` (a busy
+  agent holds it for after its current turn), `in-composer` (the text is still
+  in the composer), or `unknown`.
+- `evidence`: `transcript` (Pane found the turn in the agent's own session
+  log), `screen`, or `argv` (a create prompt passed at launch).
 
-Advance a workstream only on that evidence.
+`verifiedSubmitted` is true exactly for `taken` or `queued`; never resend
+those. For `unknown`, delivery evidence is an activity transition or output
+change against your baseline. Advance a workstream only on that evidence.
+
+`panels screen` reports placeholder and suggestion text (such as Claude's
+suggested next prompt, drawn dim or grey) as `composer.ghostText`, not as held
+input; text output marks that line `⟨suggestion⟩`.
 
 An agent finishing an earlier turn can hold a received prompt with no visible
 change, so a resend on missing evidence can run the work twice. Resend only

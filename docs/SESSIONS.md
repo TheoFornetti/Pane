@@ -175,6 +175,50 @@ do not prove completion. A completion report must carry inspectable evidence,
 the report timestamp, and provenance; new activity makes an older report
 stale.
 
+## Named locks for shared resources
+
+When several workers share one resource that only one of them may use at a
+time, such as a test account whose "approve guest" banner any logged-in worker
+can click, name a lock in their prompts. Each worker takes the lock before it
+uses the resource and gives it back after:
+
+```text
+runpane lock acquire --name testing-account --ttl 30m --wait 1800000 --note "call QA" --json
+# ... use the shared account ...
+runpane lock release --name testing-account --json
+```
+
+- **Owner.** The calling Pane and panel, from `PANE_SESSION_ID` and
+  `PANE_PANEL_ID` (or explicit `--pane`/`--panel`). Outside a Pane terminal the
+  owner is external and `--note` is required: it names the owner, so pass the
+  same note to release.
+- **Scope.** A lock is scoped to the owner's Session when its Pane belongs to
+  one (as the Session's orchestrator or an associated Pane), so two Sessions can
+  each hold `testing-account`. A Pane outside any Session uses the global scope.
+  The scope is fixed when the lock is first taken.
+- **Acquire.** Succeeds when the lock is free, expired, or already held by the
+  same owner, which renews the TTL (`renewed: true`). Otherwise it returns
+  `ok: false` with `heldBy` and `expiresAt` and exits 1. With `--wait` the call
+  blocks in the daemon, which grants the lock to the oldest waiter as soon as it
+  is released or expires; the CLI chains daemon calls of up to 120 seconds for
+  longer waits.
+- **Release.** Only the owner can release a lock. `--force` releases another
+  owner's lock, for example a stuck worker's; add `--session <id|name>` to
+  name a Session-scoped lock from outside that Session.
+- **Automatic release.** Pane releases a lock when its TTL (at most 24h) runs
+  out, when the owner panel's terminal exits or is closed, and when the owner
+  Pane is archived. Quitting Pane does not release locks: the resumed agents
+  still expect to hold them.
+- **Storage.** Locks are saved in `locks.json` below `PANE_DIR` with
+  temp-and-rename writes, so they survive a daemon restart. Expired locks and
+  locks whose owner Pane or panel is gone are dropped when the file loads.
+- **Visibility.** `runpane lock list [--session <id|name>]` lists held locks,
+  and `sessions overview` includes `locks`: those scoped to the Session plus
+  those its Panes hold.
+
+If a worker interrupts a waiting `lock acquire`, the daemon may still grant it
+the lock for up to two minutes; release it, or let the TTL expire.
+
 ## Session watcher
 
 Use one durable, named watcher per Session, scoped to every associated Pane:

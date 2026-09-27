@@ -500,6 +500,15 @@ structured \`create\` and \`update\` input. The IPC counterparts are
 After each change, run \`runpane sessions overview --session <session-id-or-name> --json\`.
 The Liveness Contract below sets up the Session's watcher.
 
+Name locks in prompts when workers share a resource only one may use at a
+time, such as a test account: each worker runs
+\`runpane lock acquire --name <name> --ttl 30m --wait 1800000 --note "<what for>" --json\`
+before using the shared account and \`runpane lock release --name <name>\`
+after. A lock is scoped to this Session, is released when its TTL runs out or
+the holder's panel exits or Pane is archived, and shows under \`locks\` in the
+Session overview; \`runpane lock release --name <name> --force\` frees one a
+stuck worker holds.
+
 Idle, stopped, and exited states are activity signals. Completion needs a
 report with inspectable evidence, a timestamp, and provenance, and newer
 activity makes an older report stale. Keep findings in this conversation.

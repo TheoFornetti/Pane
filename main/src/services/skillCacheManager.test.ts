@@ -337,6 +337,8 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     expect(canonicalSkill).toContain('## Session-owned workflow (authoritative)');
     expect(canonicalSkill).toContain('create-ticket');
     expect(canonicalSkill).toContain('runpane sessions overview --session <session-id-or-name> --json');
+    expect(canonicalSkill).toContain('runpane lock acquire --name <name> --ttl 30m --wait 1800000');
+    expect(canonicalSkill).toContain('runpane lock release --name <name>');
     expect(canonicalSkill).toContain('RunPane Sessions commands are `list`, `create`, `get`, `update`');
     expect(canonicalSkill).toContain('--from-json <path|->');
     expect(canonicalSkill).toContain('orchestration-sessions:list/select/create/get/update/set-agent/associate/detach/overview');

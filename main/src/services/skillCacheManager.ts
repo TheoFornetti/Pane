@@ -161,7 +161,9 @@ Auto-resume:
 - Check the result. \`verifiedSubmitted: true\` means the agent took the
   message. Otherwise read \`runpane panels screen\`: if the message is still in
   the composer, run \`runpane panels submit-composer --panel <panel-id> --yes --json\`
-  once, and if it is still held after that, report to the user.
+  once, and if it is still held after that, report to the user. If
+  \`blocked.kind\` is \`composer-unknown\`, Pane found no composer and typed
+  nothing; read the screen and report to the user instead of retrying.
 - Run the whole sequence in one pass, so it finishes inside a short wake
   window.
 

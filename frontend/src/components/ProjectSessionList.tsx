@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Home, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -49,7 +49,7 @@ interface ProjectSessionListProps {
   repositoriesSectionExpanded: boolean;
   onPinnedSectionExpandedChange: (expanded: boolean) => void;
   onRepositoriesSectionExpandedChange: (expanded: boolean) => void;
-  /** Lets the sidebar footer's "Add repository" open this list's dialog. */
+  /** Lets the sidebar's "New project" button open this list's dialog. */
   onRegisterAddRepository?: (open: () => void) => void;
   showRemoteDesktopLink?: boolean;
   onRemoteDesktopClick?: () => void;
@@ -372,20 +372,6 @@ export function ProjectSessionList({
   return (
     <>
       <div className="flex flex-col py-1.5">
-        {/* Home */}
-        <button
-          type="button"
-          onClick={() => {
-            setSidebarNavigationScope('repositories');
-            setActiveSession(null);
-            navigateToSessions();
-          }}
-          className={cn(SIDEBAR_ROW_BASE, SIDEBAR_ROW_GAP, SIDEBAR_ROW_PADDING, 'h-8 text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary')}
-        >
-          <Home className="w-4 h-4" />
-          <span>Home</span>
-        </button>
-
         {orchestrationAvailability === 'unavailable' || orchestrationAvailability === 'idle' ? (
           <button
             type="button"

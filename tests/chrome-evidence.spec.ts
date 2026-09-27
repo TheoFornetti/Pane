@@ -173,7 +173,7 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string) {
 test('flat chrome preserves the primary navigation hierarchy', async ({ page }, testInfo) => {
   await bootChromeFixture(page);
 
-  await expect(page.getByRole('button', { name: 'Feedback', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Home menu' })).toBeVisible();
   await expect(page.getByTestId('usage-nav')).toHaveCount(0);
   await expect(page.locator('.pane-sidebar-shell')).toHaveCSS('border-radius', '0px');
   await expect(page.locator('.pane-session-shell')).toHaveCSS('border-radius', '0px');
@@ -223,7 +223,8 @@ test('macOS UI uses the sans stack; content surfaces stay monospace', async ({ p
   await page.getByRole('tab', { name: 'Changes', exact: true }).click();
   await expectSans(page.getByRole('tab', { name: 'Changes', exact: true }));
 
-  await page.getByRole('button', { name: 'Feedback', exact: true }).click();
+  await page.getByRole('button', { name: 'Home menu' }).click();
+  await page.getByRole('menuitem', { name: 'Feedback', exact: true }).click();
   const feedback = page.getByRole('dialog', { name: 'Send feedback' });
   await expectSans(feedback.getByRole('heading', { name: 'Send feedback' }).last());
   await expectSans(feedback.getByText('Create a public issue in greenfield-inc/Pane.'));

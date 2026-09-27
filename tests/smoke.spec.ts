@@ -116,7 +116,7 @@ test.describe('Smoke Tests', () => {
     const sidebar = page.locator('[data-testid="sidebar"]').first();
     await expect(sidebar).toBeVisible({ timeout: 10000 });
 
-    const sidebarMenuButton = page.getByRole('button', { name: 'Sidebar menu' });
+    const sidebarMenuButton = page.getByRole('button', { name: 'Home menu' });
     await expect(sidebarMenuButton).toBeVisible();
   });
 

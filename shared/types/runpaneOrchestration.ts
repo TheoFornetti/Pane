@@ -1,4 +1,4 @@
-import type { ProjectEnvironment, ToolPanelType } from './panels';
+import type { ProjectEnvironment, TerminalAgentReport, TerminalAgentReportState, ToolPanelType } from './panels';
 import type { RunpaneAgent } from './generatedRunpaneContract';
 import type { RemoteDaemonExecutableHealth } from './remoteDaemon';
 import type { TerminalGraphicsProtocol } from '../constants/terminalGraphics';
@@ -41,7 +41,9 @@ export type RunpaneWorkspaceEntryKind =
   | 'agent.idle'
   | 'pane.created'
   | 'pane.gone'
-  | 'panel.exited';
+  | 'panel.exited'
+  /** A worker ran `runpane report`. Opt-in: only a consumer that lists it in `kinds` receives it. */
+  | 'agent.report';
 
 export interface RunpaneWorkspaceEntry {
   gen: number;
@@ -68,6 +70,8 @@ export interface RunpaneWorkspaceEntry {
   baseline?: true;
   changedWhileAway?: boolean;
   panels?: RunpaneWorkspacePanelSummary[];
+  /** The report of an `agent.report` entry; its summary is cut to 2,000 characters (the panel keeps up to 16,000). */
+  report?: TerminalAgentReport;
 }
 
 export interface RunpaneWorkspacePanelSummary {
@@ -560,6 +564,8 @@ export interface RunpanePanelSummary {
   position?: number;
   createdAt?: string;
   lastActiveAt?: string;
+  /** Latest `runpane report` from this panel's agent. */
+  report?: TerminalAgentReport;
 }
 
 export interface RunpanePanelListRequest {
@@ -656,6 +662,55 @@ export interface RunpanePanelInputRequest {
   panelId: string;
   input: string;
 }
+
+/** `runpane report`: a worker's structured hand-back for its panel. */
+export interface RunpaneReportRequest {
+  /** The panel's Pane; when given it must own `panelId`. */
+  paneId?: string;
+  panelId: string;
+  state: TerminalAgentReportState;
+  pr?: number;
+  head?: string;
+  summary?: string;
+  summaryPath?: string;
+  question?: string;
+}
+
+export interface RunpaneReportResult {
+  ok: true;
+  generation?: number;
+  paneId: string;
+  panelId: string;
+  report: TerminalAgentReport;
+  /** Named Sessions the Pane is associated with, which recorded the report as activity. */
+  sessionIds: string[];
+}
+
+export interface RunpanePanelLastMessageRequest {
+  panelId: string;
+  /** Maximum characters to return; defaults to 20,000. */
+  limit?: number;
+}
+
+export type RunpanePanelLastMessageResult =
+  | {
+    ok: true;
+    panelId: string;
+    paneId: string;
+    agentType: 'claude' | 'codex';
+    /** The agent's last reply, from its transcript; the tail is kept when it is longer than `limit`. */
+    text: string;
+    length: number;
+    limit: number;
+    truncated: boolean;
+  }
+  | {
+    ok: false;
+    panelId: string;
+    paneId: string;
+    reason: 'transcript-unavailable';
+    message: string;
+  };
 
 export interface RunpanePanelInputResult {
   ok: true;

@@ -17,11 +17,13 @@ import { terminalPanelManager } from '../services/terminalPanelManager';
 import { databaseService as panelDatabase } from '../services/database';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
 import { WorkspaceJournal } from '../services/workspaceJournal';
+import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { usageManager } from '../services/usage/usageManager';
 import { CommandRunner } from '../utils/commandRunner';
 import { PathResolver } from '../utils/pathResolver';
 import { agentTranscripts } from '../services/agentTranscript';
+import { claudeProjectDirName } from '../services/agentTranscript/claude';
 import { registerRunpaneHandlers } from './runpane';
 
 // Transcript reads are real file I/O; these tests script what the transcript says.
@@ -4093,6 +4095,153 @@ describe('runpane IPC handlers', () => {
       expect(result).toMatchObject({
         ok: true,
         items: [{ ok: true, initialInput: { submitted: true, verifiedSubmitted: true } }],
+      });
+    });
+  });
+
+  describe('worker reports', () => {
+    const claudeWorker: ToolPanel = {
+      ...terminalPanel,
+      title: 'Claude',
+      state: { isActive: true, customState: { agentType: 'claude', isCliPanel: true } },
+    };
+    let stored: ToolPanel;
+
+    beforeEach(() => {
+      stored = structuredClone(claudeWorker);
+      vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) => (panelId === stored.id ? stored : undefined));
+      vi.mocked(panelManager.getPanelsForSession).mockImplementation(() => [stored]);
+      // The panel store merges state writes; keep the latest one, as it would be after a restart.
+      vi.mocked(panelManager.updatePanel).mockImplementation(async (_panelId, updates) => {
+        if (updates.state) stored = { ...stored, state: updates.state };
+      });
+    });
+
+    it('stores the latest report in the panel custom state and journals an opt-in agent.report', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-27T18:00:00.000Z'));
+      // SAFETY: Only recordAgentReport is reached by the report handler, and it is stubbed below.
+      const orchestrationSessionManager = Object.create(OrchestrationSessionManager.prototype) as OrchestrationSessionManager;
+      const recordAgentReport = vi.spyOn(orchestrationSessionManager, 'recordAgentReport').mockResolvedValue(['session-a']);
+      // The registry builds its own journal, which names Panes through the session manager.
+      const services = createServices({ orchestrationSessionManager });
+      const registry = createRegistry(services);
+
+      const result = await registry.invoke('runpane:report', [{
+        paneId: session.id,
+        panelId: terminalPanel.id,
+        state: 'ready',
+        pr: 747,
+        head: 'FC5DCE9',
+        summary: `Opened PR 747. ${'x'.repeat(3_000)}`,
+        summaryPath: '/tmp/report.md',
+      }]);
+      vi.useRealTimers();
+
+      const report = {
+        state: 'ready', pr: 747, head: 'fc5dce9', summary: `Opened PR 747. ${'x'.repeat(3_000)}`, summaryPath: '/tmp/report.md',
+        reportedAt: '2026-09-27T18:00:00.000Z',
+      };
+      expect(result).toEqual({ ok: true, generation: 0, paneId: session.id, panelId: terminalPanel.id, report, sessionIds: ['session-a'] });
+      expect(stored.state.customState).toMatchObject({ agentType: 'claude', isCliPanel: true, agentReport: report });
+      expect(recordAgentReport).toHaveBeenCalledWith(terminalPanel.id, report);
+
+      // Consumers that do not list agent.report never receive it; released CLIs reject unknown kinds.
+      expect((await registry.invoke('runpane:workspace:wait', [{ since: 0, timeoutMs: 0 }])).entries).toEqual([]);
+      const optedIn = await registry.invoke('runpane:workspace:wait', [{ since: 0, timeoutMs: 0, kinds: ['agent.ready', 'agent.report'] }]);
+      expect(optedIn.entries).toEqual([expect.objectContaining({
+        kind: 'agent.report',
+        paneId: session.id,
+        paneName: session.name,
+        panelId: terminalPanel.id,
+        panelTitle: 'Claude',
+        agentType: 'claude',
+        source: 'agent',
+        report: expect.objectContaining({ state: 'ready', pr: 747, head: 'fc5dce9', summaryPath: '/tmp/report.md', summaryTruncated: true }),
+      })]);
+      expect(optedIn.entries[0].report.summary).toHaveLength(2_000);
+
+      // panels list and a later report read the stored one; a new report replaces it.
+      const listed = await registry.invoke('runpane:panels:list', [{ paneId: session.id }]);
+      expect(listed.panels[0].report).toEqual(report);
+      await registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked', question: 'Drop the old column?' }]);
+      expect(stored.state.customState).toMatchObject({ agentReport: { state: 'blocked', question: 'Drop the old column?' } });
+      expect(stored.state.customState).not.toHaveProperty('agentReport.pr');
+    });
+
+    it('refuses a blocked report without a question, a bad head, and a panel from another Pane', async () => {
+      const registry = createRegistry();
+      await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked' }]))
+        .rejects.toThrow('A blocked report needs a question');
+      await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', head: 'nothex!' }]))
+        .rejects.toThrow('head must be a commit SHA');
+      await expect(registry.invoke('runpane:report', [{ paneId: 'session-9', panelId: terminalPanel.id, state: 'done' }]))
+        .rejects.toThrow(`Panel ${terminalPanel.id} belongs to Pane ${session.id}, not session-9.`);
+      await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'waiting' }])).rejects.toThrow();
+      expect(panelManager.updatePanel).not.toHaveBeenCalled();
+    });
+
+    describe('panels last-message', () => {
+      let home: string;
+
+      beforeEach(() => {
+        home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pane-last-message-home-')));
+        tempDirs.push(home);
+        vi.stubEnv('HOME', home);
+      });
+
+      afterEach(() => {
+        vi.unstubAllEnvs();
+      });
+
+      /** A Claude transcript for the Pane's worktree, in the line shapes the PR5b reader fixtures use. */
+      function writeClaudeTranscript(rows: object[]): void {
+        const dir = path.join(home, '.claude', 'projects', claudeProjectDirName(session.worktreePath ?? ''));
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'transcript.jsonl'), rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+      }
+      const assistant = (id: string, text: string, timestamp: string) => ({
+        type: 'assistant',
+        message: { id, role: 'assistant', content: [{ type: 'text', text }] },
+        timestamp,
+      });
+
+      it('returns the last assistant reply from the transcript, keeping the end when it is long', async () => {
+        writeClaudeTranscript([
+          { type: 'user', message: { role: 'user', content: 'Fix the login redirect' }, timestamp: '2026-09-27T18:00:00.000Z' },
+          assistant('msg-1', 'Working on it.', '2026-09-27T18:00:01.000Z'),
+          assistant('msg-2', 'Opened PR #747 at fc5dce9.', '2026-09-27T18:05:00.000Z'),
+          assistant('msg-2', 'Tests pass.', '2026-09-27T18:05:01.000Z'),
+        ]);
+        const registry = createRegistry();
+
+        await expect(registry.invoke('runpane:panels:last-message', [{ panelId: terminalPanel.id }])).resolves.toEqual({
+          ok: true,
+          panelId: terminalPanel.id,
+          paneId: session.id,
+          agentType: 'claude',
+          text: 'Opened PR #747 at fc5dce9.\nTests pass.',
+          length: 38,
+          limit: 20_000,
+          truncated: false,
+        });
+        const short = await registry.invoke('runpane:panels:last-message', [{ panelId: terminalPanel.id, limit: 30 }]);
+        expect(short).toMatchObject({ ok: true, truncated: true, length: 38, limit: 30 });
+        expect(short.text).toBe('[earlier text truncated]\npass.');
+      });
+
+      it('reports transcript-unavailable, never the screen, without a transcript or for a shell panel', async () => {
+        vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('Opened PR #1 on screen', 'idle', 'claude'));
+        const registry = createRegistry();
+
+        const missing = await registry.invoke('runpane:panels:last-message', [{ panelId: terminalPanel.id }]);
+        expect(missing).toMatchObject({ ok: false, reason: 'transcript-unavailable', panelId: terminalPanel.id, paneId: session.id });
+        expect(missing.message).not.toContain('Opened PR #1');
+
+        stored = { ...stored, state: { isActive: true, customState: {} } };
+        vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(null);
+        await expect(registry.invoke('runpane:panels:last-message', [{ panelId: terminalPanel.id }]))
+          .resolves.toMatchObject({ ok: false, reason: 'transcript-unavailable' });
       });
     });
   });

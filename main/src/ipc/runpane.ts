@@ -19,6 +19,12 @@ import { detectAgentState } from '../services/agentStatus/manifestEngine';
 import { getManifestForAgent } from '../services/agentStatus/manifests';
 import { detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from '../services/agents/agentScreenSignature';
 import { agentTranscripts, type TranscriptLocator } from '../services/agentTranscript';
+import {
+  AGENT_REPORT_STATES,
+  journalAgentReport,
+  normalizeAgentReport,
+  readPanelAgentReport,
+} from '../services/agentReport';
 import { resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
 import {
   bracketedPaste,
@@ -34,7 +40,7 @@ import type { ArchiveProgressManager, SerializedArchiveTask } from '../services/
 import type { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
-import type { CreatePanelRequest, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
+import type { CreatePanelRequest, TerminalAgentReport, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import {
@@ -84,6 +90,8 @@ import type {
   RunpanePanelCreateResult,
   RunpanePanelInputRequest,
   RunpanePanelInputResult,
+  RunpanePanelLastMessageRequest,
+  RunpanePanelLastMessageResult,
   RunpanePanelListRequest,
   RunpanePanelListResult,
   RunpanePanelOutputRecord,
@@ -106,6 +114,8 @@ import type {
   RunpaneRepoListResult,
   RunpaneRepoSelector,
   RunpaneRepoSummary,
+  RunpaneReportRequest,
+  RunpaneReportResult,
   RunpaneResolvedTool,
   RunpaneToolSpec,
   RunpaneWorktreeCleanupState,
@@ -173,6 +183,8 @@ const RUNPANE_CHANNELS = [
   'runpane:panels:submit',
   'runpane:panels:submit-composer',
   'runpane:panels:wait',
+  'runpane:panels:last-message',
+  'runpane:report',
   'runpane:workspace:state',
   'runpane:workspace:wait',
   'runpane:agents:doctor',
@@ -182,6 +194,8 @@ const AGENT_TEMPLATES = RUNPANE_CONTRACT.agentTemplates;
 const AGENT_IDS = new Set<string>(RUNPANE_CONTRACT.enums.agents);
 const DEFAULT_PANEL_OUTPUT_LIMIT = 200;
 const DEFAULT_PANEL_SCREEN_LIMIT = 80;
+const DEFAULT_LAST_MESSAGE_LIMIT = 20_000;
+const LAST_MESSAGE_TRUNCATION_MARKER = '[earlier text truncated]\n';
 const DEFAULT_PANEL_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_PANEL_WAIT_INTERVAL_MS = 500;
 const DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS = 3_000;
@@ -216,6 +230,7 @@ const MUTATING_RUNPANE_ACTIONS = new Set([
   'panels:input',
   'panels:submit',
   'panels:submit-composer',
+  'report',
   'sessions:create',
   'sessions:update',
   'sessions:set-agent',
@@ -1195,6 +1210,42 @@ export function registerRunpaneHandlers(
     }));
   });
 
+  commandRegistry.register('runpane:panels:last-message', async (request: PaneCommandValue): Promise<RunpanePanelLastMessageResult> => {
+    return withRunpaneAction(services, 'panels:last-message', {}, async () => {
+      const normalized = parsePanelLastMessageRequest(request);
+      const panel = resolveTerminalPanel(normalized.panelId);
+      const cwd = sessionManager.getSession(panel.sessionId)?.worktreePath;
+      return readPanelLastMessage(panel, cwd, normalized.limit ?? DEFAULT_LAST_MESSAGE_LIMIT);
+    }, result => ({
+      paneId: result.paneId,
+      panelId: result.panelId,
+      resultCount: result.ok ? 1 : 0,
+    }));
+  });
+
+  commandRegistry.register('runpane:report', async (request: PaneCommandValue): Promise<RunpaneReportResult> => {
+    return withRunpaneAction(services, 'report', {}, async () => {
+      const normalized = parseReportRequest(request);
+      const panel = resolveTerminalPanel(normalized.panelId);
+      if (normalized.paneId && normalized.paneId !== panel.sessionId) {
+        throw new Error(`Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${normalized.paneId}.`);
+      }
+      const report = normalizeAgentReport(normalized, new Date().toISOString());
+      await storePanelAgentReport(panel, report);
+      const panelSummary = panelToSummary(panelManager.getPanel(panel.id) ?? panel);
+      workspaceJournal.appendPaneEntry(panel.sessionId, {
+        kind: 'agent.report',
+        panelId: panel.id,
+        panelTitle: panel.title,
+        agentType: panelSummary.agentType,
+        source: 'agent',
+        report: journalAgentReport(report),
+      });
+      const sessionIds = await services.orchestrationSessionManager?.recordAgentReport(panel.id, report) ?? [];
+      return { ok: true, paneId: panel.sessionId, panelId: panel.id, report, sessionIds };
+    }, result => ({ paneId: result.paneId, panelId: result.panelId, ok: result.ok }));
+  });
+
   commandRegistry.register('runpane:workspace:state', async (request: PaneCommandValue = {}): Promise<RunpaneWorkspaceStateResult> => {
     return withRunpaneAction(services, 'workspace:state', {}, () => {
       const normalized = parsePaneListRequest(request);
@@ -1504,7 +1555,55 @@ function panelToSummary(panel: ToolPanel) {
     position: optionalNumber(panel.metadata.position),
     createdAt: toIsoString(panel.metadata.createdAt),
     lastActiveAt: toIsoString(panel.metadata.lastActiveAt),
+    report: readPanelAgentReport(panel),
   };
+}
+
+/** Keep the report in the panel's custom state; the write merges, so other terminal state is untouched. */
+async function storePanelAgentReport(panel: ToolPanel, report: TerminalAgentReport): Promise<void> {
+  const current = panelManager.getPanel(panel.id) ?? panel;
+  const state = current.state ?? { isActive: false };
+  const customState = isRecord(state.customState) ? state.customState : {};
+  await panelManager.updatePanel(panel.id, {
+    state: { ...state, customState: { ...customState, agentReport: report } },
+  });
+}
+
+/**
+ * The agent's last reply from its transcript, bounded to `limit` characters (the tail is kept).
+ * Without a transcript this reports `transcript-unavailable`; it never falls back to the screen.
+ */
+async function readPanelLastMessage(
+  panel: ToolPanel,
+  cwd: string | undefined,
+  limit: number,
+): Promise<RunpanePanelLastMessageResult> {
+  const agentType = panelStateSummary(panel, terminalPanelManager.getTerminalSnapshot(panel.id)).agentType;
+  const unavailable = (message: string): RunpanePanelLastMessageResult => ({
+    ok: false,
+    panelId: panel.id,
+    paneId: panel.sessionId,
+    reason: 'transcript-unavailable',
+    message,
+  });
+  if (agentType !== 'claude' && agentType !== 'codex') {
+    return unavailable(`Panel ${panel.id} is not a Claude or Codex panel, so Pane has no transcript to read. Use \`runpane panels screen --panel ${panel.id}\`.`);
+  }
+  const locator = panelTranscriptLocator(panel, cwd, agentType);
+  let message: string | undefined;
+  try {
+    message = locator ? await agentTranscripts.lastAssistantMessage(locator) : undefined;
+  } catch {
+    message = undefined;
+  }
+  if (message === undefined) {
+    return unavailable(`No ${agentType} transcript reply found for panel ${panel.id}. Use \`runpane panels screen --panel ${panel.id}\`.`);
+  }
+  const truncated = message.length > limit;
+  const text = truncated
+    ? `${LAST_MESSAGE_TRUNCATION_MARKER}${message.slice(message.length - Math.max(0, limit - LAST_MESSAGE_TRUNCATION_MARKER.length))}`
+    : message;
+  return { ok: true, panelId: panel.id, paneId: panel.sessionId, agentType, text, length: message.length, limit, truncated };
 }
 
 interface PaneCreateItemOptions {
@@ -3005,6 +3104,7 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'pane.created',
   'pane.gone',
   'panel.exited',
+  'agent.report',
 );
 
 function parseWorkspaceKinds(value: PaneCommandValue): RunpaneWorkspaceEntryKind[] | undefined {
@@ -3276,6 +3376,36 @@ function parsePanelScreenRequest(value: PaneCommandValue): RunpanePanelScreenReq
     panelId,
     limit: parsePositiveInteger(value.limit, 'limit'),
   };
+}
+
+function parsePanelLastMessageRequest(value: PaneCommandValue): RunpanePanelLastMessageRequest {
+  if (!isRecord(value)) {
+    throw new Error('Panel last-message request must be an object');
+  }
+  const panelId = optionalString(value.panelId)?.trim();
+  if (!panelId) {
+    throw new Error('Panel last-message request must include panelId');
+  }
+  return { panelId, limit: parsePositiveInteger(value.limit, 'limit') };
+}
+
+const reportRequestSchema = boundary.object({
+  paneId: boundary.optional(boundary.string),
+  panelId: boundary.nonEmptyString,
+  state: boundary.enumeration(...AGENT_REPORT_STATES),
+  pr: boundary.optional(boundary.number),
+  head: boundary.optional(boundary.string),
+  summary: boundary.optional(boundary.string),
+  summaryPath: boundary.optional(boundary.string),
+  question: boundary.optional(boundary.string),
+});
+
+function parseReportRequest(value: PaneCommandValue): RunpaneReportRequest {
+  if (!isRecord(value)) {
+    throw new Error('Report request must be an object');
+  }
+  const decoded = decodeBoundary(value, reportRequestSchema);
+  return { ...decoded, paneId: decoded.paneId?.trim() || undefined, panelId: decoded.panelId.trim() };
 }
 
 function parsePanelSubmitRequest(value: PaneCommandValue): RunpanePanelSubmitRequest {

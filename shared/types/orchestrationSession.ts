@@ -1,6 +1,6 @@
 import type { AgentState } from './agentStatus';
 import type { PaneChatAgent } from './paneChat';
-import type { ToolPanel } from './panels';
+import type { TerminalAgentReport, ToolPanel } from './panels';
 
 /** Stable identifier of the built-in orchestration session imported from Pane Chat. */
 export const LEGACY_ORCHESTRATION_SESSION_ID = 'legacy-pane-chat';
@@ -48,6 +48,7 @@ export type OrchestrationActivityKind =
   | 'blocked'
   | 'idle'
   | 'unknown'
+  /** The Session's own report, or (with a panelId) a worker's `runpane report`. */
   | 'report';
 
 export interface OrchestrationActivity {
@@ -143,6 +144,8 @@ export interface OrchestrationPaneOverview {
   missing: boolean;
   panels: OrchestrationPanelOverview[];
   git?: OrchestrationGitSummary;
+  /** The newest `runpane report` among the Pane's panels, with the panel that sent it. */
+  report?: TerminalAgentReport & { panelId: string };
 }
 
 export interface OrchestrationSessionOverview {

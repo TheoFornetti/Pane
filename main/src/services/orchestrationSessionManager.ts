@@ -11,7 +11,7 @@ import type { Session } from '../types/session';
 import type { SkillCacheManager } from './skillCacheManager';
 import type { PaneChatManager } from './paneChatManager';
 import type { GitStatusManager } from './gitStatusManager';
-import type { ToolPanel, TerminalPanelState } from '../../../shared/types/panels';
+import type { TerminalAgentReport, ToolPanel, TerminalPanelState } from '../../../shared/types/panels';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import {
   LEGACY_ORCHESTRATION_SESSION_ID,
@@ -47,6 +47,7 @@ import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
+import { readPanelAgentReport } from './agentReport';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
 const LEGACY_AGENT_SESSION_ID_PREFIX = `${LEGACY_ORCHESTRATION_SESSION_ID}-`;
@@ -412,6 +413,40 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
+  /**
+   * Record a worker's `runpane report` as activity on every Session its panel is associated
+   * with. Returns the ids of those Sessions.
+   */
+  async recordAgentReport(panelId: string, report: TerminalAgentReport): Promise<string[]> {
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const data = this.store.read();
+      const parentPaneId = panelManager.getPanel(panelId)?.sessionId;
+      if (!parentPaneId) return [];
+      const changed: OrchestrationSessionRecord[] = [];
+      let nextData = data;
+      for (const current of data.sessions) {
+        const association = current.associations.find(item =>
+          item.paneId === parentPaneId && (item.panelIds.length === 0 || item.panelIds.includes(panelId)));
+        if (!association) continue;
+        const nextRecord: OrchestrationSessionRecord = {
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: new Date().toISOString(),
+          activity: [...current.activity, this.activity('report', agentReportMessage(report), 'agent', parentPaneId, panelId)],
+        };
+        trimActivity(nextRecord);
+        nextData = replaceSession(nextData, nextRecord);
+        changed.push(nextRecord);
+      }
+      if (nextData !== data) {
+        this.store.write(nextData);
+        for (const item of changed) this.emitChanged(item, 'report');
+      }
+      return changed.map(item => item.id);
+    });
+  }
+
   private async ensureInitializedUnlocked(): Promise<void> {
     if (this.initialized) return;
     const data = this.store.read();
@@ -768,9 +803,10 @@ export class OrchestrationSessionManager extends EventEmitter {
     for (const panelId of association.panelIds) {
       if (!panelIds.has(panelId)) panels.push(missingPanel(panelId));
     }
+    const report = newestAgentReport(allPanels);
     const cachedGit = this.gitStatusManager?.getCachedStatus(pane.id);
     const branch = await this.readCurrentBranch(pane);
-    return {
+    const overview: OrchestrationPaneOverview = {
       paneId: pane.id,
       name: pane.name,
       worktreePath: pane.worktreePath,
@@ -790,6 +826,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         prState: cachedGit.status.prState,
       } : undefined,
     };
+    if (report) overview.report = report;
+    return overview;
   }
 
   private async readCurrentBranch(pane: Session): Promise<string | undefined> {
@@ -984,6 +1022,26 @@ function cloneLinks(links: OrchestrationLink[]): OrchestrationLink[] {
 
 function cloneReport(report: OrchestrationReport): OrchestrationReport {
   return { ...report, evidence: cloneLinks(report.evidence) };
+}
+
+/** Activity text for a worker report: `Worker reported ready: PR #747 at fc5dce9.` */
+function agentReportMessage(report: TerminalAgentReport): string {
+  const details = [
+    report.pr !== undefined ? `PR #${report.pr}` : undefined,
+    report.head ? `at ${report.head.slice(0, 7)}` : undefined,
+  ].filter(Boolean).join(' ');
+  const question = report.question ? ` Question: ${report.question}` : '';
+  return `Worker reported ${report.state}${details ? `: ${details}` : ''}.${question}`;
+}
+
+/** The most recent report among a Pane's panels, tagged with the panel that sent it. */
+function newestAgentReport(panels: readonly ToolPanel[]): (TerminalAgentReport & { panelId: string }) | undefined {
+  let newest: (TerminalAgentReport & { panelId: string }) | undefined;
+  for (const panel of panels) {
+    const report = readPanelAgentReport(panel);
+    if (report && (!newest || report.reportedAt > newest.reportedAt)) newest = { ...report, panelId: panel.id };
+  }
+  return newest;
 }
 
 function trimActivity(record: OrchestrationSessionRecord): void {

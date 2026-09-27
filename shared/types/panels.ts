@@ -27,6 +27,26 @@ export interface ToolPanelState {
 
 export type TerminalAgentDetection = 'declared' | 'command' | 'process' | 'screen';
 
+/** What a worker says about its task when it runs `runpane report`. */
+export type TerminalAgentReportState = 'ready' | 'blocked' | 'failed' | 'done';
+
+/** The latest `runpane report` from an agent panel, kept in its custom state so it survives restarts. */
+export interface TerminalAgentReport {
+  state: TerminalAgentReportState;
+  /** Pull request number the work is in. */
+  pr?: number;
+  /** Commit the report is about (lowercase hex, 7-40 characters). */
+  head?: string;
+  /** Up to 16,000 characters; a longer summary ends with a truncation marker and sets `summaryTruncated`. */
+  summary?: string;
+  summaryTruncated?: true;
+  /** Absolute path of the file the summary was read from (`--summary-file`). */
+  summaryPath?: string;
+  /** What the worker needs answered; present when `state` is `blocked`. */
+  question?: string;
+  reportedAt: string;
+}
+
 export interface TerminalPanelState {
   // Basic state (implemented in Phase 1-2)
   isInitialized?: boolean;       // Whether PTY process has been started
@@ -72,6 +92,8 @@ export interface TerminalPanelState {
    */
   launchMode?: 'wrapped';
   agentSessionId?: string;           // Agent-generated session ID for resuming conversations
+  /** Latest `runpane report` from this panel's agent. */
+  agentReport?: TerminalAgentReport;
   /** Stable orchestration identity for resumed Session terminals. */
   orchestrationSessionId?: string;
 

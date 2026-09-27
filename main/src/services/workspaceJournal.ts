@@ -76,6 +76,11 @@ const agentStatusEventSchema = boundary.object({
   state: agentStateSchema,
   reason: boundary.optional(boundary.nullable(boundary.string)),
 });
+/**
+ * Kinds only a consumer that lists them in `kinds` receives. Released CLIs decode entry kinds
+ * strictly and reject unknown ones, so a new kind must never reach a consumer that did not ask.
+ */
+const OPT_IN_KINDS: readonly RunpaneWorkspaceEntryKind[] = ['agent.report'];
 const panelExitEventSchema = boundary.object({
   type: boundary.string,
   source: boundary.object({
@@ -123,6 +128,18 @@ export class WorkspaceJournal implements PaneEventSink {
 
   rememberPane(metadata: WorkspacePaneMetadata): void {
     this.paneById.set(metadata.paneId, metadata);
+  }
+
+  /**
+   * Appends an entry raised by a daemon service (a worker's `runpane report`), filling in the
+   * Pane's name and repo (the id stands in for an unknown Pane's name).
+   */
+  appendPaneEntry(
+    paneId: string,
+    entry: Omit<RunpaneWorkspaceEntry, 'gen' | 'at' | keyof WorkspacePaneMetadata>,
+  ): RunpaneWorkspaceEntry {
+    const pane = this.lookupPane(paneId) ?? { paneId, paneName: paneId };
+    return this.append({ ...pane, ...entry });
   }
 
   append(entry: Omit<RunpaneWorkspaceEntry, 'gen' | 'at'>): RunpaneWorkspaceEntry {
@@ -351,6 +368,7 @@ export function workspaceFilterKey(filter: WorkspaceJournalFilter): string {
 
 export function matchesFilter(entry: RunpaneWorkspaceEntry, filter: WorkspaceJournalFilter): boolean {
   if (filter.kinds && !filter.kinds.includes(entry.kind)) return false;
+  if (!filter.kinds && OPT_IN_KINDS.includes(entry.kind)) return false;
   if (filter.paneIds && !filter.paneIds.includes(entry.paneId)) return false;
   if (filter.excludePaneIds && filter.excludePaneIds.includes(entry.paneId)) return false;
   if (filter.repoId !== undefined && entry.repoId !== filter.repoId) return false;

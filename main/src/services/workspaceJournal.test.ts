@@ -221,6 +221,24 @@ describe('WorkspaceJournal', () => {
     ]);
   });
 
+  it('delivers agent.report only to a consumer that lists it in kinds', async () => {
+    const journal = new WorkspaceJournal({
+      resolvePane: paneId => ({ paneId, paneName: 'Fix login', repoId: 7 }),
+    });
+    const anyKind = journal.waitAfter(0, {}, 50);
+    const optedIn = journal.waitAfter(0, { kinds: ['agent.ready', 'agent.report'] }, 1000);
+    const report = { state: 'ready' as const, pr: 747, head: 'fc5dce9', reportedAt: '2026-09-27T18:00:00.000Z' };
+    journal.appendPaneEntry('pane-1', { kind: 'agent.report', panelId: 'panel-1', agentType: 'claude', source: 'agent', report });
+
+    await expect(optedIn).resolves.toMatchObject({
+      timedOut: false,
+      entries: [{ kind: 'agent.report', paneId: 'pane-1', paneName: 'Fix login', repoId: 7, panelId: 'panel-1', report }],
+    });
+    await expect(anyKind).resolves.toMatchObject({ timedOut: true, entries: [] });
+    expect(journal.readAfter(0).entries).toEqual([]);
+    expect(journal.readAfter(0, { kinds: ['agent.ready'] }).entries).toEqual([]);
+  });
+
   it('times out without inventing an entry', async () => {
     vi.useFakeTimers();
     const journal = new WorkspaceJournal();

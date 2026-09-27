@@ -33,7 +33,8 @@ const OBSERVED_KINDS: readonly RunpaneWorkspaceEntryKind[] = [...SETTLE_CANCELLI
 /**
  * Per-consumer shaping of workspace entries: READY/BLOCKED settle windows that a
  * state change cancels silently, and a minimum flush interval that batches
- * non-urgent lines. BLOCKED bypasses the interval once its settle matures.
+ * non-urgent lines. BLOCKED bypasses the interval once its settle matures, and a
+ * worker's report bypasses it at once.
  */
 export class WatchCadence {
   /** Journal position this instance has read up to; the durable cursor may trail it. */
@@ -113,7 +114,7 @@ export class WatchCadence {
   }
 
   private hasUrgentHeld(): boolean {
-    return this.held.some(entry => entry.kind === 'agent.blocked');
+    return this.held.some(isUrgentEntry);
   }
 
   private hold(entry: RunpaneWorkspaceEntry): void {
@@ -123,6 +124,11 @@ export class WatchCadence {
   private emits(kind: RunpaneWorkspaceEntryKind): boolean {
     return !this.options.emitKinds || this.options.emitKinds.includes(kind);
   }
+}
+
+/** Entries that need action now, so they flush without waiting for the minimum interval. */
+function isUrgentEntry(entry: RunpaneWorkspaceEntry): boolean {
+  return entry.kind === 'agent.blocked' || entry.kind === 'agent.report';
 }
 
 function entryTimeMs(entry: RunpaneWorkspaceEntry, fallback: number): number {

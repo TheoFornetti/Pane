@@ -700,6 +700,40 @@ describe('OrchestrationSessionManager', () => {
     expect(changedEvents).toEqual([{ panelId: panePanel.id, sessionId: named.session.id, state: 'idle' }]);
   });
 
+  it('records a worker report as Session activity and shows the newest one under its Pane in the overview', async () => {
+    const fixture = createFixture();
+    const named = await fixture.manager.create({ name: 'Reports' });
+    const other = await fixture.manager.create({ name: 'Unrelated' });
+    const pane = paneFixture(fixture, 'report-pane', { name: 'Report Pane' });
+    const worker = createPanel('report-pane-claude', pane.id);
+    const reviewer = createPanel('report-pane-reviewer', pane.id);
+    await seedPanel(worker);
+    await seedPanel(reviewer);
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: pane.id });
+    const older = { state: 'blocked' as const, question: 'Keep the old API?', reportedAt: '2026-09-27T17:00:00.000Z' };
+    const newer = { state: 'ready' as const, pr: 747, head: 'fc5dce9', summary: 'Tests pass.', reportedAt: '2026-09-27T18:00:00.000Z' };
+    await panelManager.updatePanel(reviewer.id, { state: { ...reviewer.state, customState: { ...reviewer.state.customState, agentReport: older } } });
+    await panelManager.updatePanel(worker.id, { state: { ...worker.state, customState: { ...worker.state.customState, agentReport: newer } } });
+    const changed: Array<{ sessionId: string; kind: string }> = [];
+    fixture.manager.on('changed', event => changed.push(event));
+
+    await expect(fixture.manager.recordAgentReport(worker.id, newer)).resolves.toEqual([named.session.id]);
+
+    expect(changed).toEqual([{ sessionId: named.session.id, kind: 'report' }]);
+    const overview = await fixture.manager.overview({ sessionId: named.session.id });
+    expect(overview.activity[0]).toMatchObject({
+      kind: 'report',
+      source: 'agent',
+      paneId: pane.id,
+      panelId: worker.id,
+      message: 'Worker reported ready: PR #747 at fc5dce9.',
+    });
+    expect(overview.panes[0].report).toEqual({ ...newer, panelId: worker.id });
+    const untouched = await fixture.manager.overview({ sessionId: other.session.id });
+    expect(untouched.activity.some(activity => activity.kind === 'report')).toBe(false);
+    await expect(fixture.manager.recordAgentReport('missing-panel', newer)).resolves.toEqual([]);
+  });
+
   it('supports exact-name selectors and rejects lost updates with an optimistic revision guard', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Context handoff', context: 'Initial context' });

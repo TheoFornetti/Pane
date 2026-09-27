@@ -22,6 +22,19 @@ function entry(kind: RunpaneWorkspaceEntryKind, atMs: number, overrides: Partial
 const kinds = (entries: RunpaneWorkspaceEntry[]) => entries.map(item => item.kind);
 
 describe('WatchCadence', () => {
+  it('flushes a worker report at once, with the lines the interval was holding', () => {
+    const cadence = new WatchCadence({
+      settleMs: 0, blockedSettleMs: 0, minIntervalMs: 600_000, emitKinds: ['agent.ready', 'agent.report'], key: '',
+    });
+    cadence.ingest([entry('agent.ready', T0, { panelId: 'panel-2' })], T0);
+    expect(kinds(cadence.flush(T0))).toEqual(['agent.ready']);
+    cadence.ingest([entry('agent.ready', T0 + 10_000, { panelId: 'panel-3' })], T0 + 10_000);
+    expect(cadence.flush(T0 + 10_000)).toEqual([]);
+    cadence.ingest([entry('agent.report', T0 + 20_000, { report: { state: 'ready', reportedAt: 'T' } })], T0 + 20_000);
+    expect(cadence.nextDeadline(T0 + 20_000)).toBe(T0 + 20_000);
+    expect(kinds(cadence.flush(T0 + 20_000))).toEqual(['agent.ready', 'agent.report']);
+  });
+
   it('cancels a READY silently when the panel goes busy inside the settle window', () => {
     const cadence = new WatchCadence({ settleMs: 120_000, blockedSettleMs: 0, minIntervalMs: 0, emitKinds: ['agent.ready'], key: '' });
     cadence.ingest([entry('agent.ready', T0)], T0);

@@ -35,19 +35,19 @@ afterEach(async () => {
 });
 
 describe('removeWorktreeViaTrash', () => {
-  it('moves the worktree into the trash, prunes it, and keeps the branch', async () => {
+  it('moves the worktree into the trash, prunes it, deletes it, and keeps the branch', async () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();
 
     const outcome = await removeWorktreeViaTrash(worktree, repo, resolver, runner, { label: 'pane-1' });
 
-    expect(outcome).toBe('removed');
+    expect(outcome).toBe('done');
     expect(existsSync(worktree)).toBe(false);
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
     expect(git(repo, 'branch', '--list', 'feature')).toContain('feature');
     expect(readdirSync(join(repo, '.git', 'pane-trash'))).toEqual([]);
   });
 
-  it('reports queued while the files are still being deleted, then deletes them', async () => {
+  it('reports pending while the files are still being deleted, then deletes them', async () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();
     const realRm = fsPromises.rm.bind(fsPromises);
     let release: () => void = () => undefined;
@@ -59,7 +59,7 @@ describe('removeWorktreeViaTrash', () => {
 
     const outcome = await removeWorktreeViaTrash(worktree, repo, resolver, runner, { label: 'pane-2', inlineGraceMs: 10 });
 
-    expect(outcome).toBe('queued');
+    expect(outcome).toBe('pending');
     expect(existsSync(worktree)).toBe(false);
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
     const [entry] = readdirSync(join(repo, '.git', 'pane-trash'));
@@ -76,7 +76,7 @@ describe('removeWorktreeViaTrash', () => {
 
     const outcome = await removeWorktreeViaTrash(worktree, repo, resolver, runner);
 
-    expect(outcome).toBe('removed');
+    expect(outcome).toBe('done');
     expect(existsSync(worktree)).toBe(false);
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
   });

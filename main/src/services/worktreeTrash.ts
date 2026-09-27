@@ -6,11 +6,12 @@ import type { PathResolver } from '../utils/pathResolver';
 import { forceRemoveWorktree, stopFsmonitorDaemon } from './gitPerformanceConfig';
 
 /**
- * - `removed`: the worktree directory and its files are gone.
- * - `queued`: git no longer knows the worktree and its path is free, but its
- *   files are still being deleted in the background.
+ * Once the worktree is removed, whether its files are fully deleted:
+ * - `done`: the files are gone.
+ * - `pending`: git no longer knows the worktree and its path is free, but its
+ *   files are still being deleted from the trash in the background.
  */
-export type WorktreeRemovalOutcome = 'removed' | 'queued';
+export type WorktreeTrashDeletion = 'pending' | 'done';
 
 const TRASH_DIRECTORY = 'pane-trash';
 /** Small worktrees usually finish deleting within this window, so they report `removed`. */
@@ -38,11 +39,11 @@ export async function removeWorktreeViaTrash(
   pathResolver: PathResolver,
   commandRunner: CommandRunner,
   options: { label?: string; inlineGraceMs?: number } = {},
-): Promise<WorktreeRemovalOutcome> {
+): Promise<WorktreeTrashDeletion> {
   const trashRoot = await resolveTrashRoot(worktreePath, projectPath, pathResolver, commandRunner);
   if (!trashRoot) {
     await forceRemoveWorktree(worktreePath, projectPath, commandRunner);
-    return 'removed';
+    return 'done';
   }
 
   await stopFsmonitorDaemon(worktreePath, commandRunner);
@@ -54,7 +55,7 @@ export async function removeWorktreeViaTrash(
   } catch (error) {
     console.warn(`[WorktreeTrash] rename_failed worktreePath=${JSON.stringify(worktreePath)} falling back to git worktree remove:`, error);
     await forceRemoveWorktree(worktreePath, projectPath, commandRunner);
-    return 'removed';
+    return 'done';
   }
 
   // Register before anything else awaits so a concurrent sweep skips this entry.
@@ -76,7 +77,7 @@ export async function removeWorktreeViaTrash(
     }),
   ]);
   clearTimeout(graceTimer);
-  return finished ? 'removed' : 'queued';
+  return finished ? 'done' : 'pending';
 }
 
 /**

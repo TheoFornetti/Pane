@@ -1187,7 +1187,8 @@ def print_pane_archive_result(result: Dict[str, Any]) -> None:
         return
 
     forced = " (forced)" if result.get("forced") else ""
-    print(f"Archived pane {result.get('paneId')}{forced}. Worktree cleanup: {result.get('worktreeCleanup')}.")
+    trash = " (files are still being deleted in the background)" if result.get("trashDeletion") == "pending" else ""
+    print(f"Archived pane {result.get('paneId')}{forced}. Worktree cleanup: {result.get('worktreeCleanup')}{trash}.")
     merged = (result.get("safetyCheck") or {}).get("mergedViaPr")
     if merged:
         print(f"Merged via PR #{merged.get('number')} (head {merged.get('headOid')}).")
@@ -1210,7 +1211,8 @@ def print_pane_archive_bulk_result(result: Dict[str, Any]) -> None:
         else:
             merged_pr = (item.get("safetyCheck") or {}).get("mergedViaPr")
             merged = f" merged via PR #{merged_pr.get('number')}" if merged_pr else ""
-            cleanup = f" worktree {item.get('worktreeCleanup')}" if item.get("worktreeCleanup") else ""
+            trash = ", files deleting in background" if item.get("trashDeletion") == "pending" else ""
+            cleanup = f" worktree {item.get('worktreeCleanup')}{trash}" if item.get("worktreeCleanup") else ""
             print(f"  {outcome} {label}{merged}{cleanup}")
 
 

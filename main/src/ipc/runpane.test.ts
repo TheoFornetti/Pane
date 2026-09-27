@@ -3551,7 +3551,7 @@ describe('runpane IPC handlers', () => {
         paneId: session.id,
         archived: true,
         forced: false,
-        worktreeCleanup: 'removed',
+        worktreeCleanup: 'completed',
         worktreePath: repoPath,
         safetyCheck: {
           performed: true,
@@ -3659,7 +3659,7 @@ describe('runpane IPC handlers', () => {
       expect(result).toMatchObject({
         ok: true,
         forced: true,
-        worktreeCleanup: 'removed',
+        worktreeCleanup: 'completed',
         safetyCheck: {
           performed: true,
           hasUncommittedChanges: true,
@@ -3855,7 +3855,7 @@ describe('runpane IPC handlers', () => {
       expect(sessionsDelete).toHaveBeenCalledWith(session.id);
       expect(result).toMatchObject({
         ok: true,
-        worktreeCleanup: 'removed',
+        worktreeCleanup: 'completed',
         safetyCheck: {
           performed: true,
           hasUpstream: true,
@@ -3980,11 +3980,11 @@ describe('runpane IPC handlers', () => {
 
       expect(result).toMatchObject({
         ok: true,
-        worktreeCleanup: 'removed',
+        worktreeCleanup: 'completed',
       });
     });
 
-    it('reports queued cleanup as a successful archive while a large worktree is still deleting', async () => {
+    it('reports completed with pending trash deletion as a successful archive while a large worktree is still deleting', async () => {
       const repoPath = createTempGitRepo('queued-cleanup-repo');
       execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
       const queuedSession: Session = { ...session, worktreePath: repoPath };
@@ -4000,13 +4000,72 @@ describe('runpane IPC handlers', () => {
       } as never);
       const registry = createRegistry(services);
       registerSessionsDeleteStub(registry, services, {
-        onArchive: (sessionId) => archiveProgressManager.setWorktreeCleanup(sessionId, 'queued'),
+        onArchive: (sessionId) => archiveProgressManager.setTrashDeletion(sessionId, 'pending'),
       });
 
       const result = await registry.invoke('runpane:panes:archive', [{ paneId: session.id }]);
 
-      expect(result).toMatchObject({ ok: true, archived: true, worktreeCleanup: 'queued' });
+      expect(result).toMatchObject({ ok: true, archived: true, worktreeCleanup: 'completed', trashDeletion: 'pending' });
     });
+
+    it('only emits worktreeCleanup values that released runpane CLIs can decode', async () => {
+      // The enum shipped in runpane <= 2.4.133; its decoders reject anything else.
+      const releasedWorktreeCleanup = ['completed', 'failed', 'timeout', 'not-applicable'];
+      const successSchema = RUNPANE_CONTRACT.jsonSchemas.paneArchiveResult.oneOf[0];
+      expect(successSchema.properties.worktreeCleanup.enum).toEqual(releasedWorktreeCleanup);
+
+      const realSetTimeout = globalThis.setTimeout;
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const emitted: unknown[] = [];
+        const scenarios: Array<{
+          external?: boolean;
+          onArchive: (manager: ArchiveProgressManager, sessionId: string) => Promise<void> | void;
+        }> = [
+          { onArchive: () => undefined },
+          { onArchive: (manager, sessionId) => manager.setTrashDeletion(sessionId, 'pending') },
+          { onArchive: () => { throw new Error('removal failed'); } },
+          // Removal still running when the 30s wait ends.
+          { onArchive: () => new Promise<void>(() => undefined) },
+          { external: true, onArchive: () => undefined },
+        ];
+        for (const scenario of scenarios) {
+          const repoPath = createTempGitRepo('released-enum-repo');
+          execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+          const pane: Session = { ...session, worktreePath: repoPath, worktreeOwnership: scenario.external ? 'external' : 'pane' };
+          const archiveProgressManager = new ArchiveProgressManager();
+          // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+          const services = createServices({
+            // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+            sessionManager: {
+              ...createServices().sessionManager,
+              getSession: vi.fn(() => pane),
+            } as never,
+            archiveProgressManager,
+          } as never);
+          const registry = createRegistry(services);
+          registerSessionsDeleteStub(registry, services, {
+            onArchive: (sessionId) => scenario.onArchive(archiveProgressManager, sessionId),
+          });
+
+          let settled = false;
+          const pending = Promise.resolve(registry.invoke('runpane:panes:archive', [{ paneId: session.id }]))
+            .finally(() => { settled = true; });
+          // git runs on real I/O; step fake time until the archive's 30s cleanup wait resolves.
+          for (let step = 0; step < 400 && !settled; step++) {
+            await new Promise(resolve => realSetTimeout(resolve, 10));
+            await vi.advanceTimersByTimeAsync(1_000);
+          }
+          const result = JSON.parse(JSON.stringify(await pending));
+          emitted.push(result.worktreeCleanup);
+          expect(result.ok, `ok for ${result.worktreeCleanup}`).toBe(result.worktreeCleanup !== 'failed');
+        }
+        expect(emitted).toEqual(['completed', 'completed', 'failed', 'timeout', 'not-applicable']);
+        for (const value of emitted) expect(releasedWorktreeCleanup).toContain(value);
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 60_000);
 
     describe('adopted worktrees with --remove-worktree', () => {
       function createRepoWithLinkedWorktree(name: string) {
@@ -4048,7 +4107,7 @@ describe('runpane IPC handlers', () => {
           // Mirror sessions:delete, which removes the worktree and records the outcome.
           onArchive: async (sessionId) => {
             const outcome = await removeWorktreeViaTrash(worktreePath, repoPath, new PathResolver({ path: repoPath }), commandRunner);
-            services.archiveProgressManager?.setWorktreeCleanup(sessionId, outcome);
+            services.archiveProgressManager?.setTrashDeletion(sessionId, outcome);
           },
         });
 
@@ -4059,7 +4118,7 @@ describe('runpane IPC handlers', () => {
         expect(result).toMatchObject({
           ok: true,
           archived: true,
-          worktreeCleanup: 'removed',
+          worktreeCleanup: 'completed',
           worktreePath,
           safetyCheck: {
             performed: true,
@@ -4317,7 +4376,7 @@ describe('runpane IPC handlers', () => {
           archived: 1,
           skipped: 1,
           items: [
-            { paneId: 'pane-clean', outcome: 'archived', worktreeCleanup: 'removed' },
+            { paneId: 'pane-clean', outcome: 'archived', worktreeCleanup: 'completed' },
             { paneId: 'pane-dirty', outcome: 'skipped', skipped: { code: 'uncommitted-changes' } },
           ],
         });

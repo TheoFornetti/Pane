@@ -507,9 +507,9 @@ export function registerSessionHandlers(
                 const removal = isExternalWorktree && dbSession.worktree_path
                   ? await worktreeManager.removeWorktreeAtPath(project.path, dbSession.worktree_path, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner, auditContext)
                   : await worktreeManager.removeWorktree(project.path, dbSession.worktree_name, project.worktree_folder || undefined, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner, auditContext);
-                archiveProgressManager?.setWorktreeCleanup(sessionId, removal);
+                archiveProgressManager?.setTrashDeletion(sessionId, removal);
 
-                cleanupMessage += removal === 'queued'
+                cleanupMessage += removal === 'pending'
                   ? `\x1b[32m✓ Worktree removed (files are being deleted in the background)\x1b[0m\r\n`
                   : `\x1b[32m✓ Worktree removed successfully\x1b[0m\r\n`;
               } catch (worktreeError) {

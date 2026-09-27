@@ -3521,7 +3521,7 @@
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default; pass `--no-pinned` to opt out. Panes created interactively in the Pane UI are unaffected.",
       "For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is reported only after argument attachment or composer-clear plus activity evidence. Routing input does not by itself verify submission.",
-      "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup`: `removed`, or `queued` while a large worktree finishes deleting in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane.",
+      "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup: completed` once the worktree is gone from its path and from git; `trashDeletion: pending` means its files are still being deleted in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane.",
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
       "`runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.",
       "`runpane panels list` lists tool panels inside one Pane session.",
@@ -6038,12 +6038,19 @@
             },
             "worktreeCleanup": {
               "enum": [
-                "removed",
-                "queued",
+                "completed",
                 "failed",
+                "timeout",
                 "not-applicable"
               ],
-              "description": "`removed`: the worktree is gone. `queued`: git no longer tracks it and its files are being deleted in the background. `failed`: removal failed and the worktree may remain. `not-applicable`: nothing was removed (main-repo Pane, or an adopted worktree without --remove-worktree). Older Pane versions reported `completed` and `timeout` instead of `removed` and `queued`."
+              "description": "`completed`: the worktree is gone from its path and from git (see trashDeletion). `failed`: removal failed and the worktree may remain; ok is false. `timeout`: the archive script or git removal is still running in the background; ok stays true. `not-applicable`: nothing was removed (main-repo Pane, or an adopted worktree without --remove-worktree). Released CLIs decode exactly these values."
+            },
+            "trashDeletion": {
+              "enum": [
+                "pending",
+                "done"
+              ],
+              "description": "Present with worktreeCleanup `completed`. `pending`: the removed worktree was moved into the repository's .git/pane-trash and its files are still being deleted in the background. `done`: the files are gone."
             },
             "worktreePath": {
               "type": "string"
@@ -7706,6 +7713,9 @@
               "worktreeCleanup": {
                 "$ref": "#/jsonSchemas/paneArchiveResult/oneOf/0/properties/worktreeCleanup"
               },
+              "trashDeletion": {
+                "$ref": "#/jsonSchemas/paneArchiveResult/oneOf/0/properties/trashDeletion"
+              },
               "worktreePath": {
                 "type": "string"
               }
@@ -8752,7 +8762,7 @@
           "If the result has ok:false with a blocked field, the pane was NOT archived; inspect blocked.code and rerun with --force if discarding the flagged work is intentional.",
           "Inspect safetyCheck.unpushedCommitDetails for exact commit IDs and subjects; upstreamRefreshed confirms the tracking ref was refreshed first.",
           "A --dry-run result sets dryRun:true and wouldArchive without deleting the Pane or its worktree.",
-          "A successful archive reports worktreeCleanup `removed`, or `queued` when a large worktree (for example one with node_modules) is detached from git and still deleting in the background. Both are ok:true.",
+          "A successful archive reports worktreeCleanup `completed` once the worktree is gone from its path and from git. trashDeletion `pending` means a large worktree (for example one with node_modules) is still being deleted from .git/pane-trash in the background; that is still ok:true. `timeout` (also ok:true) means removal is still running; only `failed` sets ok:false.",
           "safetyCheck.mergedViaPr names the merged PR whose head is HEAD; it needs an authenticated `gh`. Without it, a squash-merged branch whose remote branch was deleted reports unpushed-commits.",
           "An adopted Pane (panes adopt) keeps its worktree unless --remove-worktree is passed. `panes restore` does not recreate a removed adopted worktree; the local branch is kept, so `git worktree add <path> <branch>` brings it back.",
           "With --session --merged, each item has outcome archived, would-archive (dry run), skipped (with skipped.code and skipped.message), or failed.",

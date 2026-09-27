@@ -429,8 +429,9 @@ interface PaneArchiveBlockedResult {
   nextCommand: string;
 }
 
-/** Older Pane daemons report `completed` and `timeout`; current ones report `removed` and `queued`. */
-type WorktreeCleanupState = 'removed' | 'queued' | 'failed' | 'not-applicable' | 'completed' | 'timeout';
+/** Released CLIs decode exactly these values; new detail goes in new optional fields such as `trashDeletion`. */
+type WorktreeCleanupState = 'completed' | 'failed' | 'timeout' | 'not-applicable';
+type WorktreeTrashDeletion = 'pending' | 'done';
 
 interface PaneArchiveSuccessResult {
   ok: boolean;
@@ -439,6 +440,7 @@ interface PaneArchiveSuccessResult {
   archived: true;
   forced: boolean;
   worktreeCleanup: WorktreeCleanupState;
+  trashDeletion?: WorktreeTrashDeletion;
   worktreePath?: string;
   safetyCheck: PaneArchiveSafetyCheck;
 }
@@ -451,6 +453,7 @@ interface PaneArchiveBulkItem {
   error?: string;
   safetyCheck?: PaneArchiveSafetyCheck;
   worktreeCleanup?: WorktreeCleanupState;
+  trashDeletion?: WorktreeTrashDeletion;
   worktreePath?: string;
 }
 
@@ -846,7 +849,8 @@ const archiveSafetySchema: BoundarySchema<PaneArchiveSafetyCheck> = boundary.obj
   })),
 });
 const archiveBlockCodeSchema = boundary.enumeration('uncommitted-changes', 'unpushed-commits', 'uncommitted-and-unpushed', 'status-unknown');
-const worktreeCleanupSchema = boundary.enumeration('removed', 'queued', 'failed', 'not-applicable', 'completed', 'timeout');
+const worktreeCleanupSchema = boundary.enumeration('completed', 'failed', 'timeout', 'not-applicable');
+const trashDeletionSchema = boundary.enumeration('pending', 'done');
 const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   id: boundary.string,
   panelId: boundary.string,
@@ -1128,6 +1132,7 @@ const paneArchiveResultSchema: BoundarySchema<PaneArchiveResult> = boundary.unio
     archived: boundary.literal(true),
     forced: boundary.boolean,
     worktreeCleanup: worktreeCleanupSchema,
+    trashDeletion: boundary.optional(trashDeletionSchema),
     worktreePath: boundary.optional(boundary.string),
     safetyCheck: archiveSafetySchema,
   }),
@@ -1160,6 +1165,7 @@ const paneArchiveBulkResultSchema: BoundarySchema<PaneArchiveBulkResult> = bound
     error: boundary.optional(boundary.string),
     safetyCheck: boundary.optional(archiveSafetySchema),
     worktreeCleanup: boundary.optional(worktreeCleanupSchema),
+    trashDeletion: boundary.optional(trashDeletionSchema),
     worktreePath: boundary.optional(boundary.string),
   })),
 });
@@ -2731,7 +2737,8 @@ function printPaneArchiveResult(result: PaneArchiveResult): void {
     return;
   }
 
-  console.log(`Archived pane ${result.paneId}${result.forced ? ' (forced)' : ''}. Worktree cleanup: ${result.worktreeCleanup}.`);
+  const trash = result.trashDeletion === 'pending' ? ' (files are still being deleted in the background)' : '';
+  console.log(`Archived pane ${result.paneId}${result.forced ? ' (forced)' : ''}. Worktree cleanup: ${result.worktreeCleanup}${trash}.`);
   if (result.safetyCheck.mergedViaPr) {
     console.log(`Merged via PR #${result.safetyCheck.mergedViaPr.number} (head ${result.safetyCheck.mergedViaPr.headOid}).`);
   }
@@ -2748,7 +2755,8 @@ function printPaneArchiveBulkResult(result: PaneArchiveBulkResult): void {
       console.error(`  failed ${label}: ${item.error ?? 'unknown error'}`);
     } else {
       const merged = item.safetyCheck?.mergedViaPr ? ` merged via PR #${item.safetyCheck.mergedViaPr.number}` : '';
-      const cleanup = item.worktreeCleanup ? ` worktree ${item.worktreeCleanup}` : '';
+      const trash = item.trashDeletion === 'pending' ? ', files deleting in background' : '';
+      const cleanup = item.worktreeCleanup ? ` worktree ${item.worktreeCleanup}${trash}` : '';
       console.log(`  ${item.outcome} ${label}${merged}${cleanup}`);
     }
   }

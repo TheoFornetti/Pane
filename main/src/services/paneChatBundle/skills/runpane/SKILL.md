@@ -245,3 +245,14 @@ Report one dashboard line set per workstream:
 
 A workstream is done when it is ready to merge. Merging needs its own exact
 authorization.
+
+## Close out
+
+Archiving removes a Pane's worktree, so it needs the user's cleanup approval.
+Once PRs merge, preview with
+`runpane panes archive --session <id|name> --merged --dry-run --json`, then
+rerun with `--yes`. It archives only Panes that are clean and pushed, or whose
+branch merged through a PR whose head is `HEAD` (`safetyCheck.mergedViaPr`),
+and gives every other Pane a `skipped.code`. Adopted worktrees are kept unless
+you add `--remove-worktree`. Local branches are always kept. Never add
+`--force` to discard work without the user's approval.

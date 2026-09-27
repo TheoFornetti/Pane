@@ -9,7 +9,7 @@ import { commitGitMessage } from '../utils/gitCommit';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { worktreePoolManager } from './worktreePoolManager';
 import { ensureFastGitConfig, forceRemoveWorktree } from './gitPerformanceConfig';
-import { removeWorktreeViaTrash, sweepWorktreeTrash, type WorktreeRemovalOutcome } from './worktreeTrash';
+import { removeWorktreeViaTrash, sweepWorktreeTrash, type WorktreeTrashDeletion } from './worktreeTrash';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 type WorktreeAuditSource = 'session-delete' | 'project-delete' | 'create-cleanup';
@@ -426,18 +426,18 @@ export class WorktreeManager {
     return { worktreePath: projectPath, baseCommit, baseBranch: detectedBranch };
   }
 
-  async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<WorktreeRemovalOutcome> {
+  async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<WorktreeTrashDeletion> {
     const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
     return this.removeWorktreeAtPath(projectPath, pathResolver.join(baseDir, name), sessionCreatedAt, pathResolver, commandRunner, auditContext);
   }
 
   /**
    * Removes the linked worktree at `worktreePath`, keeping its branch. Large
-   * worktrees finish deleting in the background (`queued`). Adopted worktrees
+   * worktrees finish deleting in the background (`pending`). Adopted worktrees
    * can live outside the project's worktree folder, so callers pass the
    * stored path rather than a name.
    */
-  async removeWorktreeAtPath(projectPath: string, worktreePath: string, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<WorktreeRemovalOutcome> {
+  async removeWorktreeAtPath(projectPath: string, worktreePath: string, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<WorktreeTrashDeletion> {
     return await withLock(`worktree-remove-${projectPath}-${worktreePath}`, async () => {
       const auditDetails = {
         source: auditContext?.source,
@@ -475,7 +475,7 @@ export class WorktreeManager {
             ...auditDetails,
             reason: errorMessage,
           });
-          return 'removed';
+          return 'done';
         }
 
         logWorktreeAudit('remove_failed', {

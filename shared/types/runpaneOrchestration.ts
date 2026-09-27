@@ -466,12 +466,16 @@ export interface RunpanePaneArchiveBulkRequest {
 }
 
 /**
- * - `removed`: the worktree directory is gone.
- * - `queued`: the worktree is detached from git and its files are being deleted in the background.
+ * Released runpane CLIs decode exactly these values, so never add one.
+ * - `completed`: the worktree is gone from its path and from git.
  * - `failed`: removal failed; the worktree may still be on disk.
+ * - `timeout`: removal (or the archive script before it) is still running in the background.
  * - `not-applicable`: nothing was removed (a main-repo Pane, or an adopted worktree without `removeWorktree`).
  */
-export type RunpaneWorktreeCleanupState = 'removed' | 'queued' | 'failed' | 'not-applicable';
+export type RunpaneWorktreeCleanupState = 'completed' | 'failed' | 'timeout' | 'not-applicable';
+
+/** After `completed`: whether the removed worktree's files are deleted, or still being deleted from the trash. */
+export type RunpaneWorktreeTrashDeletion = 'pending' | 'done';
 
 export type RunpanePaneArchiveBlockCode =
   | 'uncommitted-changes'
@@ -525,6 +529,7 @@ export interface RunpanePaneArchiveSuccessResult {
   archived: true;
   forced: boolean;
   worktreeCleanup: RunpaneWorktreeCleanupState;
+  trashDeletion?: RunpaneWorktreeTrashDeletion;
   worktreePath?: string;
   safetyCheck: RunpanePaneArchiveSafetyCheck;
 }
@@ -558,6 +563,7 @@ export interface RunpanePaneArchiveBulkItem {
   error?: string;
   safetyCheck?: RunpanePaneArchiveSafetyCheck;
   worktreeCleanup?: RunpaneWorktreeCleanupState;
+  trashDeletion?: RunpaneWorktreeTrashDeletion;
   worktreePath?: string;
 }
 

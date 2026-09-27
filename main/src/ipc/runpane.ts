@@ -97,6 +97,7 @@ import type {
   RunpaneResolvedTool,
   RunpaneToolSpec,
   RunpaneWorktreeCleanupState,
+  RunpaneWorktreeTrashDeletion,
   RunpaneWorkspaceEntry,
   RunpaneWorkspaceEntryKind,
   RunpaneWorkspaceStateResult,
@@ -846,13 +847,13 @@ export function registerRunpaneHandlers(
         }
       }
 
-      const worktreeCleanup = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, worktreeCleanupApplicable);
+      const cleanup = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, worktreeCleanupApplicable);
       const success: RunpanePaneArchiveSuccessResult = {
-        ok: worktreeCleanup !== 'failed',
+        ok: isArchiveCleanupOk(cleanup.worktreeCleanup),
         paneId: normalized.paneId,
         archived: true,
         forced: Boolean(normalized.force),
-        worktreeCleanup,
+        ...cleanup,
         worktreePath: pane.worktreePath,
         safetyCheck: toPublicSafetyCheck(safetyCheck),
       };
@@ -3148,15 +3149,16 @@ async function assertRemovableWorktree(services: AppServices, pane: Session, rem
 
 /**
  * Archives the Pane through `sessions:delete`, exactly like the UI, and waits
- * for its worktree to be removed. Large worktrees report `queued`: git has
- * forgotten them and their files are being deleted in the background.
+ * for its worktree to be removed. A large worktree reports `completed` with
+ * `trashDeletion: 'pending'`: git has forgotten it and its path is free, and
+ * its files are being deleted from the trash in the background.
  */
 async function archivePaneAndRemoveWorktree(
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
   pane: Session,
   removesWorktree: boolean,
-): Promise<RunpaneWorktreeCleanupState> {
+): Promise<WorktreeCleanupOutcome> {
   const cleanupWait = removesWorktree && services.archiveProgressManager
     ? waitForArchiveProgressCompletion(services.archiveProgressManager, pane.id, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS)
     : null;
@@ -3175,9 +3177,22 @@ async function archivePaneAndRemoveWorktree(
     throw new Error(deleteResult.error ?? `Failed to archive pane ${pane.id}`);
   }
 
-  if (!removesWorktree) return 'not-applicable';
+  if (!removesWorktree) return { worktreeCleanup: 'not-applicable' };
   if (cleanupWait) return cleanupWait;
-  return waitForWorktreeRemovalByPolling(pane.worktreePath, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS);
+  return { worktreeCleanup: await waitForWorktreeRemovalByPolling(pane.worktreePath, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS) };
+}
+
+interface WorktreeCleanupOutcome {
+  worktreeCleanup: RunpaneWorktreeCleanupState;
+  trashDeletion?: RunpaneWorktreeTrashDeletion;
+}
+
+/**
+ * The archive still succeeded when removal is only slow: the Pane is archived
+ * and removal keeps running in the background. Only `failed` is an error.
+ */
+function isArchiveCleanupOk(worktreeCleanup: RunpaneWorktreeCleanupState): boolean {
+  return worktreeCleanup !== 'failed';
 }
 
 /**
@@ -3233,13 +3248,14 @@ async function archiveSessionPanes(
         items.push({ ...base, outcome: 'would-archive', safetyCheck: publicSafetyCheck });
         continue;
       }
-      const worktreeCleanup = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, removesWorktree);
+      const cleanup = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, removesWorktree);
+      const cleanupOk = isArchiveCleanupOk(cleanup.worktreeCleanup);
       items.push({
         ...base,
-        outcome: worktreeCleanup === 'failed' ? 'failed' : 'archived',
-        error: worktreeCleanup === 'failed' ? 'Pane was archived but its worktree could not be removed.' : undefined,
+        outcome: cleanupOk ? 'archived' : 'failed',
+        error: cleanupOk ? undefined : 'Pane was archived but its worktree could not be removed.',
         safetyCheck: publicSafetyCheck,
-        worktreeCleanup,
+        ...cleanup,
       });
     } catch (error) {
       items.push({ ...base, outcome: 'failed', error: error instanceof Error ? error.message : String(error) });
@@ -3329,30 +3345,30 @@ function waitForArchiveProgressCompletion(
   archiveProgressManager: ArchiveProgressManager,
   paneId: string,
   timeoutMs: number,
-): Promise<RunpaneWorktreeCleanupState> {
+): Promise<WorktreeCleanupOutcome> {
   return new Promise((resolve) => {
     let settled = false;
-    const finish = (state: RunpaneWorktreeCleanupState) => {
+    const finish = (outcome: WorktreeCleanupOutcome) => {
       if (settled) return;
       settled = true;
       archiveProgressManager.off('archive-progress', onProgress);
       clearTimeout(timer);
-      resolve(state);
+      resolve(outcome);
     };
 
     const onProgress = (payload: { tasks: SerializedArchiveTask[] }) => {
       const task = payload.tasks.find(candidate => candidate.sessionId === paneId);
       if (task?.status === 'completed') {
-        finish(task.worktreeCleanup ?? 'removed');
+        finish({ worktreeCleanup: 'completed', trashDeletion: task.trashDeletion });
       } else if (task?.status === 'failed') {
-        finish('failed');
+        finish({ worktreeCleanup: 'failed' });
       }
     };
 
     archiveProgressManager.on('archive-progress', onProgress);
-    // A slow archive script or removal keeps running in the background queue;
-    // the Pane is already archived, so report the removal as queued, not failed.
-    const timer = setTimeout(() => finish('queued'), timeoutMs);
+    // A slow archive script or git removal keeps running in the background
+    // queue; the Pane is already archived, so this is `timeout` with ok:true.
+    const timer = setTimeout(() => finish({ worktreeCleanup: 'timeout' }), timeoutMs);
   });
 }
 
@@ -3364,11 +3380,11 @@ async function waitForWorktreeRemovalByPolling(
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     if (!fs.existsSync(worktreePath)) {
-      return 'removed';
+      return 'completed';
     }
     await sleep(Math.min(intervalMs, Math.max(timeoutMs - (Date.now() - startedAt), 0)));
   }
-  return fs.existsSync(worktreePath) ? 'queued' : 'removed';
+  return fs.existsSync(worktreePath) ? 'timeout' : 'completed';
 }
 
 function parsePaneArchiveRequest(value: PaneCommandValue): RunpanePaneArchiveRequest {

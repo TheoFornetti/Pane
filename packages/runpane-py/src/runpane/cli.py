@@ -119,6 +119,7 @@ class ParsedArgs:
     repo_path: Optional[str] = None
     name: Optional[str] = None
     worktree_name: Optional[str] = None
+    branch: Optional[str] = None
     base_branch: Optional[str] = None
     agent: Optional[str] = None
     tool_command: Optional[str] = None
@@ -685,7 +686,10 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--worktree-name":
         parsed.worktree_name = value
         return
-    if flag == "--base-branch":
+    if flag == "--branch":
+        parsed.branch = value
+        return
+    if flag in {"--base-branch", "--base"}:
         parsed.base_branch = value
         return
     if flag == "--agent":
@@ -708,7 +712,7 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--input-file":
         parsed.panel_input_file = value
         return
-    if flag == "--initial-input-file":
+    if flag in {"--initial-input-file", "--prompt-file"}:
         parsed.initial_input_file = value
         return
     if flag == "--from-json":

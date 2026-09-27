@@ -755,6 +755,7 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
         "panes": [{
             "name": parsed.name,
             **optional_value("worktreeName", parsed.worktree_name),
+            **optional_value("branch", parsed.branch),
             **optional_value("baseBranch", parsed.base_branch),
             "pinned": pinned,
             "tool": build_tool_spec(parsed),
@@ -812,7 +813,7 @@ def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any
 
 def resolve_initial_input(parsed: Any) -> Optional[str]:
     if parsed.initial_input and parsed.initial_input_file:
-        raise ValueError("Use either --initial-input/--prompt or --initial-input-file, not both.")
+        raise ValueError("Use either --initial-input/--prompt or --initial-input-file/--prompt-file, not both.")
     if parsed.initial_input_file:
         return read_input_source(parsed.initial_input_file)
     return parsed.initial_input

@@ -185,6 +185,10 @@ For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is repor
 
 `runpane panes create --prompt` is an alias for `--initial-input`; request JSON and daemon payloads should use the canonical `initialInput` field.
 
+`runpane panes create --branch <name>` creates the Pane's worktree on exactly that new branch, slashes included (for example `agents/w5a`). The name is checked with `git check-ref-format --branch`, creation fails if the branch already exists, and Pane never renames it to make it unique. `--worktree-name` still names the directory and defaults to `--name`. `--base` is an alias for `--base-branch`, and `--prompt-file` for `--initial-input-file`. `panes create --base <ref> --branch <name> --prompt-file <file>` replaces `git worktree add` plus `panes adopt`.
+
+`runpane panes adopt --launch` accepts `--prompt`, `--prompt-file`, `--wait-ready`, and `--ready-timeout-ms`, and reports `readiness`, `initialInput`, and `nextCommand` like `panes create`. A prompt without `--launch` is an error rather than being dropped.
+
 If composer submission cannot be verified without risking a duplicate, the create item is unsuccessful with `initialInput.staged`, `initialInput.attempts`, `initialInput.blocked.kind: submission_unverified`, and an actionable `nextCommand`. The CLI-facing `--prompt` alias maps to this canonical `initialInput` result.
 
 When running from WSL while Pane is installed on Windows, the Linux wrapper may look for a missing `/tmp/pane-daemon.../daemon.sock` or resolve to a Windows shim such as Volta. In that case invoke the Windows wrapper through PowerShell from a Windows cwd, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.
@@ -303,14 +307,15 @@ These flags are consumed by local daemon-control commands:
 --path <path>
 --name <name>
 --worktree-name <name>
---base-branch <branch>
+--branch <name>
+--base-branch <ref> (aliases: --base)
 --folder <name>
 --resume <agent-session-id>
 --agent <codex|claude|cursor>
 --tool-command <command>
 --title <title>
 --initial-input <text> (aliases: --prompt)
---initial-input-file <path|->
+--initial-input-file <path|-> (aliases: --prompt-file)
 --from-json <path|->
 --timeout-ms <milliseconds>
 --ready-timeout-ms <milliseconds>

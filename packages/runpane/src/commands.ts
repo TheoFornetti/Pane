@@ -34,6 +34,7 @@ export interface ParsedArgs {
   resume?: string;
   name?: string;
   worktreeName?: string;
+  branch?: string;
   baseBranch?: string;
   agent?: RunpaneAgent;
   toolCommand?: string;
@@ -432,7 +433,11 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.worktreeName = value;
     return;
   }
-  if (flag === '--base-branch') {
+  if (flag === '--branch') {
+    parsed.branch = value;
+    return;
+  }
+  if (flag === '--base-branch' || flag === '--base') {
     parsed.baseBranch = value;
     return;
   }
@@ -471,7 +476,7 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.panelInputFile = value;
     return;
   }
-  if (flag === '--initial-input-file') {
+  if (flag === '--initial-input-file' || flag === '--prompt-file') {
     parsed.initialInputFile = value;
     return;
   }

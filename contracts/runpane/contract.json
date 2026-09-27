@@ -296,7 +296,7 @@
       "name": "panes create",
       "summary": "Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.",
       "usage": [
-        "runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [options]",
+        "runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--source user|agent] [--focus|--no-focus] [options]",
         "runpane panes create --from-json <path|-> [--yes] [--json]"
       ],
       "mutates": true,
@@ -313,7 +313,7 @@
       "name": "panes adopt",
       "summary": "Adopt an existing externally managed git worktree as a Pane without changing the worktree.",
       "usage": [
-        "runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [--resume <id>] [--folder <name>] [--launch] [--no-pinned] [--dry-run] [--yes] [--json]"
+        "runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [--resume <id>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--dry-run] [--yes] [--json]"
       ],
       "mutates": true,
       "additive": true,
@@ -1226,9 +1226,17 @@
         "description": "Worktree name to request. Defaults to --name."
       },
       {
+        "name": "--branch",
+        "value": "<name>",
+        "description": "Exact new branch name for the created worktree, slashes included. Must not exist yet; defaults to the worktree name."
+      },
+      {
         "name": "--base-branch",
-        "value": "<branch>",
-        "description": "Base branch for the created worktree."
+        "value": "<ref>",
+        "aliases": [
+          "--base"
+        ],
+        "description": "Ref the created worktree branches from. --base is an alias."
       },
       {
         "name": "--folder",
@@ -1266,7 +1274,10 @@
       {
         "name": "--initial-input-file",
         "value": "<path|->",
-        "description": "Read initial input from a file or stdin."
+        "aliases": [
+          "--prompt-file"
+        ],
+        "description": "Read initial input from a file or stdin. --prompt-file is an alias."
       },
       {
         "name": "--from-json",
@@ -1281,7 +1292,7 @@
       {
         "name": "--ready-timeout-ms",
         "value": "<milliseconds>",
-        "description": "Readiness wait timeout for panes create --wait-ready."
+        "description": "Readiness wait timeout for panes create/adopt --wait-ready."
       },
       {
         "name": "--concurrency",
@@ -1809,7 +1820,7 @@
       ],
       "panes create": [
         "Usage:",
-        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [options]",
+        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--base <ref>] [--branch <name>] [options]",
         "  runpane panes create --from-json <path|-> [--yes] [--json]",
         "",
         "Creates user-visible Panes (Pane sessions) for feature/PR work in a saved repository and opens a terminal-backed tool tab. Pane creates and owns the worktree/branch for each new Pane.",
@@ -1817,14 +1828,16 @@
         "Options:",
         "  --repo <selector>              active, id, exact path, or saved repository name",
         "  --name <name>                  Pane/session name",
-        "  --worktree-name <name>         Worktree name; defaults to --name",
-        "  --base-branch <branch>         Base branch for the worktree",
+        "  --worktree-name <name>         Worktree directory name; defaults to --name",
+        "  --branch <name>                Exact new branch name (slashes kept); must not exist; defaults to the worktree name",
+        "  --base-branch <ref>            Ref to branch from; --base is an alias",
         "  --agent <codex|claude|cursor>         Built-in terminal template",
         "  --tool-command <command>       Custom terminal command",
         "  --title <title>                Terminal tab title",
         "  --initial-input <text>         Text sent after the command is ready",
         "  --prompt <text>                Alias for --initial-input",
         "  --initial-input-file <path|->  Read initial input from a file or stdin",
+        "  --prompt-file <path|->         Alias for --initial-input-file",
         "  --from-json <path|->           Read a full request payload",
         "  --timeout-ms <milliseconds>    Pane creation timeout",
         "  --wait-ready                   Wait for terminal readiness before returning",
@@ -1844,9 +1857,9 @@
         "Usage:",
         "  runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [options]",
         "",
-        "Adopts an existing externally managed git worktree without creating, syncing, or deleting it.",
+        "Adopts an existing externally managed git worktree without creating, syncing, or deleting it. To start new work on a named branch, use `panes create --base <ref> --branch <name>` instead of `git worktree add` plus adopt.",
         "",
-        "Options: --resume <id> stages the agent resume command; --launch runs it immediately; --folder <name> groups the pane; --no-pinned opts out of pinning; --dry-run previews."
+        "Options: --resume <id> stages the agent resume command; --launch runs it immediately; --prompt <text> or --prompt-file <path|-> (aliases of --initial-input and --initial-input-file) sends a prompt once the launched agent is ready and needs --launch; --wait-ready and --ready-timeout-ms <ms> wait for the launched agent like panes create; --folder <name> groups the pane; --no-pinned opts out of pinning; --dry-run previews."
       ],
       "panes archive": [
         "Usage:",
@@ -2754,7 +2767,7 @@
       ],
       "panes create": [
         "Usage:",
-        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [options]",
+        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--base <ref>] [--branch <name>] [options]",
         "  runpane panes create --from-json <path|-> [--yes] [--json]",
         "",
         "Creates user-visible Panes (Pane sessions) for feature/PR work in a saved repository and opens a terminal-backed tool tab. Pane creates and owns the worktree/branch for each new Pane.",
@@ -2762,14 +2775,16 @@
         "Options:",
         "  --repo <selector>              active, id, exact path, or saved repository name",
         "  --name <name>                  Pane/session name",
-        "  --worktree-name <name>         Worktree name; defaults to --name",
-        "  --base-branch <branch>         Base branch for the worktree",
+        "  --worktree-name <name>         Worktree directory name; defaults to --name",
+        "  --branch <name>                Exact new branch name (slashes kept); must not exist; defaults to the worktree name",
+        "  --base-branch <ref>            Ref to branch from; --base is an alias",
         "  --agent <codex|claude|cursor>         Built-in terminal template",
         "  --tool-command <command>       Custom terminal command",
         "  --title <title>                Terminal tab title",
         "  --initial-input <text>         Text sent after the command is ready",
         "  --prompt <text>                Alias for --initial-input",
         "  --initial-input-file <path|->  Read initial input from a file or stdin",
+        "  --prompt-file <path|->         Alias for --initial-input-file",
         "  --from-json <path|->           Read a full request payload",
         "  --timeout-ms <milliseconds>    Pane creation timeout",
         "  --wait-ready                   Wait for terminal readiness before returning",
@@ -2789,9 +2804,9 @@
         "Usage:",
         "  runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [options]",
         "",
-        "Adopts an existing externally managed git worktree without creating, syncing, or deleting it.",
+        "Adopts an existing externally managed git worktree without creating, syncing, or deleting it. To start new work on a named branch, use `panes create --base <ref> --branch <name>` instead of `git worktree add` plus adopt.",
         "",
-        "Options: --resume <id> stages the agent resume command; --launch runs it immediately; --folder <name> groups the pane; --no-pinned opts out of pinning; --dry-run previews."
+        "Options: --resume <id> stages the agent resume command; --launch runs it immediately; --prompt <text> or --prompt-file <path|-> (aliases of --initial-input and --initial-input-file) sends a prompt once the launched agent is ready and needs --launch; --wait-ready and --ready-timeout-ms <ms> wait for the launched agent like panes create; --folder <name> groups the pane; --no-pinned opts out of pinning; --dry-run previews."
       ],
       "panes archive": [
         "Usage:",
@@ -3505,6 +3520,8 @@
       "`runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.",
       "`runpane panels input` sends exact input bytes to one terminal panel. Prefer `--input-file` for newlines, Ctrl-C, quotes, or shell-sensitive text.",
       "`runpane panes create --prompt` is an alias for `--initial-input`; request JSON and daemon payloads should use the canonical `initialInput` field.",
+      "`runpane panes create --branch <name>` creates the Pane's worktree on exactly that new branch, slashes included (for example `agents/w5a`). The name is checked with `git check-ref-format --branch`, creation fails if the branch already exists, and Pane never renames it to make it unique. `--worktree-name` still names the directory and defaults to `--name`. `--base` is an alias for `--base-branch`, and `--prompt-file` for `--initial-input-file`. `panes create --base <ref> --branch <name> --prompt-file <file>` replaces `git worktree add` plus `panes adopt`.",
+      "`runpane panes adopt --launch` accepts `--prompt`, `--prompt-file`, `--wait-ready`, and `--ready-timeout-ms`, and reports `readiness`, `initialInput`, and `nextCommand` like `panes create`. A prompt without `--launch` is an error rather than being dropped.",
       "If composer submission cannot be verified without risking a duplicate, the create item is unsuccessful with `initialInput.staged`, `initialInput.attempts`, `initialInput.blocked.kind: submission_unverified`, and an actionable `nextCommand`. The CLI-facing `--prompt` alias maps to this canonical `initialInput` result.",
       "When running from WSL while Pane is installed on Windows, the Linux wrapper may look for a missing `/tmp/pane-daemon.../daemon.sock` or resolve to a Windows shim such as Volta. In that case invoke the Windows wrapper through PowerShell from a Windows cwd, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.",
       "`runpane watch` waits for workspace transitions from the daemon journal without polling. `--follow` keeps waiting and prints one line per event: READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, plus HEARTBEAT every 60 seconds as proof of life. Defaults are responsive: no settle, no batching, all kinds, IDLE every `--idle-after`. Expensive consumers opt into `--kinds` (drop `agent.busy`; BUSY carries no action), `--settle <ms>` (READY only after a quiet window; a BUSY inside it cancels the line), `--blocked-settle <ms>`, `--min-interval <ms>` (batch non-urgent lines; BLOCKED bypasses it), and `--idle-backoff` (10m, 30m, 1h, 3h, then daily). The recommended orchestrator invocation is `runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff`, which budgets about 6 wake-ups per active pane per hour worst case, usually 1-3. Pane Chat arms it automatically through its skill; only your own scripts need the flags. STUCK means real unsubmitted composer text, never an agent prompt suggestion. Judge a dead watch by a non-zero exit or a WATCH ERROR line, not by silence.",
@@ -4045,6 +4062,46 @@
         "pane-1",
         "--folder",
         "folder-9",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panes",
+        "create",
+        "--repo",
+        "active",
+        "--name",
+        "w5a",
+        "--base",
+        "release/foo",
+        "--branch",
+        "agents/w5a",
+        "--agent",
+        "claude",
+        "--prompt-file",
+        "prompt.md",
+        "--dry-run",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panes",
+        "create",
+        "--repo",
+        "active",
+        "--name",
+        "w5b",
+        "--base-branch",
+        "origin/main",
+        "--branch",
+        "agents/w5b",
+        "--worktree-name",
+        "w5b-dir",
+        "--tool-command",
+        "bash",
+        "--initial-input-file",
+        "-",
+        "--dry-run",
         "--yes",
         "--json"
       ]
@@ -4677,6 +4734,9 @@
                 "type": "string"
               },
               "worktreeName": {
+                "type": "string"
+              },
+              "branch": {
                 "type": "string"
               },
               "baseBranch": {
@@ -8284,6 +8344,24 @@
             "description": "Custom terminal command to run instead of a built-in agent."
           },
           {
+            "name": "--base-branch",
+            "value": "<ref>",
+            "required": false,
+            "description": "Ref to branch from, such as origin/main or release/foo. --base is an alias."
+          },
+          {
+            "name": "--branch",
+            "value": "<name>",
+            "required": false,
+            "description": "Exact new branch name, slashes included (for example agents/w5a). Fails if the branch exists; never renamed to be unique. Defaults to the worktree name."
+          },
+          {
+            "name": "--worktree-name",
+            "value": "<name>",
+            "required": false,
+            "description": "Worktree directory name; defaults to --name."
+          },
+          {
             "name": "--prompt",
             "value": "<text>",
             "required": false,
@@ -8293,7 +8371,7 @@
             "name": "--initial-input-file",
             "value": "<path|->",
             "required": false,
-            "description": "Read initial input from a file or stdin."
+            "description": "Read initial input from a file or stdin. --prompt-file is an alias."
           },
           {
             "name": "--from-json",
@@ -8362,6 +8440,7 @@
         ],
         "examples": [
           "runpane panes create --repo active --name issue-257 --agent <agent> --prompt \"Plan this issue\" --source agent --no-focus --wait-ready --yes --json",
+          "runpane panes create --repo active --name w5a --base origin/main --branch agents/w5a --agent <agent> --prompt-file prompt.md --source agent --no-focus --wait-ready --yes --json",
           "runpane panes create --from-json panes.json --yes --json",
           "runpane panes create --repo active --name issue-123 --agent <agent> --prompt \"Plan this issue\" --source agent --no-focus --wait-ready --yes --json"
         ],
@@ -8373,6 +8452,7 @@
           "At least one of --agent or --tool-command is required unless --from-json is used.",
           "`panes create` is for user-visible Pane orchestration, not the agent's default private delegation mechanism.",
           "Register the saved base repository once. Pane creates and owns the worktree/branch for each new Pane.",
+          "`panes create --base <ref> --branch <name> --prompt-file <file>` replaces `git worktree add` plus `panes adopt`: Pane creates the worktree on exactly that branch name. `--branch` is checked with `git check-ref-format --branch` and fails if the branch already exists; `--worktree-name` still names the directory.",
           "Use `panels create` instead when a reviewer/helper should share an existing Pane's worktree.",
           "Agent-created Panes should pass `--source agent --no-focus --wait-ready --yes --json` unless the user explicitly wants focus moved. `panes create` pins the new Pane by default, so a follow-up `panes pin` call is unnecessary; pass `--no-pinned` for throwaway shells or bulk imports. `--pinned` is still accepted and is now a no-op.",
           "The built-in agent templates come from the runpane contract; custom terminal commands can pass agent-specific flags when requested by the user.",
@@ -8434,7 +8514,30 @@
           {
             "name": "--launch",
             "required": false,
-            "description": "Run the resume command immediately."
+            "description": "Run the agent (or its resume command) immediately."
+          },
+          {
+            "name": "--prompt",
+            "value": "<text>",
+            "required": false,
+            "description": "Alias for --initial-input; sent once the launched agent is ready. Requires --launch."
+          },
+          {
+            "name": "--prompt-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "Alias for --initial-input-file; read the prompt from a file or stdin. Requires --launch."
+          },
+          {
+            "name": "--wait-ready",
+            "required": false,
+            "description": "Wait for the launched agent to be ready and the prompt submitted before returning. Requires --launch."
+          },
+          {
+            "name": "--ready-timeout-ms",
+            "value": "<ms>",
+            "required": false,
+            "description": "Readiness timeout; defaults to 30000."
           },
           {
             "name": "--no-pinned",
@@ -8458,14 +8561,18 @@
           }
         ],
         "examples": [
-          "runpane panes adopt --repo active --path /path/to/worktree --name imported --agent codex --resume <id> --yes --json"
+          "runpane panes adopt --repo active --path /path/to/worktree --name imported --agent codex --resume <id> --yes --json",
+          "runpane panes adopt --repo active --path /path/to/worktree --name imported --agent claude --launch --prompt-file prompt.md --wait-ready --yes --json"
         ],
         "jsonSchemas": [
           "paneCreateResult"
         ],
         "notes": [
           "The resume command is staged without Enter unless --launch is passed.",
-          "Pane never removes an externally owned worktree."
+          "Pane never removes an externally owned worktree.",
+          "A prompt (--prompt, --initial-input, --prompt-file, --initial-input-file) or --wait-ready needs --launch; without it adopt fails instead of dropping the prompt.",
+          "With --launch the result carries the same readiness, initialInput, and nextCommand fields as panes create. With --resume the prompt goes to the resumed conversation's composer once the agent is ready.",
+          "To start new work on a named branch, prefer `panes create --base <ref> --branch <name>` over `git worktree add` plus adopt."
         ]
       },
       "panes archive": {

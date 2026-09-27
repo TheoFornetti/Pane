@@ -307,8 +307,8 @@ export interface RunpaneInitialInputDeliveryResult {
   delivered: boolean;
   submitted: boolean;
   inputBytes: number;
-  strategy?: 'codex-ctrl-enter' | 'enter' | 'argument';
-  sequenceName?: 'codex-ctrl-enter-cr' | 'enter-cr' | 'argument';
+  strategy?: 'codex-ctrl-enter' | 'enter' | 'tab' | 'argument';
+  sequenceName?: 'codex-ctrl-enter-cr' | 'enter-cr' | 'tab' | 'argument';
   verifiedSubmitted?: boolean;
   verification?: RunpanePanelVerification;
   staged?: boolean;
@@ -656,8 +656,8 @@ export interface RunpanePanelSubmitResult {
   panelId: string;
   paneId?: string;
   inputBytes: number;
-  enter: 'cr';
-  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr';
+  enter: 'cr' | 'tab';
+  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr' | 'tab';
   verifiedSubmitted: boolean;
   verification?: RunpanePanelVerification;
   sentAt: string;
@@ -665,7 +665,7 @@ export interface RunpanePanelSubmitResult {
   nextCommand?: string;
 }
 
-export type RunpanePanelSubmitComposerStrategy = 'auto' | 'codex-ctrl-enter' | 'enter';
+export type RunpanePanelSubmitComposerStrategy = 'auto' | 'codex-ctrl-enter' | 'enter' | 'tab';
 
 export interface RunpanePanelSubmitComposerRequest {
   panelId: string;
@@ -678,8 +678,8 @@ export interface RunpanePanelSubmitComposerResult {
   panelId: string;
   paneId?: string;
   inputBytes: number;
-  strategy: 'codex-ctrl-enter' | 'enter';
-  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr';
+  strategy: 'codex-ctrl-enter' | 'enter' | 'tab';
+  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr' | 'tab';
   verifiedSubmitted: boolean;
   verification?: RunpanePanelVerification;
   sentAt: string;

@@ -259,7 +259,7 @@ Brief tools:
 - `panels screen`: Read a compact current-screen view from a terminal panel.
 - `panels input`: Send input bytes to a terminal panel.
 - `panels submit`: Send text plus terminal Enter to a terminal panel.
-- `panels submit-composer`: Submit an agent composer with the correct key sequence, including Ctrl+Enter for Codex.
+- `panels submit-composer`: Submit an agent composer with the key for its current state.
 - `panels wait`: Wait for terminal initialized, ready, idle, or text state with compact output.
 - `watch`: Wait for workspace transitions (READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT) from the daemon journal without polling; responsive by default, with opt-in cadence flags for expensive consumers.
 
@@ -322,7 +322,7 @@ These flags are consumed by local daemon-control commands:
 --text <text>
 --input-file <path|->
 --source <user|agent>
---strategy <auto|codex-ctrl-enter|enter>
+--strategy <auto|codex-ctrl-enter|enter|tab>
 --as <consumer-name>
 --since <generation>
 --from <now|earliest>

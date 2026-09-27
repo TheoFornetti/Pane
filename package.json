@@ -121,6 +121,7 @@
     "@electron/rebuild": "4.2.0",
     "@oxlint/plugins": "1.76.0",
     "@playwright/test": "^1.52.0",
+    "ajv": "6.12.6",
     "concurrently": "^9.1.0",
     "electron": "41.10.3",
     "electron-builder": "26.7.0",

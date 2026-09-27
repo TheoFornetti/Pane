@@ -15,6 +15,26 @@ const dist = (file) => path.join(runpaneDir, 'dist', file);
 const sdk = (subpath) => require(require.resolve(`@modelcontextprotocol/sdk/${subpath}`, { paths: [runpaneDir] }));
 const { Client } = sdk('client/index.js');
 const { StdioClientTransport } = sdk('client/stdio.js');
+const Ajv = require(require.resolve('ajv', { paths: [rootDir] }));
+
+function assertMatchesAdvertisedSchema(tool, payload) {
+  const validate = new Ajv({ allErrors: true }).compile(tool.outputSchema);
+  assert.equal(validate(payload), true, JSON.stringify(validate.errors));
+}
+
+test('doctor structured content matches its advertised output schema', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-doctor-schema-'));
+  try {
+    await withMcpClient(async (client) => {
+      const tool = (await client.listTools()).tools.find((item) => item.name === 'doctor');
+      const doctor = require('node:child_process').spawnSync(process.execPath,
+        [dist('cli.js'), 'doctor', '--pane-dir', paneDir, '--json'], { encoding: 'utf8' });
+      assertMatchesAdvertisedSchema(tool, JSON.parse(doctor.stdout));
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
 
 async function withMcpClient(action, { args = ['--toolsets', 'all'], env = {} } = {}) {
   const transport = new StdioClientTransport({
@@ -493,11 +513,13 @@ test('panels_input presses named keys, so a model can answer a menu without raw 
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   try {
     await withStubDaemon(paneDir, {
-      'runpane:panels:input': (args) => ({ ok: true, panelId: args[0].panelId, inputBytes: args[0].input.length, sentAt: '2026-09-25T00:00:00.000Z' }),
+      'runpane:panels:input': (args) => ({ ok: true, generation: 79, panelId: args[0].panelId, inputBytes: args[0].input.length, sentAt: '2026-09-25T00:00:00.000Z' }),
     }, async (requests) => {
       await withMcpClient(async (client) => {
+        const tool = (await client.listTools()).tools.find((item) => item.name === 'panels_input');
         const pressed = await client.callTool({ name: 'panels_input', arguments: { panel: 'panel-8', keys: 'down,enter', yes: true, paneDir } });
         assert.equal(pressed.isError, undefined, pressed.content[0].text);
+        assertMatchesAdvertisedSchema(tool, pressed.structuredContent);
         const unknown = await client.callTool({ name: 'panels_input', arguments: { panel: 'panel-8', keys: 'pagedown', yes: true, paneDir } });
         assert.equal(unknown.isError, true);
         assert.match(unknown.content[0].text, /Unknown key "pagedown"\. Use enter, escape/);

@@ -543,8 +543,8 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     return;
   }
   if (flag === '--strategy') {
-    if (!['auto', 'codex-ctrl-enter', 'enter'].includes(value)) {
-      throw new Error('--strategy must be one of: auto, codex-ctrl-enter, enter.');
+    if (!['auto', 'codex-ctrl-enter', 'enter', 'tab'].includes(value)) {
+      throw new Error('--strategy must be one of: auto, codex-ctrl-enter, enter, tab.');
     }
     parsed.composerStrategy = value;
     return;

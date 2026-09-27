@@ -81,6 +81,8 @@ VS Code (`.vscode/mcp.json`, or run **MCP: Add Server**):
 
 Any other client that can launch a stdio server uses the same command and arguments.
 
+`agents_send` uses the target agent's composer state. For Codex, it queues with Tab while the agent is working and submits with Enter when ready. A send is confirmed only after the text leaves the composer; if it remains, the result includes a command to retry the appropriate key. `panels_submit_composer` with `strategy: auto` uses the same keys.
+
 The server is stdio only: it runs next to the Pane app on the same machine, so there is no HTTP transport and no OAuth. To drive a remote Pane, run the server on the remote host.
 
 The Python package (`pipx run runpane`) does not include the MCP server, the docs search, or the agent tasks, because they need Node. From Python, those commands print the npm command and exit with status 2.

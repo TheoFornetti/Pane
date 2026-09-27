@@ -574,8 +574,8 @@ interface PanelSubmitResult {
   panelId: string;
   paneId?: string;
   inputBytes: number;
-  enter: 'cr';
-  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr';
+  enter: 'cr' | 'tab';
+  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr' | 'tab';
   verifiedSubmitted: boolean;
   verification?: 'observed' | 'unverifiable';
   sentAt: string;
@@ -589,8 +589,8 @@ interface PanelSubmitComposerResult {
   panelId: string;
   paneId?: string;
   inputBytes: number;
-  strategy: 'codex-ctrl-enter' | 'enter';
-  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr';
+  strategy: 'codex-ctrl-enter' | 'enter' | 'tab';
+  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr' | 'tab';
   verifiedSubmitted: boolean;
   verification?: 'observed' | 'unverifiable';
   sentAt: string;
@@ -1182,8 +1182,8 @@ export const panelSubmitResultSchema: BoundarySchema<PanelSubmitResult> = bounda
   panelId: boundary.string,
   paneId: boundary.optional(boundary.string),
   inputBytes: boundary.number,
-  enter: boundary.literal('cr'),
-  sequenceName: boundary.enumeration('codex-ctrl-enter-cr', 'enter-cr'),
+  enter: boundary.enumeration('cr', 'tab'),
+  sequenceName: boundary.enumeration('codex-ctrl-enter-cr', 'enter-cr', 'tab'),
   verifiedSubmitted: boundary.boolean,
   verification: verificationSchema,
   sentAt: boundary.string,
@@ -1196,8 +1196,8 @@ const panelSubmitComposerResultSchema: BoundarySchema<PanelSubmitComposerResult>
   panelId: boundary.string,
   paneId: boundary.optional(boundary.string),
   inputBytes: boundary.number,
-  strategy: boundary.enumeration('codex-ctrl-enter', 'enter'),
-  sequenceName: boundary.enumeration('codex-ctrl-enter-cr', 'enter-cr'),
+  strategy: boundary.enumeration('codex-ctrl-enter', 'enter', 'tab'),
+  sequenceName: boundary.enumeration('codex-ctrl-enter-cr', 'enter-cr', 'tab'),
   verifiedSubmitted: boundary.boolean,
   verification: verificationSchema,
   sentAt: boundary.string,

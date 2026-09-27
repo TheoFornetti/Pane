@@ -1733,14 +1733,31 @@ describe('runpane IPC handlers', () => {
     expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(
       2,
       terminalPanel.id,
-      '\x1b[13;5u\r',
+      '\r',
     );
     expect(result).toMatchObject({
       ok: true,
       panelId: terminalPanel.id,
-      sequenceName: 'codex-ctrl-enter-cr',
+      sequenceName: 'enter-cr',
       verifiedSubmitted: true,
     });
+  });
+
+  it('stages and queues text while Codex is working', async () => {
+    vi.useFakeTimers();
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce(terminalSnapshot('• Working (tab to queue message)\n› Ask Codex to do anything\n', 'active'))
+      .mockReturnValueOnce(terminalSnapshot('• Working (tab to queue message)\n› ping-busy\n', 'active'))
+      .mockReturnValue(terminalSnapshot('• Working\n› Ask Codex to do anything\n', 'active'));
+    const registry = createRegistry();
+
+    const pendingResult = registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'ping-busy' }]);
+    await vi.advanceTimersByTimeAsync(600);
+    const result = await pendingResult;
+
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(1, terminalPanel.id, 'ping-busy');
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(2, terminalPanel.id, '\t');
+    expect(result).toMatchObject({ ok: true, enter: 'tab', sequenceName: 'tab', verifiedSubmitted: true });
   });
 
   it('stages text before submitting a Claude composer', async () => {
@@ -1924,16 +1941,16 @@ describe('runpane IPC handlers', () => {
 
     expect(result).toMatchObject({
       ok: false,
-      sequenceName: 'codex-ctrl-enter-cr',
+      sequenceName: 'enter-cr',
       verifiedSubmitted: false,
       blocked: {
         kind: 'agent-prompt',
-        suggestedCommand: `runpane panels screen --panel ${terminalPanel.id} --limit 80 --json`,
+        suggestedCommand: `runpane panels input --panel ${terminalPanel.id} --keys enter --yes --json`,
       },
     });
   });
 
-  it('submits a Codex composer with the effective Ctrl+Enter sequence and verifies composer cleared', async () => {
+  it('submits an idle Codex composer with Enter and verifies composer cleared', async () => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot)
       .mockReturnValueOnce({
         initialized: true,
@@ -1967,14 +1984,14 @@ describe('runpane IPC handlers', () => {
       strategy: 'auto',
     }]);
 
-    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, '\x1b[13;5u\r');
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, '\r');
     expect(result).toMatchObject({
       ok: true,
       panelId: terminalPanel.id,
       paneId: session.id,
-      inputBytes: 8,
-      strategy: 'codex-ctrl-enter',
-      sequenceName: 'codex-ctrl-enter-cr',
+      inputBytes: 1,
+      strategy: 'enter',
+      sequenceName: 'enter-cr',
       verifiedSubmitted: true,
       nextCommand: `runpane panels wait --panel ${terminalPanel.id} --for ready --timeout-ms 30000 --json`,
     });
@@ -1983,9 +2000,21 @@ describe('runpane IPC handlers', () => {
       expect.objectContaining({
         action: 'panels:submit-composer',
         status: 'success',
-        input_bytes: 8,
+        input_bytes: 1,
       }),
     );
+  });
+
+  it('queues a working Codex composer with Tab and verifies it left the composer', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce(terminalSnapshot('• Working (tab to queue message)\n› follow-up\n', 'active'))
+      .mockReturnValue(terminalSnapshot('• Working\n› Ask Codex to do anything\n', 'active'));
+    const registry = createRegistry();
+
+    const result = await registry.invoke('runpane:panels:submit-composer', [{ panelId: terminalPanel.id, strategy: 'auto' }]);
+
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, '\t');
+    expect(result).toMatchObject({ ok: true, strategy: 'tab', sequenceName: 'tab', verifiedSubmitted: true });
   });
 
   it('blocks submit-composer when the Codex pasted-content composer remains visible', async () => {
@@ -2008,17 +2037,17 @@ describe('runpane IPC handlers', () => {
       strategy: 'auto',
     }]);
 
-    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, '\x1b[13;5u\r');
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, '\r');
     expect(result).toMatchObject({
       ok: false,
       panelId: terminalPanel.id,
-      inputBytes: 8,
-      strategy: 'codex-ctrl-enter',
-      sequenceName: 'codex-ctrl-enter-cr',
+      inputBytes: 1,
+      strategy: 'enter',
+      sequenceName: 'enter-cr',
       verifiedSubmitted: false,
       blocked: {
         kind: 'agent-prompt',
-        suggestedCommand: `runpane panels screen --panel ${terminalPanel.id} --limit 80 --json`,
+        suggestedCommand: `runpane panels input --panel ${terminalPanel.id} --keys enter --yes --json`,
       },
     });
   });

@@ -91,8 +91,20 @@ export interface ParsedArgs {
   keys?: string[];
   toolsets?: string[];
   readOnly?: boolean;
+  reportState?: ReportState;
+  reportPr?: number;
+  reportHead?: string;
+  summary?: string;
+  summaryFile?: string;
+  question?: string;
   remoteSetupArgs: string[];
 }
+
+/** `runpane report --state`: what a worker says about its task. */
+type ReportState = 'ready' | 'blocked' | 'failed' | 'done';
+const REPORT_STATES: readonly ReportState[] = ['ready', 'blocked', 'failed', 'done'];
+const reportStateSchema = boundary.enumeration('ready', 'blocked', 'failed', 'done');
+const HEAD_PATTERN = /^[0-9a-fA-F]{7,40}$/;
 
 const COMMAND_MATCHERS = RUNPANE_CONTRACT.commands
   .map((command) => ({ name: command.name, tokens: command.name.split(' ') }))
@@ -202,7 +214,20 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   if (parsed.command === 'watch' && parsed.watchSince !== undefined && cadenceValueFlagPresent) {
     throw new Error('runpane watch accepts either --since or --settle/--blocked-settle/--min-interval, not both (cadence needs a named cursor).');
   }
+  if (parsed.command === 'report') validateReportArgs(parsed);
   return parsed;
+}
+
+function validateReportArgs(parsed: ParsedArgs): void {
+  if (!parsed.reportState) {
+    throw new Error(`runpane report requires --state <${REPORT_STATES.join('|')}>.`);
+  }
+  if (parsed.summary !== undefined && parsed.summaryFile !== undefined) {
+    throw new Error('runpane report accepts either --summary or --summary-file, not both.');
+  }
+  if (parsed.reportState === 'blocked' && !parsed.question?.trim()) {
+    throw new Error('runpane report --state blocked requires --question "<what you need answered>".');
+  }
 }
 
 function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
@@ -634,6 +659,36 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.toolsets = value.split(',').map((name) => name.trim()).filter(Boolean);
     return;
   }
+  if (flag === '--state') {
+    if (!REPORT_STATES.some((state) => state === value)) {
+      throw new Error(`--state must be one of: ${REPORT_STATES.join(', ')}.`);
+    }
+    parsed.reportState = decodeBoundary(value, reportStateSchema);
+    return;
+  }
+  if (flag === '--pr') {
+    const pr = Number(value);
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(pr) || pr <= 0) throw new Error('--pr must be a positive integer.');
+    parsed.reportPr = pr;
+    return;
+  }
+  if (flag === '--head') {
+    if (!HEAD_PATTERN.test(value)) throw new Error('--head must be a commit SHA of 7 to 40 hex characters.');
+    parsed.reportHead = value.toLowerCase();
+    return;
+  }
+  if (flag === '--summary') {
+    parsed.summary = value;
+    return;
+  }
+  if (flag === '--summary-file') {
+    parsed.summaryFile = value;
+    return;
+  }
+  if (flag === '--question') {
+    parsed.question = value;
+    return;
+  }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
 }
@@ -683,6 +738,8 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'panels submit'
     || command === 'panels submit-composer'
     || command === 'panels wait'
+    || command === 'panels last-message'
+    || command === 'report'
     || command === 'workspace state'
     || command === 'watch'
     || command === 'agents doctor'

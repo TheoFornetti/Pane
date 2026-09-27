@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { boundary, decodeBoundary } from './boundaryDecoder';
@@ -6,7 +7,7 @@ import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { hasCadenceValueFlag, type ParsedArgs, type RunpaneAgent } from './commands';
 import type { BoundarySchema, JsonValue } from './boundaryDecoder';
-import { effectiveWatchHeartbeatMs, formatNonEntry, formatWaitResult, type WatchFormat } from './watchLines';
+import { describeReport, effectiveWatchHeartbeatMs, formatNonEntry, formatWaitResult, type WatchFormat } from './watchLines';
 
 interface OrchestrationLink {
   label: string;
@@ -448,6 +449,46 @@ interface PaneArchiveDryRunResult {
 
 type PaneArchiveResult = PaneArchiveSuccessResult | PaneArchiveBlockedResult | PaneArchiveDryRunResult;
 
+/** The latest `runpane report` from an agent panel. */
+export interface AgentReport {
+  state: 'ready' | 'blocked' | 'failed' | 'done';
+  pr?: number;
+  head?: string;
+  summary?: string;
+  summaryTruncated?: true;
+  summaryPath?: string;
+  question?: string;
+  reportedAt: string;
+}
+
+interface ReportResult {
+  ok: true;
+  generation?: number;
+  paneId: string;
+  panelId: string;
+  report: AgentReport;
+  sessionIds: string[];
+}
+
+type PanelLastMessageResult =
+  | {
+    ok: true;
+    panelId: string;
+    paneId: string;
+    agentType: 'claude' | 'codex';
+    text: string;
+    length: number;
+    limit: number;
+    truncated: boolean;
+  }
+  | {
+    ok: false;
+    panelId: string;
+    paneId: string;
+    reason: 'transcript-unavailable';
+    message: string;
+  };
+
 interface PanelSummary {
   id: string;
   panelId: string;
@@ -463,6 +504,7 @@ interface PanelSummary {
   position?: number;
   createdAt?: string;
   lastActiveAt?: string;
+  report?: AgentReport;
 }
 
 interface PanelListResult {
@@ -656,7 +698,8 @@ type WorkspaceEntryKind =
   | 'agent.idle'
   | 'pane.created'
   | 'pane.gone'
-  | 'panel.exited';
+  | 'panel.exited'
+  | 'agent.report';
 
 interface WorkspacePanelSummary {
   panelId: string;
@@ -690,6 +733,7 @@ interface WorkspaceEntry {
   baseline?: true;
   changedWhileAway?: boolean;
   panels?: WorkspacePanelSummary[];
+  report?: AgentReport;
 }
 
 interface WorkspaceStateResult {
@@ -839,6 +883,43 @@ const archiveSafetySchema: BoundarySchema<PaneArchiveSafetyCheck> = boundary.obj
     subject: boundary.string,
   }))),
 });
+const agentReportSchema: BoundarySchema<AgentReport> = boundary.object({
+  state: boundary.enumeration('ready', 'blocked', 'failed', 'done'),
+  pr: boundary.optional(boundary.number),
+  head: boundary.optional(boundary.string),
+  summary: boundary.optional(boundary.string),
+  summaryTruncated: boundary.optional(boundary.literal(true)),
+  summaryPath: boundary.optional(boundary.string),
+  question: boundary.optional(boundary.string),
+  reportedAt: boundary.string,
+});
+const reportResultSchema: BoundarySchema<ReportResult> = boundary.object({
+  ok: boundary.literal(true),
+  generation: boundary.optional(boundary.number),
+  paneId: boundary.string,
+  panelId: boundary.string,
+  report: agentReportSchema,
+  sessionIds: boundary.array(boundary.string),
+});
+const panelLastMessageResultSchema: BoundarySchema<PanelLastMessageResult> = boundary.union(
+  boundary.object({
+    ok: boundary.literal(true),
+    panelId: boundary.string,
+    paneId: boundary.string,
+    agentType: boundary.enumeration('claude', 'codex'),
+    text: boundary.string,
+    length: boundary.number,
+    limit: boundary.number,
+    truncated: boundary.boolean,
+  }),
+  boundary.object({
+    ok: boundary.literal(false),
+    panelId: boundary.string,
+    paneId: boundary.string,
+    reason: boundary.literal('transcript-unavailable'),
+    message: boundary.string,
+  }),
+);
 const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   id: boundary.string,
   panelId: boundary.string,
@@ -854,6 +935,7 @@ const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   position: boundary.optional(boundary.number),
   createdAt: boundary.optional(boundary.string),
   lastActiveAt: boundary.optional(boundary.string),
+  report: boundary.optional(agentReportSchema),
 });
 
 const repoListResultSchema: BoundarySchema<RepoListResult> = boundary.object({
@@ -1286,6 +1368,7 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'pane.created',
   'pane.gone',
   'panel.exited',
+  'agent.report',
 );
 const agentStateSchema = boundary.enumeration('blocked', 'working', 'idle', 'unknown');
 const workspacePanelSummarySchema: BoundarySchema<WorkspacePanelSummary> = boundary.object({
@@ -1318,6 +1401,7 @@ const workspaceEntrySchema: BoundarySchema<WorkspaceEntry> = boundary.object({
   exitCode: boundary.optional(boundary.number),
   baseline: boundary.optional(boundary.literal(true)),
   changedWhileAway: boundary.optional(boundary.boolean),
+  report: boundary.optional(agentReportSchema),
   panels: boundary.optional(boundary.array(workspacePanelSummarySchema)),
 });
 export const workspaceStateResultSchema: BoundarySchema<WorkspaceStateResult> = boundary.object({
@@ -2016,6 +2100,82 @@ export async function runPanelsScreen(parsed: ParsedArgs): Promise<number> {
   return 0;
 }
 
+export async function runPanelsLastMessage(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.panelId) {
+    throw new Error('runpane panels last-message requires --panel.');
+  }
+
+  const result = await invokeDaemon('runpane:panels:last-message', [{
+    panelId: parsed.panelId,
+    limit: parsed.limit,
+  }], panelLastMessageResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else if (result.ok) {
+    output.write(result.text);
+    if (result.text && !result.text.endsWith('\n')) output.write('\n');
+    if (result.truncated) console.error(`(showing the last ${result.limit} of ${result.length} characters)`);
+  } else {
+    console.error(`${result.reason}: ${result.message}`);
+  }
+  return result.ok ? 0 : 1;
+}
+
+/** Where a report is for: explicit --panel (with an optional --pane), else the Pane terminal's own panel. */
+function resolveReportIdentity(
+  parsed: Pick<ParsedArgs, 'paneId' | 'panelId'>,
+  env: NodeJS.ProcessEnv = process.env,
+): { paneId?: string; panelId: string } {
+  if (parsed.paneId || parsed.panelId) {
+    if (!parsed.panelId) {
+      throw new Error('runpane report --pane also needs --panel <panel-id>. Find it with `runpane panels list --pane <pane-id>`.');
+    }
+    return parsed.paneId ? { paneId: parsed.paneId, panelId: parsed.panelId } : { panelId: parsed.panelId };
+  }
+  const panelId = env.PANE_PANEL_ID?.trim();
+  if (!panelId) {
+    throw new Error('runpane report cannot tell which panel is reporting. Run it inside a Pane terminal '
+      + '(which sets PANE_SESSION_ID and PANE_PANEL_ID), or pass --pane <pane-id> --panel <panel-id>.');
+  }
+  const paneId = env.PANE_SESSION_ID?.trim();
+  return paneId ? { paneId, panelId } : { panelId };
+}
+
+/** The CLIs send one character past the daemon's 16,000 so it still marks an overlong summary truncated. */
+const MAX_SENT_SUMMARY_LENGTH = 16_001;
+
+export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  const identity = resolveReportIdentity(parsed, env);
+  const summaryText = parsed.summaryFile !== undefined
+    ? stripUtf8Bom(readInputSource(parsed.summaryFile))
+    : parsed.summary;
+  const summaryPath = parsed.summaryFile !== undefined && parsed.summaryFile !== '-'
+    ? path.resolve(parsed.summaryFile)
+    : undefined;
+  const result = await invokeDaemon('runpane:report', [{
+    ...identity,
+    state: parsed.reportState,
+    pr: parsed.reportPr,
+    head: parsed.reportHead,
+    summary: summaryText?.slice(0, MAX_SENT_SUMMARY_LENGTH),
+    summaryPath,
+    question: parsed.question,
+  }], reportResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    const sessions = result.sessionIds.length > 0 ? ` Recorded on Session ${result.sessionIds.join(', ')}.` : '';
+    console.log(`Reported ${describeReport(result.report)} for panel ${result.panelId}.${sessions}`);
+  }
+  return 0;
+}
+
 export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
   const request = buildPanelInputRequest(parsed, 'submit');
   await confirmPanelInput(parsed, request, 'submit');
@@ -2635,6 +2795,7 @@ function workspaceLabel(kind: WorkspaceEntryKind): string {
     'pane.created': 'NEW',
     'pane.gone': 'GONE',
     'panel.exited': 'EXIT',
+    'agent.report': 'REPORT',
   } satisfies Record<WorkspaceEntryKind, string>;
   return labels[kind];
 }

@@ -563,6 +563,47 @@
       "--dry-run",
       "--yes",
       "--json"
+    ],
+    [
+      "report",
+      "--state",
+      "ready",
+      "--pr",
+      "747",
+      "--head",
+      "FC5DCE9",
+      "--summary",
+      "Done: tests pass",
+      "--json"
+    ],
+    [
+      "report",
+      "--state",
+      "blocked",
+      "--question",
+      "Which API version?",
+      "--pane",
+      "session-1",
+      "--panel",
+      "panel-1",
+      "--summary-file",
+      "-"
+    ],
+    [
+      "report",
+      "--state=done",
+      "--summary-file=/tmp/report.md",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "panels",
+      "last-message",
+      "--panel",
+      "panel-1",
+      "--limit",
+      "5000",
+      "--json"
     ]
   ],
   "help": {

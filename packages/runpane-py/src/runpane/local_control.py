@@ -566,6 +566,73 @@ def run_panels_screen(parsed: Any) -> int:
     return 0
 
 
+def run_panels_last_message(parsed: Any) -> int:
+    if not parsed.panel_id:
+        raise ValueError("runpane panels last-message requires --panel.")
+
+    result = invoke_daemon("runpane:panels:last-message", [{
+        "panelId": parsed.panel_id,
+        "limit": parsed.limit,
+    }], pane_dir=parsed.pane_dir)
+
+    if parsed.json:
+        print_json(result)
+    elif result.get("ok"):
+        text = result.get("text") or ""
+        sys.stdout.write(text)
+        if text and not text.endswith("\n"):
+            sys.stdout.write("\n")
+        if result.get("truncated"):
+            print(f"(showing the last {result.get('limit')} of {result.get('length')} characters)", file=sys.stderr)
+    else:
+        print(f"{result.get('reason')}: {result.get('message')}", file=sys.stderr)
+    return 0 if result.get("ok") else 1
+
+
+def resolve_report_identity(parsed: Any, env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Where a report is for: explicit --panel (with an optional --pane), else the Pane terminal's own panel."""
+    env = os.environ if env is None else env
+    if parsed.pane_id or parsed.panel_id:
+        if not parsed.panel_id:
+            raise ValueError("runpane report --pane also needs --panel <panel-id>. Find it with `runpane panels list --pane <pane-id>`.")
+        return {"paneId": parsed.pane_id, "panelId": parsed.panel_id} if parsed.pane_id else {"panelId": parsed.panel_id}
+    panel_id = (env.get("PANE_PANEL_ID") or "").strip()
+    if not panel_id:
+        raise ValueError(
+            "runpane report cannot tell which panel is reporting. Run it inside a Pane terminal "
+            "(which sets PANE_SESSION_ID and PANE_PANEL_ID), or pass --pane <pane-id> --panel <panel-id>."
+        )
+    pane_id = (env.get("PANE_SESSION_ID") or "").strip()
+    return {"paneId": pane_id, "panelId": panel_id} if pane_id else {"panelId": panel_id}
+
+
+# The CLIs send one character past the daemon's 16,000 so it still marks an overlong summary truncated.
+MAX_SENT_SUMMARY_LENGTH = 16_001
+
+
+def run_report(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
+    identity = resolve_report_identity(parsed, env)
+    summary = strip_utf8_bom(read_input_source(parsed.summary_file)) if parsed.summary_file is not None else parsed.summary
+    summary_path = os.path.abspath(parsed.summary_file) if parsed.summary_file not in (None, "-") else None
+    request: Dict[str, Any] = {
+        **identity,
+        "state": parsed.report_state,
+        **optional_value("pr", parsed.report_pr),
+        **optional_value("head", parsed.report_head),
+        **optional_value("summary", summary[:MAX_SENT_SUMMARY_LENGTH] if summary is not None else None),
+        **optional_value("summaryPath", summary_path),
+        **optional_value("question", parsed.question),
+    }
+    result = invoke_daemon("runpane:report", [request], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+    else:
+        session_ids = result.get("sessionIds") or []
+        sessions = f" Recorded on Session {', '.join(session_ids)}." if session_ids else ""
+        print(f"Reported {describe_report(result.get('report') or {})} for panel {result.get('panelId')}.{sessions}")
+    return 0
+
+
 def run_panels_submit(parsed: Any) -> int:
     request = build_panel_input_request(parsed, "submit")
     confirm_panel_input(parsed, request, "submit")
@@ -1065,7 +1132,27 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
         return f"EXIT {name} {pane}{panel} code {code}"
     if kind in {"pane.created", "pane.gone"}:
         return f"{workspace_label(kind)} {name} {pane}"
+    if kind == "agent.report":
+        report = entry.get("report")
+        return f"REPORT {name} {pane}{panel} {describe_report(report) if report else 'unknown'}"
     return f"{workspace_label(kind)} {name} {pane}{panel}"
+
+
+MAX_LINE_QUESTION_LENGTH = 200
+
+
+def describe_report(report: Dict[str, Any]) -> str:
+    """`ready pr#747 fc5dce9`, or `blocked pr#747: <question>` cut to 200 characters."""
+    parts = [sanitize_watch_value(report.get("state"))]
+    if report.get("pr") is not None:
+        parts.append(f"pr#{report.get('pr')}")
+    if report.get("head"):
+        parts.append(sanitize_watch_value(report.get("head"))[:7])
+    question = sanitize_watch_value(report.get("question")) if report.get("question") else ""
+    if not question:
+        return " ".join(parts)
+    shown = f"{question[:MAX_LINE_QUESTION_LENGTH - 1]}…" if len(question) > MAX_LINE_QUESTION_LENGTH else question
+    return f"{' '.join(parts)}: {shown}"
 
 
 def emit_watch_non_entry(kind: str, output_format: str, **fields: Any) -> None:
@@ -1103,6 +1190,7 @@ def workspace_label(kind: Any) -> str:
         "pane.created": "NEW",
         "pane.gone": "GONE",
         "panel.exited": "EXIT",
+        "agent.report": "REPORT",
     }.get(kind, str(kind).upper())
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 import os
+import re
 import socket
 import sys
 from typing import Callable, Dict, List, Optional, Set, Tuple, TypeVar
@@ -25,6 +26,7 @@ from .local_control import (
     run_agents_doctor,
     run_panels_create,
     run_panels_input,
+    run_panels_last_message,
     run_panels_list,
     run_panels_output,
     run_panels_screen,
@@ -40,6 +42,7 @@ from .local_control import (
     run_panes_rename,
     run_repos_add,
     run_repos_list,
+    run_report,
     run_sessions_associate,
     run_sessions_create,
     run_sessions_detach,
@@ -95,6 +98,8 @@ INLINE_VALUE_FLAGS = {
     "--command",
 }
 DEFAULTS = RUNPANE_CONTRACT["defaults"]
+REPORT_STATES = ["ready", "blocked", "failed", "done"]
+HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 
 
 @dataclass
@@ -176,6 +181,12 @@ class ParsedArgs:
     keys: Optional[List[str]] = None
     toolsets: Optional[List[str]] = None
     read_only: bool = False
+    report_state: Optional[str] = None
+    report_pr: Optional[int] = None
+    report_head: Optional[str] = None
+    summary: Optional[str] = None
+    summary_file: Optional[str] = None
+    question: Optional[str] = None
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
 
@@ -295,6 +306,10 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_panels_submit_composer(parsed)
     if parsed.command == "panels wait":
         return run_panels_wait(parsed)
+    if parsed.command == "panels last-message":
+        return run_panels_last_message(parsed)
+    if parsed.command == "report":
+        return run_report(parsed)
     if parsed.command == "agents doctor":
         return run_agents_doctor(parsed)
     if parsed.command in {"install", "update"}:
@@ -495,7 +510,18 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         raise ValueError(
             "runpane watch accepts either --since or --settle/--blocked-settle/--min-interval, not both (cadence needs a named cursor)."
         )
+    if parsed.command == "report":
+        validate_report_args(parsed)
     return parsed
+
+
+def validate_report_args(parsed: ParsedArgs) -> None:
+    if not parsed.report_state:
+        raise ValueError(f"runpane report requires --state <{'|'.join(REPORT_STATES)}>.")
+    if parsed.summary is not None and parsed.summary_file is not None:
+        raise ValueError("runpane report accepts either --summary or --summary-file, not both.")
+    if parsed.report_state == "blocked" and not (parsed.question or "").strip():
+        raise ValueError('runpane report --state blocked requires --question "<what you need answered>".')
 
 
 def parse_non_negative_int_flag(flag: str, value: str) -> int:
@@ -853,6 +879,30 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--toolsets":
         parsed.toolsets = [name.strip() for name in value.split(",") if name.strip()]
         return
+    if flag == "--state":
+        if value not in REPORT_STATES:
+            raise ValueError(f"--state must be one of: {', '.join(REPORT_STATES)}.")
+        parsed.report_state = value
+        return
+    if flag == "--pr":
+        if not re.fullmatch(r"[0-9]+", value) or int(value) <= 0 or int(value) > 9007199254740991:
+            raise ValueError("--pr must be a positive integer.")
+        parsed.report_pr = int(value)
+        return
+    if flag == "--head":
+        if not HEAD_PATTERN.fullmatch(value):
+            raise ValueError("--head must be a commit SHA of 7 to 40 hex characters.")
+        parsed.report_head = value.lower()
+        return
+    if flag == "--summary":
+        parsed.summary = value
+        return
+    if flag == "--summary-file":
+        parsed.summary_file = value
+        return
+    if flag == "--question":
+        parsed.question = value
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -891,6 +941,8 @@ def is_runpane_local_command(command: str) -> bool:
         "panels submit",
         "panels submit-composer",
         "panels wait",
+        "panels last-message",
+        "report",
         "agents doctor",
         "agents start",
         "agents status",

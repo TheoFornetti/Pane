@@ -525,6 +525,20 @@ export const RUNPANE_CONTRACT = {
       ]
     },
     {
+      "name": "panels last-message",
+      "summary": "Read an agent's last reply from its transcript, without scraping the screen.",
+      "usage": [
+        "runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "panels",
+        "agents"
+      ],
+      "jsonSchemas": [
+        "panelLastMessageResult"
+      ]
+    },
+    {
       "name": "panes git-status",
       "summary": "Read the git status of a Pane worktree: uncommitted, unpushed, and behind-main counts.",
       "usage": [
@@ -989,6 +1003,22 @@ export const RUNPANE_CONTRACT = {
       ]
     },
     {
+      "name": "report",
+      "summary": "Hand back a worker's structured report: state, PR, head commit, summary, and the question when blocked.",
+      "usage": [
+        "runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "idempotent": true,
+      "toolsets": [
+        "agents"
+      ],
+      "jsonSchemas": [
+        "reportResult"
+      ]
+    },
+    {
       "name": "sessions list",
       "summary": "List durable named orchestration Sessions.",
       "usage": [
@@ -1390,7 +1420,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--min-interval",
         "value": "<milliseconds>",
-        "description": "Follow-only opt-in: hold non-urgent lines and flush them together at most once per interval; BLOCKED bypasses it."
+        "description": "Follow-only opt-in: hold non-urgent lines and flush them together at most once per interval; BLOCKED and REPORT bypass it."
       },
       {
         "name": "--body-file",
@@ -1431,6 +1461,36 @@ export const RUNPANE_CONTRACT = {
         "name": "--keys",
         "value": "<name,...>",
         "description": "Named keys for panels input, such as down,enter."
+      },
+      {
+        "name": "--state",
+        "value": "<ready|blocked|failed|done>",
+        "description": "Report state for runpane report."
+      },
+      {
+        "name": "--pr",
+        "value": "<number>",
+        "description": "Pull request number for runpane report."
+      },
+      {
+        "name": "--head",
+        "value": "<sha>",
+        "description": "Head commit (7-40 hex characters) for runpane report."
+      },
+      {
+        "name": "--summary",
+        "value": "<text>",
+        "description": "Report summary text; up to 16,000 characters are kept."
+      },
+      {
+        "name": "--summary-file",
+        "value": "<path|->",
+        "description": "Read the report summary from a file or stdin."
+      },
+      {
+        "name": "--question",
+        "value": "<text>",
+        "description": "What a blocked worker needs answered; required with --state blocked."
       }
     ],
     "localBoolean": [
@@ -1555,6 +1615,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
+        "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
         "  runpane panes push --pane <pane-id> --yes [--json] [--pane-dir <path>]",
@@ -1568,6 +1629,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents start --repo <selector> --name <name> (--agent <codex|claude|cursor>|--tool-command <command>) --prompt <task> [--base-branch <branch>] --yes [--json] [--pane-dir <path>]",
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
+        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text>] [--json]",
         "  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
         "  runpane panes stash --pane <pane-id> --yes [--json] [--pane-dir <path>]",
         "  runpane panes stash-pop --pane <pane-id> --yes [--json] [--pane-dir <path>]",
@@ -1793,7 +1855,7 @@ export const RUNPANE_CONTRACT = {
         "  --idle-after <ms>              Re-firing READY idle interval; defaults to 600000 under --follow",
         "  --settle <ms>                  Opt-in: emit READY only after this quiet window (--follow only)",
         "  --blocked-settle <ms>          Opt-in: emit BLOCKED only after this window (--follow only)",
-        "  --min-interval <ms>            Opt-in: batch non-urgent lines per interval; BLOCKED bypasses (--follow only)",
+        "  --min-interval <ms>            Opt-in: batch non-urgent lines per interval; BLOCKED and REPORT bypass (--follow only)",
         "  --idle-backoff                 Opt-in: IDLE at --idle-after, 30m, 1h, 3h, then daily (--follow only)",
         "  --all-managed                  Explicitly watch all managed panes",
         "  --include-shells               Include ordinary shell panels",
@@ -1812,6 +1874,7 @@ export const RUNPANE_CONTRACT = {
         "  --json                         Alias for --format json",
         "",
         "Defaults are responsive: no settle, no batching, all kinds, IDLE every --idle-after. BUSY carries no action; drop it with --kinds.",
+        "agent.report (a worker ran `runpane report`) is opt-in: list it in --kinds. REPORT lines skip the --min-interval batch.",
         "Expensive consumers opt in: --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "Pane Chat arms those flags itself through its skill; pass them only for your own scripts.",
         "STUCK means real unsubmitted composer text; an agent prompt suggestion never counts.",
@@ -1949,6 +2012,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
+        "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "",
         "Run \"runpane help panels create\" or another command-specific topic for options."
       ],
@@ -2499,6 +2563,42 @@ export const RUNPANE_CONTRACT = {
         "  runpane sessions <list|create|get|update|set-agent|associate|detach|overview> [options]",
         "",
         "Use a named Session to keep context, activity, and evidence attached to one orchestration thread."
+      ],
+      "report": [
+        "Usage:",
+        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]",
+        "",
+        "Hands back a worker's structured report for its panel: the orchestrator receives it as an",
+        "agent.report watch event and reads it in `agents status` and `sessions overview`.",
+        "Inside a Pane terminal the panel comes from PANE_SESSION_ID and PANE_PANEL_ID.",
+        "",
+        "Options:",
+        "  --state <state>                ready, blocked, failed, or done",
+        "  --pr <number>                  Pull request number",
+        "  --head <sha>                   Head commit, 7-40 hex characters",
+        "  --summary <text>               Summary text; up to 16,000 characters are kept",
+        "  --summary-file <path|->        Read the summary from a file or stdin",
+        "  --question <text>              What you need answered; required with --state blocked",
+        "  --pane <pane-id>               Pane id when not running inside a Pane terminal",
+        "  --panel <panel-id>             Panel id when not running inside a Pane terminal",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Example:",
+        "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md"
+      ],
+      "panels last-message": [
+        "Usage:",
+        "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]",
+        "",
+        "Reads a Claude or Codex agent's last reply from its transcript. It never scrapes the screen:",
+        "without a transcript it reports transcript-unavailable and exits non-zero.",
+        "",
+        "Options:",
+        "  --panel <panel-id>             Agent panel id",
+        "  --limit <count>                Maximum characters to return; defaults to 20000 (the end is kept)",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
       ]
     },
     "pip": {
@@ -2531,6 +2631,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
+        "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
         "  runpane panes push --pane <pane-id> --yes [--json] [--pane-dir <path>]",
@@ -2544,6 +2645,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents start --repo <selector> --name <name> (--agent <codex|claude|cursor>|--tool-command <command>) --prompt <task> [--base-branch <branch>] --yes [--json] [--pane-dir <path>]",
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
+        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text>] [--json]",
         "  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
         "  runpane panes stash --pane <pane-id> --yes [--json] [--pane-dir <path>]",
         "  runpane panes stash-pop --pane <pane-id> --yes [--json] [--pane-dir <path>]",
@@ -2758,7 +2860,7 @@ export const RUNPANE_CONTRACT = {
         "  --idle-after <ms>",
         "  --settle <ms>                  Opt-in READY quiet window (--follow only)",
         "  --blocked-settle <ms>          Opt-in BLOCKED window (--follow only)",
-        "  --min-interval <ms>            Opt-in batching; BLOCKED bypasses (--follow only)",
+        "  --min-interval <ms>            Opt-in batching; BLOCKED and REPORT bypass (--follow only)",
         "  --idle-backoff                 Opt-in IDLE backoff (--follow only)",
         "  --all-managed",
         "  --include-shells",
@@ -2777,6 +2879,7 @@ export const RUNPANE_CONTRACT = {
         "  --json                         Alias for --format json",
         "",
         "Defaults are responsive: no settle, no batching, all kinds, IDLE every --idle-after. BUSY carries no action; drop it with --kinds.",
+        "agent.report (a worker ran `runpane report`) is opt-in: list it in --kinds. REPORT lines skip the --min-interval batch.",
         "Expensive consumers opt in: --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "Pane Chat arms those flags itself through its skill; pass them only for your own scripts.",
         "STUCK means real unsubmitted composer text; an agent prompt suggestion never counts.",
@@ -2914,6 +3017,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
+        "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "",
         "Run \"runpane help panels create\" or another command-specific topic for options."
       ],
@@ -3425,6 +3529,42 @@ export const RUNPANE_CONTRACT = {
         "  runpane sessions <list|create|get|update|set-agent|associate|detach|overview> [options]",
         "",
         "Use a named Session to keep context, activity, and evidence attached to one orchestration thread."
+      ],
+      "report": [
+        "Usage:",
+        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]",
+        "",
+        "Hands back a worker's structured report for its panel: the orchestrator receives it as an",
+        "agent.report watch event and reads it in `agents status` and `sessions overview`.",
+        "Inside a Pane terminal the panel comes from PANE_SESSION_ID and PANE_PANEL_ID.",
+        "",
+        "Options:",
+        "  --state <state>                ready, blocked, failed, or done",
+        "  --pr <number>                  Pull request number",
+        "  --head <sha>                   Head commit, 7-40 hex characters",
+        "  --summary <text>               Summary text; up to 16,000 characters are kept",
+        "  --summary-file <path|->        Read the summary from a file or stdin",
+        "  --question <text>              What you need answered; required with --state blocked",
+        "  --pane <pane-id>               Pane id when not running inside a Pane terminal",
+        "  --panel <panel-id>             Panel id when not running inside a Pane terminal",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Example:",
+        "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md"
+      ],
+      "panels last-message": [
+        "Usage:",
+        "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]",
+        "",
+        "Reads a Claude or Codex agent's last reply from its transcript. It never scrapes the screen:",
+        "without a transcript it reports transcript-unavailable and exits non-zero.",
+        "",
+        "Options:",
+        "  --panel <panel-id>             Agent panel id",
+        "  --limit <count>                Maximum characters to return; defaults to 20000 (the end is kept)",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
       ]
     }
   },
@@ -3520,6 +3660,8 @@ export const RUNPANE_CONTRACT = {
       "runpane agents start --repo active --name fix-login --agent claude --prompt \"Fix the login redirect\" --yes --json",
       "runpane agents status --pane <pane-id> --json",
       "runpane agents send --pane <pane-id> --text \"Also add a test\" --yes --json",
+      "runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json",
+      "runpane panels last-message --panel <panel-id> --json",
       "runpane docs search --query \"archive a pane\" --json",
       "runpane links create --pane <pane-id> --json",
       "runpane panes git-status --pane <pane-id> --json",
@@ -3564,6 +3706,8 @@ export const RUNPANE_CONTRACT = {
       "`sessions detach` detach a Pane from a named Session.",
       "`sessions overview` read a live status, activity, git, and pull request overview for a named Session.",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task in a repository, check on it, and send it a follow-up.",
+      "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (`panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`.",
+      "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
       "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only."
@@ -4149,6 +4293,47 @@ export const RUNPANE_CONTRACT = {
         "--as-file-pointer",
         "--dry-run",
         "--yes",
+        "--json"
+      ],
+      [
+        "report",
+        "--state",
+        "ready",
+        "--pr",
+        "747",
+        "--head",
+        "FC5DCE9",
+        "--summary",
+        "Done: tests pass",
+        "--json"
+      ],
+      [
+        "report",
+        "--state",
+        "blocked",
+        "--question",
+        "Which API version?",
+        "--pane",
+        "session-1",
+        "--panel",
+        "panel-1",
+        "--summary-file",
+        "-"
+      ],
+      [
+        "report",
+        "--state=done",
+        "--summary-file=/tmp/report.md",
+        "--pane-dir",
+        "/tmp/pane"
+      ],
+      [
+        "panels",
+        "last-message",
+        "--panel",
+        "panel-1",
+        "--limit",
+        "5000",
         "--json"
       ]
     ],
@@ -5664,7 +5849,8 @@ export const RUNPANE_CONTRACT = {
             "agent.idle",
             "pane.created",
             "pane.gone",
-            "panel.exited"
+            "panel.exited",
+            "agent.report"
           ]
         },
         "paneId": {
@@ -5744,6 +5930,50 @@ export const RUNPANE_CONTRACT = {
         },
         "changedWhileAway": {
           "type": "boolean"
+        },
+        "report": {
+          "$ref": "#/jsonSchemas/agentReport",
+          "description": "Report of an agent.report entry; its summary is cut to 2,000 characters (the panel keeps up to 16,000)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "agentReport": {
+      "type": "object",
+      "description": "The latest runpane report from an agent panel.",
+      "required": [
+        "state",
+        "reportedAt"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "ready",
+            "blocked",
+            "failed",
+            "done"
+          ]
+        },
+        "pr": {
+          "type": "number"
+        },
+        "head": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "summaryTruncated": {
+          "const": true
+        },
+        "summaryPath": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "reportedAt": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -6387,6 +6617,9 @@ export const RUNPANE_CONTRACT = {
               },
               "lastActiveAt": {
                 "type": "string"
+              },
+              "report": {
+                "$ref": "#/jsonSchemas/agentReport"
               }
             },
             "additionalProperties": false
@@ -7000,6 +7233,81 @@ export const RUNPANE_CONTRACT = {
         }
       },
       "additionalProperties": false
+    },
+    "panelLastMessageResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "panelId",
+            "paneId",
+            "agentType",
+            "text",
+            "length",
+            "limit",
+            "truncated"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "panelId": {
+              "type": "string"
+            },
+            "paneId": {
+              "type": "string"
+            },
+            "agentType": {
+              "enum": [
+                "claude",
+                "codex"
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "length": {
+              "type": "number"
+            },
+            "limit": {
+              "type": "number"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "panelId",
+            "paneId",
+            "reason",
+            "message"
+          ],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "panelId": {
+              "type": "string"
+            },
+            "paneId": {
+              "type": "string"
+            },
+            "reason": {
+              "const": "transcript-unavailable"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "agentDoctorResult": {
       "type": "object",
@@ -7687,6 +7995,9 @@ export const RUNPANE_CONTRACT = {
         },
         "link": {
           "type": "string"
+        },
+        "report": {
+          "$ref": "#/jsonSchemas/agentReport"
         }
       },
       "additionalProperties": false
@@ -7726,6 +8037,40 @@ export const RUNPANE_CONTRACT = {
         },
         "next": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "reportResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "paneId",
+        "panelId",
+        "report",
+        "sessionIds"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "generation": {
+          "type": "number"
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "report": {
+          "$ref": "#/jsonSchemas/agentReport"
+        },
+        "sessionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -9309,6 +9654,48 @@ export const RUNPANE_CONTRACT = {
           "The default timeout and screen are intentionally small for agent context safety."
         ]
       },
+      "panels last-message": {
+        "name": "panels last-message",
+        "summary": "Read an agent's last reply from its transcript, without scraping the screen.",
+        "details": "Use this when a worker is READY and you need what it said, such as its PR number or result. It reads the Claude or Codex transcript Pane found for the panel and never falls back to the screen.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--panel",
+            "value": "<panel-id>",
+            "required": true,
+            "description": "Agent panel id."
+          },
+          {
+            "name": "--limit",
+            "value": "<count>",
+            "required": false,
+            "description": "Maximum characters to return; defaults to 20000. The end of the reply is kept."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panels last-message --panel <panel-id> --json"
+        ],
+        "jsonSchemas": [
+          "panelLastMessageResult"
+        ],
+        "notes": [
+          "Without a transcript (a shell panel, another agent, or no reply yet) the result is `{ ok: false, reason: \"transcript-unavailable\" }` and the command exits 1. Use `panels screen` then.",
+          "A worker that ran `runpane report` already handed back its state, PR, head, and summary; read those with `agents status` before reading the whole reply."
+        ]
+      },
       "panels create": {
         "name": "panels create",
         "summary": "Create a reviewer/helper terminal tab inside an existing Pane.",
@@ -9547,7 +9934,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--min-interval",
             "value": "<milliseconds>",
             "required": false,
-            "description": "Opt-in (follow only): hold READY, IDLE, NEW, GONE, EXIT, and UNKNOWN lines and flush them together at most once per interval; BLOCKED bypasses it and carries the held lines with it. Default 0. The orchestrator value is 600000."
+            "description": "Opt-in (follow only): hold READY, IDLE, NEW, GONE, EXIT, and UNKNOWN lines and flush them together at most once per interval; BLOCKED and agent.report bypass it and carries the held lines with it. Default 0. The orchestrator value is 600000."
           },
           {
             "name": "--idle-backoff",
@@ -9558,7 +9945,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--kinds",
             "required": false,
             "value": "<kind,...>",
-            "description": "Limit event kinds: agent.ready, agent.busy, agent.blocked, agent.unknown, agent.idle, pane.created, pane.gone, panel.exited. Default all. Drop agent.busy for any consumer that acts on lines; BUSY carries no action."
+            "description": "Limit event kinds: agent.ready, agent.busy, agent.blocked, agent.unknown, agent.idle, pane.created, pane.gone, panel.exited, agent.report. Default all, except that agent.report arrives only when listed here. Drop agent.busy for any consumer that acts on lines; BUSY carries no action."
           },
           {
             "name": "--pane",
@@ -9651,7 +10038,8 @@ export const RUNPANE_CONTRACT = {
           "Dead watch: judge death by a non-zero exit or a WATCH ERROR line, not by silence. Re-arm once; if it dies again, file runpane doctor --report.",
           "Cadence state is held per named consumer; an anonymous --follow with a cadence flag names itself follow-<pid>. Held lines survive a reconnect of the same consumer; a changed filter re-delivers them under the new filter.",
           "Journal loss is surfaced through reset and dropped metadata.",
-          "The daemon treats omitted idleAfterMs as disabled so older clients never receive agent.idle unexpectedly."
+          "The daemon treats omitted idleAfterMs as disabled so older clients never receive agent.idle unexpectedly.",
+          "agent.report (REPORT <pane-name> pane <pane-id> panel <panel-id> <state> [pr#<n>] [<head>][: <question>]) is a worker's `runpane report`. It is opt-in: only a consumer that lists it in --kinds receives it. It bypasses --min-interval, and orchestrators treat it as the completion signal; a READY without a report means look, and maybe nudge."
         ]
       },
       "panes git-status": {
@@ -10657,6 +11045,86 @@ export const RUNPANE_CONTRACT = {
           "`delivered` is true when the agent took the message or queued it for after its current turn; `delivery` says which (`taken` or `queued`) and how Pane knows (`transcript` or `screen`). Never resend a delivered message.",
           "It types the text and presses Enter, so it is for messages, not keys. To answer a menu, use `runpane panels input --panel <panel-id> --keys down,enter --yes`, then check the screen with `runpane agents status`.",
           "`--as-file-pointer` writes the text to `<pane-dir>/prompts/<pane-id>/<timestamp>.md` (readable only by you) and sends the one line `Read and follow <path>`; the result includes `promptFile`. Prefer it for long prompts."
+        ]
+      },
+      "report": {
+        "name": "report",
+        "summary": "Hand back a worker's structured report: state, PR, head commit, summary, and the question when blocked.",
+        "details": "Run this as a delegated worker when you finish, fail, or get blocked, as the last step of your task. The orchestrator receives it as an agent.report watch event and treats it as the completion signal.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--state",
+            "value": "<ready|blocked|failed|done>",
+            "required": true,
+            "description": "ready: work is ready for review; done: finished with nothing to review; blocked: needs an answer; failed: could not finish."
+          },
+          {
+            "name": "--pr",
+            "value": "<number>",
+            "required": false,
+            "description": "Pull request number."
+          },
+          {
+            "name": "--head",
+            "value": "<sha>",
+            "required": false,
+            "description": "Head commit the report is about, 7-40 hex characters."
+          },
+          {
+            "name": "--summary",
+            "value": "<text>",
+            "required": false,
+            "description": "Summary text; up to 16,000 characters are kept."
+          },
+          {
+            "name": "--summary-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "Read the summary from a file or stdin; the absolute path is kept as summaryPath."
+          },
+          {
+            "name": "--question",
+            "value": "<text>",
+            "required": false,
+            "description": "What you need answered; required with --state blocked."
+          },
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": false,
+            "description": "Pane id when not running inside a Pane terminal (PANE_SESSION_ID)."
+          },
+          {
+            "name": "--panel",
+            "value": "<panel-id>",
+            "required": false,
+            "description": "Panel id when not running inside a Pane terminal (PANE_PANEL_ID)."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json",
+          "runpane report --state blocked --question \"Should the migration drop the old column?\""
+        ],
+        "jsonSchemas": [
+          "reportResult"
+        ],
+        "notes": [
+          "Inside a Pane terminal the report is for the current panel (PANE_SESSION_ID and PANE_PANEL_ID). Explicit --panel (with an optional --pane) wins; with neither, the command fails with a clear error.",
+          "Each report replaces the panel's previous one and survives a Pane restart.",
+          "Watchers receive agent.report only when they list it in --kinds. REPORT lines skip the --min-interval batch."
         ]
       },
       "sessions list": {

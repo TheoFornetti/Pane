@@ -469,6 +469,7 @@
         "panels submit",
         "panels submit-composer",
         "panels wait",
+        "panels last-message",
         "agent-context",
         "mcp",
         "panes git-status",
@@ -494,6 +495,7 @@
         "agents start",
         "agents status",
         "agents send",
+        "report",
         "sessions",
         "sessions list",
         "sessions create",
@@ -601,6 +603,9 @@
         "panels wait": {
           "$ref": "#/$defs/helpLines"
         },
+        "panels last-message": {
+          "$ref": "#/$defs/helpLines"
+        },
         "agent-context": {
           "$ref": "#/$defs/helpLines"
         },
@@ -674,6 +679,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "agents send": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "report": {
           "$ref": "#/$defs/helpLines"
         },
         "sessions": {

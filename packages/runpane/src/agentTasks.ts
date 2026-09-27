@@ -2,7 +2,9 @@ import type { ParsedArgs } from './commands';
 import { confirmMutation } from './daemonActions';
 import { invokeDaemon } from './daemonClient';
 import { buildPaneLink } from './links';
+import { describeReport } from './watchLines';
 import {
+  type AgentReport,
   buildPaneCreateRequest,
   buildPanelInputRequest,
   markSuggestionLine,
@@ -15,6 +17,18 @@ import {
 } from './localControl';
 
 type AgentStatus = 'working' | 'ready' | 'blocked' | 'idle' | 'exited' | 'unknown';
+
+interface AgentStatusResult {
+  ok: true;
+  paneId: string;
+  panelId: string;
+  paneName?: string;
+  status: AgentStatus;
+  screen: string;
+  hasUndeliveredText: boolean;
+  link: string;
+  report?: AgentReport;
+}
 
 /** Terminal control bytes other than tab and newline are keystrokes, not message text. */
 function hasControlCharacters(text: string): boolean {
@@ -70,13 +84,14 @@ export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
 /** `agents status`: the agent's current state from the workspace journal plus its screen. */
 export async function runAgentsStatus(parsed: ParsedArgs): Promise<number> {
   const { paneId, panelId } = await resolveAgentPanel(parsed);
-  const [state, screen] = await Promise.all([
+  const [state, screen, report] = await Promise.all([
     invokeDaemon('runpane:workspace:state', [{}], workspaceStateResultSchema, { paneDir: parsed.paneDir }),
     invokeDaemon('runpane:panels:screen', [{ panelId, limit: parsed.limit ?? 40 }], panelScreenResultSchema, { paneDir: parsed.paneDir }),
+    readPanelReport(parsed, paneId, panelId),
   ]);
   const entry = state.entries.find((candidate) => candidate.panelId === panelId);
-  const result = {
-    ok: true as const,
+  const result: AgentStatusResult = {
+    ok: true,
     paneId,
     panelId,
     paneName: entry?.paneName,
@@ -85,8 +100,17 @@ export async function runAgentsStatus(parsed: ParsedArgs): Promise<number> {
     hasUndeliveredText: screen.composer.hasUndeliveredText,
     link: buildPaneLink({ kind: 'pane', id: paneId, panelId }),
   };
-  print(parsed, result, `${result.status}\n${markSuggestionLine(result.screen, screen.composer.ghostText)}`);
+  if (report) result.report = report;
+  const reportLine = report ? `\nReport: ${describeReport(report)} (${report.reportedAt})` : '';
+  print(parsed, result, `${result.status}${reportLine}\n${markSuggestionLine(result.screen, screen.composer.ghostText)}`);
   return 0;
+}
+
+/** The panel's latest `runpane report`, from its Pane's panel list. */
+async function readPanelReport(parsed: ParsedArgs, paneId: string, panelId: string): Promise<AgentReport | undefined> {
+  if (!paneId) return undefined;
+  const { panels } = await invokeDaemon('runpane:panels:list', [{ paneId }], panelListResultSchema, { paneDir: parsed.paneDir });
+  return panels.find((candidate) => candidate.panelId === panelId)?.report;
 }
 
 /** `agents send`: submit a follow-up and report whether the agent took or queued it. */

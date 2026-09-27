@@ -96,9 +96,15 @@ const sessionMembershipEventSchema = boundary.object({
   paneIds: boundary.optional(boundary.array(boundary.string)),
 });
 /** Kinds only a consumer that asks for them (by `kinds`, or a Session scope) receives, so older clients never see them. */
-const OPT_IN_KINDS: readonly RunpaneWorkspaceEntryKind[] = ['pane.associated', 'pane.detached'];
+const OPT_IN_KINDS: readonly RunpaneWorkspaceEntryKind[] = [
+  'pane.associated',
+  'pane.detached',
+  'pr.conflicted',
+  'pr.checks',
+  'pr.merged',
+];
 /** Pane-level kinds that carry no agent type and still pass `agentsOnly`. */
-const PANE_LIFECYCLE_KINDS: readonly RunpaneWorkspaceEntryKind[] = ['pane.created', 'pane.gone', ...OPT_IN_KINDS];
+const PANE_LEVEL_KINDS: readonly RunpaneWorkspaceEntryKind[] = ['pane.created', 'pane.gone', ...OPT_IN_KINDS];
 const panelExitEventSchema = boundary.object({
   type: boundary.string,
   source: boundary.object({
@@ -160,6 +166,18 @@ export class WorkspaceJournal implements PaneEventSink {
     if (this.ring.length > this.capacity) this.ring.shift();
     this.resolveWaiters();
     return full;
+  }
+
+  /**
+   * Appends a Pane-level entry raised by a daemon service (the Session PR monitor), filling in the
+   * Pane's name and repo (the id stands in for an unknown Pane's name, as for membership entries).
+   */
+  appendPaneEntry(
+    paneId: string,
+    entry: Omit<RunpaneWorkspaceEntry, 'gen' | 'at' | keyof WorkspacePaneMetadata>,
+  ): RunpaneWorkspaceEntry {
+    const pane = this.lookupPane(paneId) ?? { paneId, paneName: paneId };
+    return this.append({ ...pane, ...entry });
   }
 
   readAfter(cursor: number, filter: WorkspaceJournalFilter = {}, limit = 256): WorkspaceJournalReadResult {
@@ -410,7 +428,7 @@ function matchesFilter(
   if (filter.excludePaneIds && filter.excludePaneIds.includes(entry.paneId)) return false;
   if (filter.repoId !== undefined && entry.repoId !== filter.repoId) return false;
   if (filter.nameContains && !entry.paneName.toLocaleLowerCase().includes(filter.nameContains.toLocaleLowerCase())) return false;
-  if (filter.agentsOnly && !entry.agentType && !PANE_LIFECYCLE_KINDS.includes(entry.kind)) return false;
+  if (filter.agentsOnly && !entry.agentType && !PANE_LEVEL_KINDS.includes(entry.kind)) return false;
   return true;
 }
 

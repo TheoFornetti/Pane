@@ -264,6 +264,20 @@ describe('WorkspaceJournal', () => {
       expect(journal.readAfter(0, { kinds: ['pane.associated'], agentsOnly: true }).entries).toHaveLength(1);
     });
 
+    it('delivers PR entries to Session watchers and to consumers that list them, never to older kinds-less consumers', () => {
+      const { journal } = sessionJournal();
+      const pr = { number: 747, url: 'https://github.com/acme/app/pull/747', headOid: 'abc' };
+      expect(journal.appendPaneEntry('one', { kind: 'pr.conflicted', source: 'github', pr })).toMatchObject({ paneName: 'ONE' });
+      journal.appendPaneEntry('two', { kind: 'pr.merged', source: 'github', pr });
+
+      expect(journal.readAfter(0, {}).entries).toEqual([]);
+      expect(journal.readAfter(0, { sessionId, agentsOnly: true }).entries).toMatchObject([
+        { kind: 'pr.conflicted', paneId: 'one', pr, source: 'github' },
+      ]);
+      expect(journal.readAfter(0, { kinds: ['pr.merged'], agentsOnly: true }).entries.map(entry => entry.paneId)).toEqual(['two']);
+      expect(journal.readAfter(0, { sessionId, kinds: ['agent.ready'] }).entries).toEqual([]);
+    });
+
     it('keys a Session scope by the Session rather than its Panes', () => {
       expect(workspaceFilterKey({ sessionId })).toBe(workspaceFilterKey({ sessionId }));
       expect(workspaceFilterKey({ sessionId })).not.toBe(workspaceFilterKey({ sessionId: 'other' }));

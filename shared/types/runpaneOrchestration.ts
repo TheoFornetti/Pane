@@ -45,7 +45,20 @@ export type RunpaneWorkspaceEntryKind =
   /** The Pane joined a Session (`sessions associate`). */
   | 'pane.associated'
   /** The Pane left a Session (`sessions detach`). */
-  | 'pane.detached';
+  | 'pane.detached'
+  /** A Session member's open PR became conflicting with its base. */
+  | 'pr.conflicted'
+  /** A Session member's PR checks settled (`checks: passed | failed`) for its head commit. */
+  | 'pr.checks'
+  /** A Session member's PR was merged. */
+  | 'pr.merged';
+
+/** The PR a `pr.*` entry reports on. */
+export interface RunpaneWorkspacePullRequest {
+  number: number;
+  url: string;
+  headOid: string;
+}
 
 export interface RunpaneWorkspaceEntry {
   gen: number;
@@ -61,7 +74,7 @@ export interface RunpaneWorkspaceEntry {
   agentType?: string;
   from?: AgentState;
   to?: AgentState;
-  source: 'agent' | 'exit' | 'session';
+  source: 'agent' | 'exit' | 'session' | 'github';
   reason?: string | null;
   settledMs?: number;
   idleMs?: number;
@@ -79,6 +92,12 @@ export interface RunpaneWorkspaceEntry {
   /** Named Session of a `pane.associated` or `pane.detached` entry. */
   sessionId?: string;
   sessionName?: string;
+  /** PR of a `pr.conflicted`, `pr.checks`, or `pr.merged` entry. */
+  pr?: RunpaneWorkspacePullRequest;
+  /** Settled result of a `pr.checks` entry. */
+  checks?: 'passed' | 'failed';
+  /** Up to five failing check names of a failed `pr.checks` entry. */
+  failingChecks?: string[];
   panels?: RunpaneWorkspacePanelSummary[];
 }
 

@@ -978,6 +978,29 @@ describe('runpane IPC handlers', () => {
       expect(empty.entries).toEqual([]);
     });
 
+    it('delivers PR events to a Session watcher, with a conflict bypassing the minimum interval', async () => {
+      const { workspaceJournal, registry, membership } = sessionRegistry();
+      const prKinds = [...sessionKinds, 'pr.conflicted', 'pr.checks', 'pr.merged'];
+      const request = { as: 'session-s1', session: 'Release', timeoutMs: 0, idleAfterMs: 0, kinds: prKinds, minIntervalMs: 600_000 };
+      await registry.invoke('runpane:workspace:wait', [request]);
+      membership('associated', 'worker');
+      expect((await registry.invoke('runpane:workspace:wait', [request])).entries).toHaveLength(1);
+
+      const pr = { number: 747, url: 'https://github.com/acme/app/pull/747', headOid: 'abc' };
+      workspaceJournal.appendPaneEntry('worker', { kind: 'pr.merged', source: 'github', pr });
+      expect((await registry.invoke('runpane:workspace:wait', [request])).entries).toEqual([]);
+      workspaceJournal.appendPaneEntry('worker', { kind: 'pr.conflicted', source: 'github', pr });
+      const urgent = await registry.invoke('runpane:workspace:wait', [request]);
+      expect(urgent.entries.map((entry: { kind: string }) => entry.kind)).toEqual(['pr.merged', 'pr.conflicted']);
+      expect(urgent.entries[1]).toMatchObject({ paneId: 'worker', source: 'github', pr });
+
+      // Without --session, PR kinds arrive only when listed.
+      const listed = await registry.invoke('runpane:workspace:wait', [{ since: 0, timeoutMs: 0, kinds: ['pr.checks', 'pr.conflicted'] }]);
+      expect(listed.entries.map((entry: { kind: string }) => entry.kind)).toEqual(['pr.conflicted']);
+      const unlisted = await registry.invoke('runpane:workspace:wait', [{ since: 0, timeoutMs: 0 }]);
+      expect(unlisted.entries.some((entry: { kind: string }) => entry.kind.startsWith('pr.'))).toBe(false);
+    });
+
     it('rejects --session with --pane and an unknown Session', async () => {
       const { registry } = sessionRegistry();
       await expect(registry.invoke('runpane:workspace:wait', [{ session: 'Release', paneIds: [session.id], timeoutMs: 0 }]))

@@ -1,7 +1,7 @@
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { ProjectEnvironment, ToolPanel, ToolPanelType } from '../../../shared/types/panels';
 
-type PanelContext = 'project' | 'worktree';
+export type PanelContext = 'project' | 'worktree';
 
 export interface PanelCreateOptions {
   customResume?: CustomCommandResume | null;

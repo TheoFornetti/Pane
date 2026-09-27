@@ -1440,6 +1440,36 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   await expect.poll(readPanels).toHaveLength(3);
 });
 
+test('the Session + menu opens terminals, agents, and browsers as tabs', async ({ page }) => {
+  await installSessionsFixture(page, [sessionFixture('plus', 'Plus demo', '', '', new Date(0).toISOString())]);
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plus').click();
+  const titleBarTabs = page.getByTestId('window-title-bar-session-tabs');
+  await expect(titleBarTabs.getByRole('tab')).toHaveCount(1);
+  const openMenu = async () => {
+    await titleBarTabs.getByRole('button', { name: 'Add tool', exact: true }).click();
+    await expect(page.getByRole('menu')).toBeVisible();
+  };
+
+  await openMenu();
+  await page.getByRole('menuitem', { name: 'Browser' }).click();
+  await expect(titleBarTabs.getByRole('tab')).toHaveCount(2);
+
+  await openMenu();
+  await page.getByRole('menu').getByRole('menuitem').filter({ hasText: /Claude|Codex|Cursor/ }).first().click();
+  await expect(titleBarTabs.getByRole('tab')).toHaveCount(3);
+  await expect(titleBarTabs.getByRole('tab').last()).toHaveAttribute('aria-selected', 'true');
+
+  // The first plain shell becomes the Terminal dock, as in a Pane; the next is a tab.
+  await openMenu();
+  await page.getByRole('menuitem', { name: /^Terminal/ }).click();
+  await expect(page.getByRole('button', { name: 'Collapse terminal', exact: true })).toBeVisible();
+  await expect(titleBarTabs.getByRole('tab')).toHaveCount(3);
+  await openMenu();
+  await page.getByRole('menuitem', { name: /^Terminal/ }).click();
+  await expect(titleBarTabs.getByRole('tab')).toHaveCount(4);
+});
+
 test('agent-opened pages open as tabs in a split beside the Session conversation', async ({ page }, testInfo) => {
   await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())]);
   await page.goto('/');
@@ -1474,6 +1504,14 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   expect(rightStripBox?.y).toBe(titleBarBox?.y);
   await expect(groupStrips.nth(0)).toHaveCSS('-webkit-app-region', 'drag');
   await expect(groupStrips.nth(1)).toHaveCSS('padding-right', '112px');
+
+  // A group strip's "+" opens the same menu and adds the tool to that group.
+  await groupStrips.nth(1).getByRole('button', { name: 'Add tool', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Browser' }).click();
+  await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(2);
+  await groupStrips.nth(1).getByRole('button', { name: /^Close(?! plan\.html)/ }).click();
+  await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(1);
+  await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toBeVisible();
 
   await openPage('report-page', 'report.html');
   await expect(groupStrips).toHaveCount(2);

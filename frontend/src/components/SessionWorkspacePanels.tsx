@@ -2,7 +2,10 @@ import { createPortal } from 'react-dom';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, PanelRight, Terminal } from 'lucide-react';
-import type { SessionPanelLayout, ToolPanel } from '../../../shared/types/panels';
+import type { SessionPanelLayout, TerminalPanelState, ToolPanel, ToolPanelType } from '../../../shared/types/panels';
+import type { PanelCreateOptions } from '../types/panelComponents';
+import { AddToolMenu } from './panels/AddToolMenu';
+import { getDockTerminalPanel } from '../utils/terminalDock';
 import { panelApi } from '../services/panelApi';
 import { usePanelStore } from '../stores/panelStore';
 import { PanelContainer } from './panels/PanelContainer';
@@ -26,8 +29,24 @@ import {
 const EMPTY_PANELS: ToolPanel[] = [];
 const SESSION_INSPECTOR_TABS = ['overview', 'files', 'changes'] as const;
 type SessionInspectorTab = typeof SESSION_INSPECTOR_TABS[number];
-/** Panels that live on the Session stage as tabs; terminals and Files dock elsewhere. */
-const STAGE_PANEL_TYPES = new Set<ToolPanel['type']>(['editor', 'browser']);
+/** Files and Changes live in the Session sidebar, never on the stage. */
+const INSPECTOR_PANEL_TYPES = new Set<ToolPanel['type']>(['explorer', 'diff']);
+
+/** The first plain shell is the Session's bottom Terminal dock, as in a Pane. */
+function sessionDockPanel(panels: readonly ToolPanel[], agentPanelIds: readonly string[]): ToolPanel | undefined {
+  return getDockTerminalPanel(panels.filter(panel => !agentPanelIds.includes(panel.id)));
+}
+
+/**
+ * Tabs on the Session stage besides the orchestrator: every tool the user or
+ * an agent opens (terminals, agents, commands, files, pages), except the
+ * orchestrator's panels for other agents, the dock shell, and the inspectors.
+ */
+function sessionStagePanels(panels: readonly ToolPanel[], agentPanelIds: readonly string[]): ToolPanel[] {
+  const dock = sessionDockPanel(panels, agentPanelIds);
+  return panels.filter(panel => !agentPanelIds.includes(panel.id) && panel.id !== dock?.id
+    && !INSPECTOR_PANEL_TYPES.has(panel.type));
+}
 
 export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewContent, changesContent, toolbarActions, onStageSplitChange }: {
   agentPanel: ToolPanel; agentPanelIds: string[];
@@ -57,9 +76,12 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const creating = useRef(false);
-  const terminal = panels.find(panel => panel.type === 'terminal' && !agentPanelIds.includes(panel.id));
+  // The parent passes a fresh array each render; key it so effects stay put.
+  const agentIdsKey = agentPanelIds.join('\n');
+  const agentIds = useMemo(() => agentIdsKey.split('\n'), [agentIdsKey]);
+  const terminal = sessionDockPanel(panels, agentIds);
   const explorer = panels.find(panel => panel.type === 'explorer');
-  const tabs = useMemo(() => [agentPanel, ...panels.filter(panel => STAGE_PANEL_TYPES.has(panel.type))], [agentPanel, panels]);
+  const tabs = useMemo(() => [agentPanel, ...sessionStagePanels(panels, agentIds)], [agentPanel, panels, agentIds]);
   const agentPanelId = agentPanel.id;
   const persistTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -89,7 +111,7 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
       usePanelStore.getState().setPanels(sessionId, saved);
       const stored = await panelApi.getLayout(sessionId).catch(() => null);
       if (cancelled) return;
-      const stage = (usePanelStore.getState().panels[sessionId] ?? saved).filter(panel => STAGE_PANEL_TYPES.has(panel.type));
+      const stage = sessionStagePanels(usePanelStore.getState().panels[sessionId] ?? saved, agentIds);
       const base = stored?.version === 1 ? stored : createSingleGroupLayout([agentPanelId], agentPanelId);
       const splitIds = new Set(stage.filter(panel => panel.metadata?.openPlacement === 'split').map(panel => panel.id));
       applyLayout(reconcile(base, [agentPanelId, ...stage.map(panel => panel.id)], splitIds).layout);
@@ -102,7 +124,8 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
       if (panel.sessionId !== sessionId) return;
       usePanelStore.getState().addPanel(panel);
       const current = usePanelStore.getState().layouts[sessionId];
-      if (!current || !STAGE_PANEL_TYPES.has(panel.type)) return;
+      const onStage = sessionStagePanels(usePanelStore.getState().panels[sessionId] ?? [], agentIds).some(item => item.id === panel.id);
+      if (!current || !onStage) return;
       const focused = findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root);
       // Agents open pages and files beside the conversation by default.
       const root = panel.metadata?.openPlacement === 'split'
@@ -127,7 +150,34 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
       updated();
       deleted();
     };
-  }, [sessionId, agentPanelId, applyLayout]);
+  }, [sessionId, agentPanelId, agentIds, applyLayout]);
+
+  // The "+" menu: tools open as tabs in the focused group and run in the
+  // Session folder. A first plain shell becomes the Terminal dock instead.
+  const createTool = useCallback(async (type: ToolPanelType, options?: PanelCreateOptions) => {
+    setError(null);
+    try {
+      let initialState = options?.initialState;
+      if (type === 'terminal' && options?.initialCommand) {
+        const customState: Pick<TerminalPanelState, 'initialCommand' | 'customResume'> = { initialCommand: options.initialCommand };
+        if (options.customResume !== undefined) customState.customResume = options.customResume;
+        initialState = { customState };
+      }
+      const panel = await panelApi.createPanel({ sessionId, type, title: options?.title, initialState });
+      usePanelStore.getState().addPanel(panel);
+      if (sessionDockPanel(usePanelStore.getState().panels[sessionId] ?? [], agentIds)?.id === panel.id) {
+        setShowTerminal(true);
+        return;
+      }
+      const current = usePanelStore.getState().layouts[sessionId];
+      if (!current) return;
+      const focused = findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root);
+      const root = addPanelToGroup(current.root, focused.id, panel.id);
+      applyLayout({ ...activatePanelInLayout({ ...current, root }, panel.id), focusedGroupId: focused.id });
+    } catch {
+      setError('Could not open that tool. Please try again.');
+    }
+  }, [sessionId, agentIds, applyLayout]);
 
   async function toggleTool(type: 'terminal' | 'explorer') {
     if (!loaded || creating.current) return;
@@ -194,12 +244,18 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
   const primaryTabs = primary
     ? primary.panelIds.map(id => tabs.find(panel => panel.id === id)).filter((panel): panel is ToolPanel => !!panel)
     : [agentPanel];
-  const tabStrip = !isSplit && (
+  const addToolMenu = (
+    <AddToolMenu panels={panels} hideButton={isSplit}
+      onPanelCreate={(type, options) => { void createTool(type, options); }}
+      onShowExplorer={() => { void toggleTool('explorer'); }} />
+  );
+  const tabStrip = !isSplit && (<>
     <PanelTabStrip panels={primaryTabs} activePanelId={primary?.activePanelId ?? agentPanelId} idNamespace={`session-${sessionId}`}
       alwaysShowClose
       onPanelSelect={panel => { if (primary) selectPanel(primary.id, panel); }}
       onPanelClose={handleClose} />
-  );
+    {addToolMenu}
+  </>);
   const titleBarActions = (
     <>
       {toolbarActions}
@@ -221,9 +277,11 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <div className="relative min-h-0 flex-1">
+            {/* Once split, the group strips' "+" (and ⌘T) open this menu. */}
+            {isSplit && <div className="absolute left-2 top-0 h-9">{addToolMenu}</div>}
             {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={layout.focusedGroupId ?? primaryGroup(layout.root).id}
               isMainRepo={false} onSizesChange={resizeSplit} onPanelSelect={selectPanel} onPanelClose={handleClose}
-              onFocusGroup={focusGroup} showAddTool={false} alwaysShowClose
+              onFocusGroup={focusGroup} alwaysShowClose
               titleBarInset={!!sessionTabsSlot} showPermanentTabs />}
           </div>
           <div className="flex flex-shrink-0 flex-col border-t border-border-primary" style={{ height: showTerminal ? '35%' : 32 }}>

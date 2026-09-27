@@ -3544,7 +3544,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default; pass `--no-pinned` to opt out. Panes created interactively in the Pane UI are unaffected.",
-      "For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is reported only after argument attachment or composer-clear plus activity evidence. Routing input does not by itself verify submission.",
+      "For `panes create --wait-ready`, `initialInput.delivery` says where the prompt went: `taken` or `queued` (from the agent's transcript, its screen, or `argv` for a launch-argument prompt), `in-composer`, or `unknown`. `initialInput.verifiedSubmitted` is true exactly when it is `taken` or `queued`. Routing input does not by itself verify submission.",
       "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. Add `--dry-run` to inspect the same evidence without archiving. Successful archives wait for worktree removal and report `worktreeCleanup`.",
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
       "`runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.",
@@ -5096,6 +5096,9 @@ export const RUNPANE_CONTRACT = {
                       },
                       "verifiedSubmitted": {
                         "type": "boolean"
+                      },
+                      "delivery": {
+                        "$ref": "#/jsonSchemas/panelSubmitResult/properties/delivery"
                       },
                       "staged": {
                         "type": "boolean"
@@ -6724,6 +6727,9 @@ export const RUNPANE_CONTRACT = {
             },
             "hasUndeliveredText": {
               "type": "boolean"
+            },
+            "ghostText": {
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -6794,6 +6800,31 @@ export const RUNPANE_CONTRACT = {
         },
         "verifiedSubmitted": {
           "type": "boolean"
+        },
+        "delivery": {
+          "type": "object",
+          "required": [
+            "state",
+            "evidence"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "taken",
+                "queued",
+                "in-composer",
+                "unknown"
+              ]
+            },
+            "evidence": {
+              "enum": [
+                "transcript",
+                "screen",
+                "argv"
+              ]
+            }
+          },
+          "additionalProperties": false
         },
         "sentAt": {
           "type": "string"
@@ -7307,6 +7338,9 @@ export const RUNPANE_CONTRACT = {
         "verifiedSubmitted": {
           "type": "boolean"
         },
+        "delivery": {
+          "$ref": "#/jsonSchemas/panelSubmitResult/properties/delivery"
+        },
         "sentAt": {
           "type": "string"
         },
@@ -7677,6 +7711,9 @@ export const RUNPANE_CONTRACT = {
         },
         "delivered": {
           "type": "boolean"
+        },
+        "delivery": {
+          "$ref": "#/jsonSchemas/panelSubmitResult/properties/delivery"
         },
         "blocked": {
           "type": "string"
@@ -8570,7 +8607,7 @@ export const RUNPANE_CONTRACT = {
           "Use --initial-input-file for multi-line prompts or shell-sensitive initial input. A long or multi-line prompt is never typed into the shell: on bash, zsh or sh the agent launches with `\"$(cat '<prompt file>')\"` reading a private copy under `<pane-dir>/prompts/<pane-id>/`; on PowerShell, cmd, fish or WSL the prompt is pasted into the agent's composer once it is ready.",
           "`--as-file-pointer` writes the text to `<pane-dir>/prompts/<pane-id>/<timestamp>.md` (readable only by you) and sends the one line `Read and follow <path>`; the result includes `promptFile`. Prefer it for long prompts.",
           "For Claude, text starting with `!`, `#`, `/` or `@` is sent unchanged and the result carries a `warnings` entry (for example `leading-bang-runs-shell`), because Claude Code gives those characters a meaning of its own.",
-          "With --wait-ready, verifiedSubmitted is earned from delivery evidence; routing initial input alone does not imply verified submission.",
+          "With --wait-ready, `initialInput.delivery` reports `taken`, `queued`, `in-composer` or `unknown` with its evidence (`transcript`, `screen`, or `argv` for a prompt passed at launch); verifiedSubmitted is true for `taken` or `queued`. Routing initial input alone does not imply verified submission.",
           "If initialInput.blocked.kind is submission_unverified, do not submit again automatically. Inspect initialInput.staged and attempts, then run nextCommand to resolve the ambiguous composer state.",
           "When the JSON result includes nextCommand, run it to validate that the terminal produced output before reporting success.",
           "Multi-pane requests are created sequentially today. The --concurrency flag is accepted for compatibility, but agents should not rely on parallel creation.",
@@ -9142,7 +9179,7 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Use this before `panels output` when an agent only needs the latest visible/current state.",
-          "The composer object reports whether a Claude or Codex composer is present and whether it holds undelivered text. Claude's dim placeholder suggestion does not count as undelivered text.",
+          "The composer object reports whether a Claude or Codex composer is present and whether it holds undelivered text. Placeholder and suggestion text (drawn dim or grey, such as Claude's suggested next prompt) does not count as undelivered text; `composer.ghostText` carries it, and text output marks its line with `⟨suggestion⟩`.",
           "If hasMore is true and context is missing, rerun with a larger --limit or use `panels output`."
         ]
       },
@@ -9203,7 +9240,7 @@ export const RUNPANE_CONTRACT = {
           "panelSubmitResult"
         ],
         "notes": [
-          "The response includes sequenceName, verifiedSubmitted, and nextCommand. If ok is false, inspect blocked and do not assume the turn started.",
+          "The response includes sequenceName, verifiedSubmitted, delivery and nextCommand. For Claude and Codex, `delivery.state` is `taken` (the agent started a turn with the text), `queued` (it holds the text until its current turn ends), `in-composer` (the text is still in the composer) or `unknown`, and `delivery.evidence` is `transcript` (the agent's own transcript) or `screen`. verifiedSubmitted is true for `taken` or `queued`; never resend those. If ok is false, inspect blocked and do not assume the turn started.",
           "Do not follow `panels submit` with `panels submit-composer`; Claude and idle Codex composer submission is handled atomically.",
           "Use `panels input` for Ctrl-C, escape sequences, or any workflow requiring exact bytes.",
           "On `blocked.kind: composer-unknown`, nothing was typed. Check `panels screen`; if the agent is at a prompt Pane does not recognise, use `panels input`.",
@@ -9416,7 +9453,7 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "Use `panels input` or `panels submit` to write prompt text first; this command only submits the current composer.",
           "Use --strategy auto for agent workflows; explicit strategies are diagnostic escape hatches.",
-          "The JSON result includes sequenceName and verifiedSubmitted. If ok is false, follow blocked.suggestedCommand instead of assuming submission happened.",
+          "The JSON result includes sequenceName, verifiedSubmitted and, for Claude and Codex, delivery (`taken`, `queued`, `in-composer` or `unknown`, with `transcript` or `screen` evidence). If ok is false, follow blocked.suggestedCommand instead of assuming submission happened.",
           "With `--strategy auto`, if the staged text is still visible in the composer after the first attempt, Pane sends one plain Enter and checks again. It never sends a second Enter to an empty composer."
         ]
       },
@@ -10617,7 +10654,7 @@ export const RUNPANE_CONTRACT = {
           "agentSendResult"
         ],
         "notes": [
-          "`delivered` is true only when Pane saw the message leave the composer.",
+          "`delivered` is true when the agent took the message or queued it for after its current turn; `delivery` says which (`taken` or `queued`) and how Pane knows (`transcript` or `screen`). Never resend a delivered message.",
           "It types the text and presses Enter, so it is for messages, not keys. To answer a menu, use `runpane panels input --panel <panel-id> --keys down,enter --yes`, then check the screen with `runpane agents status`.",
           "`--as-file-pointer` writes the text to `<pane-dir>/prompts/<pane-id>/<timestamp>.md` (readable only by you) and sends the one line `Read and follow <path>`; the result includes `promptFile`. Prefer it for long prompts."
         ]

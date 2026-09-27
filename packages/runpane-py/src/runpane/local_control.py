@@ -559,7 +559,7 @@ def run_panels_screen(parsed: Any) -> int:
         print_json(result)
         return 0
 
-    text = result.get("text") or ""
+    text = mark_suggestion_line(result.get("text") or "", (result.get("composer") or {}).get("ghostText"))
     sys.stdout.write(text)
     if text and not text.endswith("\n"):
         sys.stdout.write("\n")
@@ -582,12 +582,33 @@ def run_panels_submit(parsed: Any) -> int:
             f"{verb} {input_bytes} byte{suffix} via {result.get('sequenceName')} "
             f"to panel {result.get('panelId')}.{verified}"
         )
+        print_delivery(result.get("delivery"))
         if result.get("blocked"):
             print(f"Blocked: {result['blocked'].get('message')}")
         print_prompt_notes(result)
         if result.get("nextCommand"):
             print(f"Next: {result.get('nextCommand')}")
     return 0 if result.get("ok") else 1
+
+
+def print_delivery(delivery: Optional[Dict[str, Any]], prefix: str = "") -> None:
+    """Where the prompt went, for human output: `Delivery: queued (transcript)`."""
+    if delivery:
+        print(f"{prefix}Delivery: {delivery.get('state')} ({delivery.get('evidence')})")
+
+
+def mark_suggestion_line(text: str, ghost_text: Optional[str]) -> str:
+    """Mark the composer line that shows ghost text (a placeholder or suggested prompt)."""
+    ghost = (ghost_text or "").split("\n")[0].strip()
+    if not ghost:
+        return text
+    lines = text.split("\n")
+    for index in range(len(lines) - 1, -1, -1):
+        line = lines[index].strip()
+        if line[:1] in ("❯", "›", ">") and ghost in line:
+            lines[index] = f"{lines[index].rstrip()}  ⟨suggestion⟩"
+            break
+    return "\n".join(lines)
 
 
 def print_prompt_notes(result: Dict[str, Any], prefix: str = "") -> None:
@@ -614,6 +635,7 @@ def run_panels_submit_composer(parsed: Any) -> int:
         verb = "Submitted" if result.get("ok") else "Could not verify"
         verified = " verified" if result.get("verifiedSubmitted") else " unverified"
         print(f"{verb} composer with {result.get('sequenceName')} to panel {result.get('panelId')}.{verified}")
+        print_delivery(result.get("delivery"))
         if result.get("blocked"):
             print(f"Blocked: {result['blocked'].get('message')}")
         if result.get("nextCommand"):
@@ -1157,6 +1179,7 @@ def print_pane_create_result(result: Dict[str, Any]) -> None:
                 blocked = readiness.get("blocked")
                 if blocked:
                     print(f"  Blocked: {blocked.get('message')}")
+            print_delivery((item.get("initialInput") or {}).get("delivery"), "  ")
             print_prompt_notes(item, "  ")
             if item.get("nextCommand"):
                 print(f"  Next: {item.get('nextCommand')}")

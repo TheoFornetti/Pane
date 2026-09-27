@@ -5,6 +5,7 @@ import { buildPaneLink } from './links';
 import {
   buildPaneCreateRequest,
   buildPanelInputRequest,
+  markSuggestionLine,
   paneCreateResultSchema,
   panelListResultSchema,
   panelScreenResultSchema,
@@ -84,11 +85,11 @@ export async function runAgentsStatus(parsed: ParsedArgs): Promise<number> {
     hasUndeliveredText: screen.composer.hasUndeliveredText,
     link: buildPaneLink({ kind: 'pane', id: paneId, panelId }),
   };
-  print(parsed, result, `${result.status}\n${result.screen}`);
+  print(parsed, result, `${result.status}\n${markSuggestionLine(result.screen, screen.composer.ghostText)}`);
   return 0;
 }
 
-/** `agents send`: submit a follow-up and report whether Pane saw it leave the composer. */
+/** `agents send`: submit a follow-up and report whether the agent took or queued it. */
 export async function runAgentsSend(parsed: ParsedArgs): Promise<number> {
   if (parsed.panelInput !== undefined && hasControlCharacters(parsed.panelInput)) {
     throw new Error('runpane agents send types a message and presses Enter, so it cannot send keys such as arrows, Escape, or Ctrl-C. '
@@ -104,6 +105,7 @@ export async function runAgentsSend(parsed: ParsedArgs): Promise<number> {
     paneId,
     panelId,
     delivered,
+    delivery: sent.delivery,
     blocked: sent.blocked?.message,
     promptFile: sent.promptFile,
     warnings: sent.warnings,
@@ -111,7 +113,8 @@ export async function runAgentsSend(parsed: ParsedArgs): Promise<number> {
       ? `Check on it with \`runpane agents status --pane ${paneId}\`.`
       : `The message may still be in the composer. Run \`runpane agents status --panel ${panelId}\` to see the screen.`,
   };
-  print(parsed, result, delivered ? `Delivered to ${panelId}.` : `Not confirmed: ${result.blocked ?? result.next}`);
+  const how = sent.delivery ? ` (${sent.delivery.state}, from the ${sent.delivery.evidence})` : '';
+  print(parsed, result, delivered ? `Delivered to ${panelId}${how}.` : `Not confirmed${how}: ${result.blocked ?? result.next}`);
   if (!parsed.json) printPromptNotes(result);
   return delivered ? 0 : 1;
 }

@@ -1952,6 +1952,118 @@ print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines(), "ref
   assert.strictEqual(python.refused, true);
 }
 
+async function checkDeliveryParity() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const localControl = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const { runAgentsSend } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'agentTasks.js'));
+  const output = process.stdout;
+  const schemas = contract.jsonSchemas;
+  const queued = { state: 'queued', evidence: 'transcript' };
+  const submitResult = {
+    ok: true, panelId: 'panel-1', paneId: 'session-1', inputBytes: 18, enter: 'cr', sequenceName: 'enter-cr',
+    verifiedSubmitted: true, verification: 'observed', delivery: queued, sentAt: '2026-09-27T18:00:00.000Z',
+  };
+  const composerResult = {
+    ok: false, panelId: 'panel-1', paneId: 'session-1', inputBytes: 2, strategy: 'enter', sequenceName: 'enter-cr',
+    verifiedSubmitted: false, delivery: { state: 'in-composer', evidence: 'screen' }, sentAt: '2026-09-27T18:00:00.000Z',
+    blocked: { kind: 'agent-prompt', message: 'Still in the composer.' },
+  };
+  const screenText = `${'─'.repeat(20)}\n❯ merge it\n${'─'.repeat(20)}\n  ? for shortcuts`;
+  const screenResult = {
+    ok: true, panelId: 'panel-1', paneId: 'session-1', source: 'alternateScreen', limit: 80, returnedLineCount: 4, hasMore: false,
+    text: screenText, state: { initialized: true, agentType: 'claude' },
+    composer: { isPresent: true, hasUndeliveredText: false, ghostText: 'merge it' },
+  };
+  const createResult = {
+    ok: true,
+    repo: { id: 1, name: 'repo', path: '/repo', active: true, sessionCount: 1 },
+    items: [{
+      ok: true, index: 0, name: 'task', pinned: true, sessionId: 'session-1', panelId: 'panel-1',
+      initialInput: {
+        delivered: true, submitted: true, inputBytes: 12, strategy: 'argument', sequenceName: 'argument',
+        verifiedSubmitted: true, delivery: { state: 'taken', evidence: 'argv' },
+      },
+    }],
+  };
+  assertMatchesJsonSchema(submitResult, schemas.panelSubmitResult, 'panel submit result with delivery');
+  assertMatchesJsonSchema(composerResult, schemas.panelSubmitComposerResult, 'submit-composer result with delivery');
+  assertMatchesJsonSchema(screenResult, schemas.panelScreenResult, 'panel screen result with ghostText');
+  assert.strictEqual(matchesJsonSchema({ ...submitResult, delivery: { ...queued, file: '/t.jsonl' } }, schemas.panelSubmitResult), false);
+  assert.strictEqual(matchesJsonSchema({ ...screenResult, composer: { ...screenResult.composer, ghostText: 3 } }, schemas.panelScreenResult), false);
+
+  const calls = [];
+  const stdout = [];
+  const written = [];
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const originalWrite = output.write;
+  daemonClient.invokeDaemon = async (channel, args) => {
+    calls.push({ channel, request: args[0] });
+    if (channel === 'runpane:panels:submit') return submitResult;
+    if (channel === 'runpane:panels:submit-composer') return composerResult;
+    if (channel === 'runpane:panels:screen') return screenResult;
+    return createResult;
+  };
+  console.log = (line) => stdout.push(String(line));
+  output.write = (chunk) => { written.push(String(chunk)); return true; };
+  try {
+    await localControl.runPanelsSubmit(parseRunpaneArgs(['panels', 'submit', '--panel', 'panel-1', '--text', 'Also run the linter', '--yes', '--json']));
+    await localControl.runPanelsSubmit(parseRunpaneArgs(['panels', 'submit', '--panel', 'panel-1', '--text', 'Also run the linter', '--yes']));
+    await localControl.runPanelsSubmitComposer(parseRunpaneArgs(['panels', 'submit-composer', '--panel', 'panel-1', '--yes', '--json']));
+    await localControl.runPanelsScreen(parseRunpaneArgs(['panels', 'screen', '--panel', 'panel-1', '--json']));
+    await localControl.runPanelsScreen(parseRunpaneArgs(['panels', 'screen', '--panel', 'panel-1']));
+    await runAgentsSend(parseRunpaneArgs(['agents', 'send', '--panel', 'panel-1', '--text', 'Also run the linter', '--yes', '--json']));
+    await runAgentsSend(parseRunpaneArgs(['agents', 'send', '--panel', 'panel-1', '--text', 'Also run the linter', '--yes']));
+    await localControl.runPanesCreate(parseRunpaneArgs(['panes', 'create', '--repo', 'active', '--name', 'task', '--agent', 'claude', '--prompt', 'Start task', '--yes']));
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+    output.write = originalWrite;
+  }
+
+  const printed = stdout.filter(line => line.startsWith('{')).map(line => JSON.parse(line));
+  // Boundary decoders drop undeclared keys, so these prove the decoders declare them.
+  assert.deepStrictEqual(printed[0].delivery, queued);
+  assert.deepStrictEqual(printed[1].delivery, composerResult.delivery);
+  assert.strictEqual(printed[2].composer.ghostText, 'merge it');
+  assert.deepStrictEqual(printed[3].delivery, queued);
+  assert.strictEqual(printed[3].delivered, true);
+  assert.ok(stdout.includes('Delivery: queued (transcript)'), stdout.join('\n'));
+  assert.ok(stdout.includes('Delivered to panel-1 (queued, from the transcript).'), stdout.join('\n'));
+  assert.ok(stdout.includes('  Delivery: taken (argv)'), stdout.join('\n'));
+  const screenOut = written.join('');
+  assert.ok(screenOut.includes('❯ merge it  ⟨suggestion⟩\n'), screenOut);
+
+  const pythonOutput = runPythonSnippet(`
+import contextlib
+import io
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+results = {
+    "runpane:panels:submit": json.loads(${JSON.stringify(JSON.stringify(submitResult))}),
+    "runpane:panels:submit-composer": json.loads(${JSON.stringify(JSON.stringify(composerResult))}),
+    "runpane:panels:screen": json.loads(${JSON.stringify(JSON.stringify(screenResult))}),
+    "runpane:panes:create": json.loads(${JSON.stringify(JSON.stringify(createResult))}),
+}
+local_control.invoke_daemon = lambda channel, args, **kwargs: results[channel]
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    local_control.run_panels_submit(parse_args(["panels", "submit", "--panel", "panel-1", "--text", "Also run the linter", "--yes"]))
+    local_control.run_panels_submit_composer(parse_args(["panels", "submit-composer", "--panel", "panel-1", "--yes"]))
+    local_control.run_panels_screen(parse_args(["panels", "screen", "--panel", "panel-1"]))
+    local_control.run_panes_create(parse_args(["panes", "create", "--repo", "active", "--name", "task", "--agent", "claude", "--prompt", "Start task", "--yes"]))
+print(json.dumps({"stdout": stdout.getvalue().splitlines()}))
+`);
+  const python = JSON.parse(pythonOutput);
+  assert.ok(python.stdout.includes('Delivery: queued (transcript)'), python.stdout.join('\n'));
+  assert.ok(python.stdout.includes('Delivery: in-composer (screen)'), python.stdout.join('\n'));
+  assert.ok(python.stdout.includes('❯ merge it  ⟨suggestion⟩'), python.stdout.join('\n'));
+  assert.ok(python.stdout.includes('  Delivery: taken (argv)'), python.stdout.join('\n'));
+}
+
 async function checkPanesCostParity() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -2927,6 +3039,7 @@ async function runChecks() {
   await checkPanePinParity();
   await checkWrapperAgentParity();
   await checkFilePointerParity();
+  await checkDeliveryParity();
   await checkPaneCreateBlockedReadiness();
   await checkPanesCostParity();
   await checkPaneRenameParity();

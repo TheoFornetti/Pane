@@ -325,13 +325,15 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     expect(canonicalSkill).toContain('runpane watch --session "$PANE_ORCHESTRATION_SESSION_ID" --follow --quiet --json');
     expect(canonicalSkill).toContain('the cursor is `session-<uuid>`');
     expect(canonicalSkill).not.toContain('session-<session-id>');
-    expect(canonicalSkill).toContain('--kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff');
+    expect(canonicalSkill).toContain('--kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff');
     // One Session watcher follows membership; the skill no longer asks for one --pane each or a re-arm.
     expect(canonicalSkill).not.toContain('--pane <pane-id> --kinds');
     expect(canonicalSkill).not.toContain('re-arm this\n  same named cursor with the current Pane set');
     expect(canonicalSkill).toContain('Never re-arm after associate or detach.');
     expect(canonicalSkill.replace(/\s+/g, ' ')).toContain('A replayed `agent.ready` is never READY');
     expect(canonicalSkill).toContain('JOINED (`pane.associated`) and LEFT (`pane.detached`)');
+    expect(canonicalSkill).toContain('PR (`pr.conflicted`, `pr.checks`, `pr.merged`)');
+    expect(canonicalSkill.replace(/\s+/g, ' ')).toContain('so never poll `gh` yourself');
     expect(canonicalSkill.replace(/\s+/g, ' ')).toContain('about 6 wake-ups per active pane per hour');
     expect(canonicalSkill).not.toContain('Filter HEARTBEAT');
     expect(canonicalSkill.replace(/\s+/g, ' ')).toContain('`_error`, `_reset`, and `_dropped` always arrive');

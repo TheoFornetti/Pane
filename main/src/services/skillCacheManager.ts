@@ -584,7 +584,7 @@ The daemon owns liveness. Never write or run an ad-hoc watcher.
 Arm at session start:
 
     runpane watch --self-test
-    runpane watch --session "$PANE_ORCHESTRATION_SESSION_ID" --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
+    runpane watch --session "$PANE_ORCHESTRATION_SESSION_ID" --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
 
 Its named cursor defaults to \`session-<uuid>\`, where \`<uuid>\` is the UUID
 inside the Session ID: for the Session \`__orchestration_session_<uuid>__\`,
@@ -639,6 +639,12 @@ unattended, then user present):
   liveness; \`--quiet\` drops it.
 - JOINED (\`pane.associated\`) and LEFT (\`pane.detached\`): a Pane joined or
   left this Session. They confirm the change; the watcher already follows it.
+- PR (\`pr.conflicted\`, \`pr.checks\`, \`pr.merged\`): the daemon polls
+  each member's open PR about every 3 minutes, so never poll \`gh\` yourself.
+  \`PR <pane> #<n> CONFLICTED\` and \`CHECKS FAILED <names>\` skip the batch:
+  send the Pane's agent the fix. \`CHECKS PASSED\` and \`MERGED\` arrive with
+  the next batch. They fire on changes only, so after a daemon restart check
+  open PRs once with \`gh pr view\`.
 - RESET (\`_reset\`) and DROPPED (\`_dropped\`): the journal restarted or
   lost entries. Refresh the Session overview before acting on later lines.
 - Replay: after a RESET, entries with \`replay: true\` restate current state.

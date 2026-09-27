@@ -128,11 +128,15 @@ When someone is waiting on the result, use the user-present profile instead:
 A Session orchestrator watches its whole Session with one command instead of
 one `--pane` per Pane. The daemon re-reads the Session's Panes on every read,
 so `sessions associate` and `sessions detach` need no re-arm, and `JOINED` and
-`LEFT` (`pane.associated`, `pane.detached`) report the change. The cursor
-defaults to `session-<uuid>`:
+`LEFT` (`pane.associated`, `pane.detached`) report the change. For Session
+members with an open PR, the daemon also polls GitHub about every 3 minutes
+and reports `PR <pane-name> pane <pane-id> #<number> CONFLICTED`, `CHECKS
+PASSED` or `CHECKS FAILED <names>`, and `MERGED` (`pr.conflicted`,
+`pr.checks`, `pr.merged`) on transitions only. The cursor defaults to
+`session-<uuid>`:
 
 ```bash
-runpane watch --session <session-id> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
+runpane watch --session <session-id> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
 ```
 
 After a `RESET`, JSON baseline entries carry `replay: true`. They restate

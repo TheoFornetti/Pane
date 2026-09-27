@@ -182,7 +182,7 @@ or exact name, and the daemon follows every Pane associated with it:
 
 ```text
 runpane watch --session <session-id> --follow --quiet --json \
-  --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached \
+  --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged \
   --settle 180000 --blocked-settle 30000 --min-interval 600000 \
   --idle-backoff
 ```
@@ -205,6 +205,33 @@ not already a member) and `sessions detach`. A watch without `--session`
 receives them only when `--kinds` lists them, so older clients never see an
 unknown kind. Cadence state is keyed by the Session rather than its current
 Panes, so held lines survive membership changes.
+
+PR events come from the daemon's Session PR monitor
+(`main/src/services/sessionPrMonitor.ts`, decision D7). About every 3 minutes
+(jittered) it runs `gh pr view <number> --json
+number,url,state,mergeable,mergeStateStatus,statusCheckRollup,headRefOid` for
+each Pane associated with a Session that is not archived, but only when Pane's
+git status already knows the Pane's PR is open. With no such Pane it runs no
+`gh` at all. Its calls share the one-at-a-time `gh` slot Pane uses for its own
+PR lookups. It appends, on transitions only:
+
+- `pr.conflicted` (`PR <pane-name> pane <pane-id> #<number> CONFLICTED`): the
+  PR now conflicts with its base. GitHub's transient `UNKNOWN` answer never
+  counts as a change.
+- `pr.checks` (`... CHECKS PASSED`, or `... CHECKS FAILED lint,test` with up to
+  five names): every check on the head commit finished. A new head commit
+  reports again once its checks finish.
+- `pr.merged` (`... MERGED`). A merged PR is not polled again. A closed PR stops
+  polling without an entry.
+
+Entries carry `pr: {number, url, headOid}`, and `pr.checks` adds `checks` and
+`failingChecks`. The first poll of a PR after the daemon starts only records
+its state, so a restart never restates old conflicts; check `gh pr view` once
+after a restart. `pr.conflicted` and failed `pr.checks` bypass
+`--min-interval` like `BLOCKED`. The PR kinds are opt-in like `JOINED`/`LEFT`.
+Without `gh`, or while it is signed out, rate limited, or timing out, the
+monitor logs once, doubles its delay up to an hour, and resumes when `gh`
+answers again.
 
 The cursor defaults to `session-<uuid>`, where `<uuid>` is the UUID inside the
 Session ID: the Session `__orchestration_session_<uuid>__` uses

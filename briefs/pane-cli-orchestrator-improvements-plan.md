@@ -382,6 +382,13 @@ workers too.
 - The call is `gh pr view --json mergeable,mergeStateStatus,statusCheckRollup,state`.
 - It emits `pr.conflicted`, `pr.checks` and `pr.merged`, on transitions only.
 
+**PR10 status: implemented** on `runpane/pr-watch-events` (stacked on PR4) as
+`main/src/services/sessionPrMonitor.ts`, sharing GitStatusManager's one-at-a-time `gh` slot. Plan
+deltas: the first poll of a PR seeds silently (a daemon restart restates nothing); `pr.checks`
+fires once every check on the head finishes (`passed`/`failed`, up to five failing names);
+`pr.conflicted` and failed `pr.checks` bypass `--min-interval`; no `pr.closed` or
+`pr.conflict-resolved` kinds; the PR kinds are opt-in like JOINED/LEFT.
+
 ---
 
 ## 4. Decisions (accepted 2026-09-27: all recommendations)

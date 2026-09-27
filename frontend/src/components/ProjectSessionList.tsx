@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Home, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, BarChart3, Settings } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Home, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -98,7 +98,6 @@ export function ProjectSessionList({
   const orchestrationAvailability = useOrchestrationSessionStore(s => s.availability);
   const selectOrchestrationSession = useOrchestrationSessionStore(s => s.select);
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
-  const navigateToUsage = useNavigationStore(s => s.navigateToUsage);
   const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
   // Expansion state lives in the navigation store so the always-mounted
   // session hotkeys (useSessionNavigationHotkeys) see the same visible ordering
@@ -410,27 +409,6 @@ export function ProjectSessionList({
             <AgentStatusDot status={paneChatStatus} size="sm" className="ml-auto" />
           </button>
         ) : null}
-
-        <button
-          type="button"
-          data-testid="usage-nav"
-          onClick={() => {
-            setSidebarNavigationScope('repositories');
-            navigateToUsage();
-          }}
-          className={cn(
-            SIDEBAR_ROW_BASE,
-            SIDEBAR_ROW_GAP,
-            SIDEBAR_ROW_PADDING,
-            'py-2 text-sm hover:bg-surface-hover hover:text-text-primary',
-            activeView === 'usage'
-              ? 'bg-surface-hover text-text-primary'
-              : 'text-text-secondary',
-          )}
-        >
-          <BarChart3 className="w-4 h-4" />
-          <span>Usage &amp; Limits</span>
-        </button>
 
         {showRemoteDesktopLink && onRemoteDesktopClick && (
           <Tooltip content={remoteDesktopTooltip} side="right" className="block w-full">

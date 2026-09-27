@@ -170,6 +170,20 @@ Every PR that changes commands or flags does the following:
 - **Compatibility:** additive, except that the `agent-context` error moves to JSON on stdout when
   `--json` is set.
 
+**PR1 status: implemented** on `pane-session-management-improvements`. Plan deltas:
+- `panes adopt` with a prompt still passes silently; that error moved to PR3, which implements the
+  support in parallel.
+- `--all-managed` stays. It is the explicit spelling of the default scope (every non-archived,
+  non-hidden managed Pane) and still conflicts with `--pane`; its docs now say so.
+- The cursor-shortening helper (`derivedWatchCursorName`, `derived_watch_cursor_name`) is
+  module-private in `localControl.ts` / `local_control.py`. Knip rejects an unused export, and
+  PR4's `--session` default lives in the same `runWatch`.
+- `--quiet` is rejected outside `watch`. `--self-test` still prints its WATCH OK result under
+  `--quiet`.
+- Skipping cleanup for a Pane with no repository also reports `missing-project-context` with
+  `worktreeWillRemain: true`. The internal `reasonUnavailable` field is gone, because `reason`
+  replaces it.
+
 ### PR2: Wrapper-launched agent identity and honest submit results (M)
 
 The addendum's P1 and P2. This PR does not depend on the others, and it fixes watch for wrapper

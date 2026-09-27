@@ -24,6 +24,7 @@ import { useOuterPanelResize } from '../hooks/useOuterPanelResize';
 import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
 import { OuterResizeSeparator } from './ui/OuterResizeSeparator';
 import { usePanelStore } from '../stores/panelStore';
+import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import { useProjectViewActionsStore } from '../stores/projectViewActionsStore';
 import { panelApi } from '../services/panelApi';
 import { setPendingViewCommit } from './panels/diff/pendingViewCommit';
@@ -1233,6 +1234,9 @@ export const SessionView = memo(() => {
     </div>
   ), [agentPresets, customCommands, handlePanelCreate, hotkeyDisplay]);
 
+  // With the window's own title bar, a split stage's top strips are the title row.
+  const titleBarHostsControls = useTitleBarSlotStore(state => state.trailingSlot !== null);
+
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
     if (!sessionLayout || !activeSession) return null;
@@ -1256,9 +1260,11 @@ export const SessionView = memo(() => {
         onStripDrop={handleStripDrop}
         getPanelTabPresentation={getPanelTabPresentation}
         emptyState={emptyStage}
+        titleBarInset={titleBarHostsControls}
       />
     );
   }, [
+    titleBarHostsControls,
     sessionLayout, activeSession, tabBarPanels, focusedGroupId,
     handleSizesChange, handleGroupPanelSelect, handlePanelClose, handleFocusGroup,
     isTabDragging, draggedPanelId, dropZones, handleDropZoneChange,

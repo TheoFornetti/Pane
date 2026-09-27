@@ -77,7 +77,7 @@ test('a split pane keeps its tabs in the group strips and collapses the top row'
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Split fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Split fixture$/ }).click();
   await page.getByRole('button', { name: 'Split pane', exact: true }).click();
 
   const alpha = page.getByRole('tab', { name: 'Alpha', exact: true });
@@ -90,6 +90,18 @@ test('a split pane keeps its tabs in the group strips and collapses the top row'
 
   const groupRows = page.locator('.panel-group-tab-bar');
   await expect(groupRows).toHaveCount(2);
+  // The top-edge strips are the title row: no blank row above them, the whole
+  // row drags the window, and the right strip clears the title bar controls.
+  const [titleBarBox, leftRowBox, rightRowBox] = await Promise.all([
+    page.getByTestId('window-title-bar').boundingBox(),
+    groupRows.nth(0).boundingBox(),
+    groupRows.nth(1).boundingBox(),
+  ]);
+  expect(leftRowBox?.y).toBe(titleBarBox?.y);
+  expect(rightRowBox?.y).toBe(titleBarBox?.y);
+  await expect(groupRows.nth(0)).toHaveCSS('-webkit-app-region', 'drag');
+  await expect(groupRows.nth(0).getByRole('tab').first()).toHaveCSS('-webkit-app-region', 'no-drag');
+  await expect(groupRows.nth(1)).toHaveCSS('padding-right', '112px');
   const expectedBackground = await computedVar(page, 'background-color', 'var(--color-bg-chrome)');
   for (let index = 0; index < 2; index += 1) {
     const styles = await groupRows.nth(index).evaluate((element) => {

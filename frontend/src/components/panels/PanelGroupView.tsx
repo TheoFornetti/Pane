@@ -121,6 +121,11 @@ export interface PanelGroupViewProps {
   emptyState?: React.ReactNode;
   showAddTool?: boolean;
   alwaysShowClose?: boolean;
+  /** This strip is the window's title row (top edge of a split stage). */
+  titleRow?: boolean;
+  /** Leave room at the right for the window title bar controls. */
+  reserveTitleControls?: boolean;
+  showPermanentTabs?: boolean;
 }
 
 export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
@@ -145,6 +150,9 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
   emptyState,
   showAddTool = true,
   alwaysShowClose = false,
+  titleRow = false,
+  reserveTitleControls = false,
+  showPermanentTabs = false,
 }) => {
   const handleMouseDownCapture = useCallback(() => {
     onFocusGroup(group.id);
@@ -168,8 +176,8 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
   // from EVERY group while split, so strips carry only working tabs. Their
   // content still renders inside whichever group owns them.
   const stripPanels = useMemo(
-    () => orderedPanels.filter(p => p.metadata?.permanent !== true),
-    [orderedPanels],
+    () => showPermanentTabs ? orderedPanels : orderedPanels.filter(p => p.metadata?.permanent !== true),
+    [orderedPanels, showPermanentTabs],
   );
 
   // Strip drop indexes are relative to the displayed subset; translate to the
@@ -206,7 +214,11 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
           pushes content down so it never covers it. Single-group panes
           render no strip here (the top bar is the strip then). */}
       {multiGroup && (
-        <div className="panel-group-tab-bar flex-shrink-0 flex items-center bg-bg-chrome border-b border-border-primary pr-2">
+        <div className={cn(
+          "panel-group-tab-bar flex-shrink-0 flex items-center bg-bg-chrome border-b border-border-primary",
+          titleRow && "panel-group-tab-bar-title",
+          reserveTitleControls ? "pr-28" : "pr-2",
+        )}>
           <PanelTabStrip
             idNamespace={group.id}
             panels={stripPanels}
@@ -244,7 +256,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
         {orderedPanels.map(panel => {
           const isActiveTab = panel.id === group.activePanelId;
           const keepAlive = panel.type === 'terminal' || panel.type === 'diff';
-          const panelTabNamespace = !multiGroup || panel.metadata?.permanent === true ? 'top' : group.id;
+          const panelTabNamespace = !multiGroup || (panel.metadata?.permanent === true && !showPermanentTabs) ? 'top' : group.id;
           if (!isActiveTab && !keepAlive) return null;
           return (
             <div

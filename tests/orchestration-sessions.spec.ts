@@ -846,6 +846,34 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
   await expect(selectedRow(child)).not.toHaveClass(/bg-surface-selected/);
 });
 
+test('Session rows show whether their child Panes are working or waiting', async ({ page }) => {
+  await installSessionsFixture(page, [
+    sessionFixture('activity', 'Activity', '', '', '2026-09-16T12:00:00.000Z', [
+      { paneId: 'pane-alpha', panelIds: [], attachedAt: '2026-09-16T12:00:00.000Z' },
+      { paneId: 'pane-beta', panelIds: [], attachedAt: '2026-09-16T12:00:00.000Z' },
+    ]),
+  ], [paneFixture('pane-alpha', 'Alpha pane'), paneFixture('pane-beta', 'Beta pane')]);
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+  const row = page.getByTestId('orchestration-session-activity');
+  await expect(row).toContainText('2');
+  const emit = (panelId: string, sessionId: string, state: string) => page.evaluate(({ panelId, sessionId, state }) => {
+    // SAFETY: installElectronApiMock adds these controls before the app loads.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { emitPanelAgentStatus: (panelId: string, sessionId: string, state: string) => void } };
+    mockWindow.__paneTestElectronMock.emitPanelAgentStatus(panelId, sessionId, state);
+  }, { panelId, sessionId, state });
+
+  await emit('alpha-agent', 'pane-alpha', 'working');
+  await emit('beta-agent', 'pane-beta', 'working');
+  await expect(row).toContainText('2 working');
+  await emit('beta-agent', 'pane-beta', 'blocked');
+  await expect(row).toContainText('1 needs input');
+  await emit('alpha-agent', 'pane-alpha', 'idle');
+  await emit('beta-agent', 'pane-beta', 'idle');
+  await expect(row).not.toContainText('working');
+  await expect(row).not.toContainText('input');
+});
+
 test('Sessions can be pinned, persist across reload, and unpin back to the normal list', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [
@@ -1432,10 +1460,20 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await openPage('plan-page', 'plan.html');
   const groupStrips = page.locator('.panel-group-tab-bar');
   await expect(groupStrips).toHaveCount(2);
-  // The permanent agent tab stays in the title bar; opened pages get the side strip.
-  await expect(titleBarTabs.getByRole('tab')).toHaveCount(1);
+  // Once split, every tab (the agent's too) lives in a group strip, and the
+  // strips are the title row: nothing is left in, or reserved for, the title bar.
+  await expect(titleBarTabs.getByRole('tab')).toHaveCount(0);
+  await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(1);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
-  await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(0);
+  const [titleBarBox, leftStripBox, rightStripBox] = await Promise.all([
+    page.getByTestId('window-title-bar').boundingBox(),
+    groupStrips.nth(0).boundingBox(),
+    groupStrips.nth(1).boundingBox(),
+  ]);
+  expect(leftStripBox?.y).toBe(titleBarBox?.y);
+  expect(rightStripBox?.y).toBe(titleBarBox?.y);
+  await expect(groupStrips.nth(0)).toHaveCSS('-webkit-app-region', 'drag');
+  await expect(groupStrips.nth(1)).toHaveCSS('padding-right', '112px');
 
   await openPage('report-page', 'report.html');
   await expect(groupStrips).toHaveCount(2);

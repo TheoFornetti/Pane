@@ -36,6 +36,7 @@ export type SettingsSettingId =
   | 'default-pane-chat-agent'
   | 'agent-skill'
   | 'agent-context'
+  | 'session-defaults'
   | 'claude-executable'
   | 'commit-footer'
   | 'git-attribution'

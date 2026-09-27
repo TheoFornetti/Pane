@@ -158,7 +158,7 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 
 `runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.
 
-`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default; pass `--no-pinned` to opt out. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.
+`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin; manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.
 
 For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is reported only after argument attachment or composer-clear plus activity evidence. Routing input does not by itself verify submission.
 
@@ -167,6 +167,8 @@ For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is repor
 `runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.
 
 `runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.
+
+`runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. HTML files render in a browser tab and other files open in an editor tab; an existing tab showing the same target is reused. It activates the tab inside the Pane but never raises or focuses the Pane window.
 
 `runpane panels list` lists tool panels inside one Pane session.
 
@@ -237,6 +239,7 @@ Brief tools:
 - `panes rename`: Rename a Pane without changing its worktree, branch, panels, or focus.
 - `panes focus`: Raise the Pane window and select a Pane (and optionally a panel) on explicit user request.
 - `panels create`: Create reviewer/helper terminal tabs inside an existing Pane; they share that Pane's worktree.
+- `panels open`: Show the user an HTML page, plan, report, dev server URL, or file as a tab in split view beside the agent.
 - `panels list`: List tool panels inside a Pane session.
 - `panels output`: Read recent terminal output from a panel.
 - `panels screen`: Read a compact current-screen view from a terminal panel.
@@ -264,6 +267,8 @@ Use Pane when the user wants visible Panes or co-drivable parallel feature/PR wo
 Register the main/base repository once. Do not register pre-created git worktrees as separate Pane repositories unless the user explicitly asks.
 
 Use `runpane panes create` for separate visible Panes (Pane sessions) for feature/PR work. Use `runpane panels create` for reviewer/helper tabs inside an existing Pane that should share that Pane's worktree.
+
+To show the user an HTML page, plan, report, dev server URL, or file, run `runpane panels open --file <path>` or `runpane panels open --url <url>` with `--source agent --yes --json`; it opens a tab in split view beside the agent. Prefer this over the system browser.
 
 Typical workflow: register the saved base repository once; create one Pane (Pane session) per feature/PR; use panels/tabs inside that Pane for helper or reviewer agents that should share the worktree; archive the Pane after the PR is done to remove it from active Panes and clean up its managed worktree when applicable.
 
@@ -334,6 +339,8 @@ These flags are consumed by local daemon-control commands:
 --agent <codex|claude|cursor>
 --tool-command <command>
 --title <title>
+--url <url>
+--file <path>
 --initial-input <text> (aliases: --prompt)
 --initial-input-file <path|->
 --from-json <path|->
@@ -366,6 +373,8 @@ These flags are consumed by local daemon-control commands:
 --wait-ready
 --no-focus
 --focus
+--split
+--tab
 --pinned
 --no-pinned
 --no-associate

@@ -63,6 +63,12 @@ export interface TerminalPanelState {
   agentSessionId?: string;           // Agent-generated session ID for resuming conversations
   /** Stable orchestration identity for resumed Session terminals. */
   orchestrationSessionId?: string;
+  /** Session-owned working directory, also used by legacy shared terminal owners. */
+  orchestrationWorkspace?: string;
+  /** Applied when the terminal next starts, not while its agent is running. */
+  orchestrationProfile?: string;
+  /** Wrapper/custom commands own their flags and resume behavior. */
+  preserveLaunchCommand?: boolean;
   customResume?: CustomCommandResume | null;
   customResumeStarted?: boolean;
 
@@ -195,6 +201,8 @@ export interface SetupTasksPanelState {
 export interface BrowserPanelState {
   currentUrl?: string;
   isPopup?: boolean;
+  /** Set when an agent reopens this page (runpane panels open); the tab reloads to show the latest file. */
+  reopenedAt?: string;
 }
 
 export interface ToolPanelMetadata {
@@ -202,6 +210,12 @@ export interface ToolPanelMetadata {
   lastActiveAt: string;
   position: number;              // Tab order
   permanent?: boolean;           // Cannot be closed (for diff panel)
+  /**
+   * Where the renderer places this panel the first time it enters the layout.
+   * 'split' opens it beside the primary group (reusing an existing side group
+   * as tabs). Ignored once the panel is in the stored layout.
+   */
+  openPlacement?: 'split' | 'tab';
 }
 
 export interface CreatePanelRequest {

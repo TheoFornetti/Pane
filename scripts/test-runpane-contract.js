@@ -556,6 +556,9 @@ function compareParserParity() {
       agent: parsed.agent ?? null,
       toolCommand: parsed.toolCommand ?? null,
       title: parsed.title ?? null,
+      url: parsed.url ?? null,
+      file: parsed.file ?? null,
+      placement: parsed.placement ?? null,
       initialInput: parsed.initialInput ?? null,
       initialInputFile: parsed.initialInputFile ?? null,
       panelInput: parsed.panelInput ?? null,
@@ -638,6 +641,9 @@ for args in samples:
         "agent": parsed.agent,
         "toolCommand": parsed.tool_command,
         "title": parsed.title,
+        "url": parsed.url,
+        "file": parsed.file,
+        "placement": parsed.placement,
         "initialInput": parsed.initial_input,
         "initialInputFile": parsed.initial_input_file,
         "panelInput": parsed.panel_input,
@@ -2208,6 +2214,13 @@ function compareAgentContextParity() {
   assert.ok(nodePanelsDetail.command.details.includes("shares the existing Pane's worktree"));
   assert.ok(nodePanelsDetail.command.notes.some((note) => note.includes("share the existing Pane's worktree")));
 
+  const nodeOpenDetail = JSON.parse(runNode(['agent-context', '--command', 'panels open', '--json']));
+  const pyOpenDetail = JSON.parse(runPython(['agent-context', '--command', 'panels open', '--json']));
+  assert.deepStrictEqual(pyOpenDetail, nodeOpenDetail);
+  assert.strictEqual(nodeOpenDetail.command.name, 'panels open');
+  assert.ok(nodeOpenDetail.command.details.includes('split view'));
+  assert.ok(nodeOpenDetail.command.jsonSchemas.includes('panelOpenResult'));
+
   const managedBlock = nodeBrief.source === 'runpane-contract'
     ? require(path.join(rootDir, 'packages', 'runpane', 'dist', 'generated', 'contract.js')).RUNPANE_CONTRACT.agentContext.managedBlock.join('\n')
     : '';
@@ -2515,6 +2528,46 @@ async function checkAgentTemplateParity() {
   });
 }
 
+async function checkSessionChildPinDefaults() {
+  const daemonClient = require(path.join(rootDir, 'packages/runpane/dist/daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages/runpane/dist/commands.js'));
+  const { runPanesCreate } = require(path.join(rootDir, 'packages/runpane/dist/localControl.js'));
+  const oldInvoke = daemonClient.invokeDaemon;
+  const oldLog = console.log;
+  const oldSession = process.env.PANE_ORCHESTRATION_SESSION_ID;
+  const pins = [];
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-child-pins-'));
+  const batch = path.join(directory, 'batch.json');
+  fs.writeFileSync(batch, JSON.stringify({ repo: 'active', panes: [{ name: 'child', tool: { agent: 'codex' } }] }));
+  try {
+    process.env.PANE_ORCHESTRATION_SESSION_ID = 'session-test';
+    daemonClient.invokeDaemon = async (_channel, args) => {
+      pins.push(args[0].panes[0].pinned);
+      return { ok: true, repo: {}, items: [] };
+    };
+    console.log = () => {};
+    for (const extra of [[], ['--pinned'], ['--no-pinned']]) {
+      await runPanesCreate(parseRunpaneArgs(['panes', 'create', '--repo', 'active', '--name', 'child', '--agent', 'codex', '--yes', '--json', ...extra]));
+    }
+    await runPanesCreate(parseRunpaneArgs(['panes', 'create', '--from-json', batch, '--yes', '--json']));
+    assert.deepStrictEqual(pins, [false, true, false, false]);
+    const pythonPins = runPythonSnippet(`
+import json
+from runpane.cli import parse_args
+from runpane.local_control import build_pane_create_request
+base = ["panes", "create", "--repo", "active", "--name", "child", "--agent", "codex"]
+print(json.dumps([build_pane_create_request(parse_args(base + extra))["panes"][0]["pinned"] for extra in [[], ["--pinned"], ["--no-pinned"]]]))
+`);
+    assert.deepStrictEqual(JSON.parse(pythonPins), [false, true, false]);
+  } finally {
+    daemonClient.invokeDaemon = oldInvoke;
+    console.log = oldLog;
+    if (oldSession === undefined) delete process.env.PANE_ORCHESTRATION_SESSION_ID;
+    else process.env.PANE_ORCHESTRATION_SESSION_ID = oldSession;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 async function runChecks() {
   checkGeneratedContractFresh();
   ensureBuiltCli();
@@ -2541,6 +2594,7 @@ async function runChecks() {
   await checkPaneArchiveDryRunParity();
   await checkPanePinParity();
   await checkPaneCreateBlockedReadiness();
+  await checkSessionChildPinDefaults();
   await checkPanesCostParity();
   await checkPaneRenameParity();
   await checkAgentTemplateParity();

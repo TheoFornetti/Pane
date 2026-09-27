@@ -118,8 +118,12 @@ worst case, usually 1 to 3:
 
 ```bash
 runpane watch --self-test
-runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
+runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
 ```
+
+When someone is waiting on the result, use the user-present profile instead:
+`--settle 60000 --blocked-settle 15000 --min-interval 120000` with no
+`--idle-backoff`, so `READY` arrives within about 3 minutes rather than 13.
 
 - `--kinds` drops `agent.busy`; `BUSY` carries no action.
 - `--settle <ms>` emits `READY` only after the panel stays idle that long. A
@@ -133,8 +137,10 @@ runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited
   daily, and resets on any activity.
 
 These flags require `--follow`. Pane Chat arms them automatically through its
-pane-orchestrator skill, so you only need them for your own scripts. Filter
-`HEARTBEAT` out of any monitor that wakes an agent, and judge a dead watch by a
+pane-orchestrator skill, so you only need them for your own scripts. Pass
+`--quiet` to any monitor that wakes an agent: it drops `WATCH OK`, `HEARTBEAT`,
+and `WATCH RECONNECTED` (`_ok`, `_heartbeat`, `_reconnected` in JSON), while
+`WATCH ERROR`, `RESET`, and `DROPPED` always print. Judge a dead watch by a
 non-zero exit or a `WATCH ERROR` line, not by silence. `runpane agent-context
 --command watch --json` lists every flag with its default.
 

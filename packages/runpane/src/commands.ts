@@ -81,6 +81,8 @@ export interface ParsedArgs {
   includeShells?: boolean;
   noHeldInput?: boolean;
   selfTest?: boolean;
+  /** Watch only: drop the _ok, _heartbeat, and _reconnected control lines. */
+  quiet?: boolean;
   report?: boolean;
   bodyFile?: string;
   message?: string;
@@ -188,6 +190,9 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   if (parsed.command === 'watch' && parsed.follow && parsed.timeoutMs === 0) {
     throw new Error('--timeout-ms must be greater than 0 with --follow.');
   }
+  if (parsed.command === 'watch' && parsed.sessionId !== undefined) {
+    throw new Error('runpane watch --session is not supported yet. Pass one --pane per Pane from `runpane sessions overview --session <id|name> --json`.');
+  }
   if (parsed.command === 'watch' && parsed.allManaged && parsed.watchPaneIds?.length) {
     throw new Error('runpane watch accepts either --all-managed or --pane, not both.');
   }
@@ -235,6 +240,11 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
     }
     if (isAgentContextCommand && arg === '--command') {
       parsed.contextCommand = readValue(args, ++index, arg, literalValues);
+      continue;
+    }
+    // Offline commands accept --pane-dir and ignore it, so one --pane-dir works for every command.
+    if ((isAgentContextCommand || parsed.command === 'version') && arg === '--pane-dir') {
+      parsed.paneDir = readValue(args, ++index, arg, literalValues);
       continue;
     }
     if (isLocalCommand && LOCAL_BOOLEAN_FLAGS.has(arg)) {
@@ -377,6 +387,13 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--self-test') {
     parsed.selfTest = true;
+    return;
+  }
+  if (flag === '--quiet' || flag === '--no-control-lines') {
+    if (parsed.command !== 'watch') {
+      throw new Error(`${flag} is only valid with runpane watch.`);
+    }
+    parsed.quiet = true;
     return;
   }
   if (flag === '--report') {

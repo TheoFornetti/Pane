@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
@@ -402,6 +403,8 @@ interface PaneArchiveSafetyCheck {
   upstreamRefreshed?: boolean;
   unpushedCommits?: number;
   unpushedCommitDetails?: Array<{ sha: string; subject: string }>;
+  reason?: 'external-worktree' | 'main-repo' | 'missing-project-context' | 'git-error';
+  worktreeWillRemain?: true;
 }
 
 interface PaneArchiveBlockedResult {
@@ -800,6 +803,8 @@ const archiveSafetySchema: BoundarySchema<PaneArchiveSafetyCheck> = boundary.obj
     sha: boundary.string,
     subject: boundary.string,
   }))),
+  reason: boundary.optional(boundary.enumeration('external-worktree', 'main-repo', 'missing-project-context', 'git-error')),
+  worktreeWillRemain: boundary.optional(boundary.literal(true)),
 });
 const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   id: boundary.string,
@@ -1576,12 +1581,18 @@ export async function runWatch(parsed: ParsedArgs): Promise<number> {
     ? undefined
     : parsed.agentsOnly || parsed.follow ? true : undefined;
   const includeHeldInput = parsed.includeHeldInput && !parsed.noHeldInput ? true : undefined;
+  // Lines mode turns presence into STUCK; JSON mode passes heldInputPresent through as the equivalent.
   const includeHeldInputPresence = defaults.includeHeldInputPresence
-    && !parsed.noHeldInput && parsed.follow && format === 'lines' ? true : undefined;
+    && !parsed.noHeldInput && parsed.follow ? true : undefined;
   const cadenceValueFlagPresent = hasCadenceValueFlag(parsed);
   // Cadence state lives in the daemon per named consumer, so an anonymous follower names itself.
+  const panelCursor = process.env.PANE_PANEL_ID ? derivedWatchCursorName('panel', process.env.PANE_PANEL_ID) : undefined;
   const watchAs = parsed.watchAs
-    ?? (parsed.follow ? process.env.PANE_PANEL_ID || (cadenceValueFlagPresent ? `follow-${process.pid}` : undefined) : undefined);
+    ?? (parsed.follow ? panelCursor || (cadenceValueFlagPresent ? `follow-${process.pid}` : undefined) : undefined);
+  // --quiet drops lines that only prove liveness; --self-test still prints its WATCH OK result.
+  const emitControlLine = (line: string): void => {
+    if (!parsed.quiet) emitWatchLine(line);
+  };
   const request = {
     as: watchAs,
     since: parsed.watchSince,
@@ -1625,17 +1636,19 @@ export async function runWatch(parsed: ParsedArgs): Promise<number> {
         eventInclude: [],
       });
       if (failingCode) {
-        emitWatchLine(formatNonEntry('_reconnected', { generation: result.generation }, format));
+        emitControlLine(formatNonEntry('_reconnected', { generation: result.generation }, format));
         failingCode = undefined;
       }
       if (!armed && (parsed.follow || parsed.selfTest)) {
-        emitWatchLine(formatNonEntry('_ok', { generation: result.generation, epoch: result.epoch }, format));
+        const okLine = formatNonEntry('_ok', { generation: result.generation, epoch: result.epoch }, format);
+        if (parsed.selfTest) emitWatchLine(okLine);
+        else emitControlLine(okLine);
         armed = true;
         if (parsed.selfTest) return 0;
       }
       for (const line of formatWaitResult(result, format)) emitWatchLine(line);
       if (heartbeatMs > 0 && Date.now() - lastHeartbeatAt >= heartbeatMs) {
-        emitWatchLine(formatNonEntry('_heartbeat', {
+        emitControlLine(formatNonEntry('_heartbeat', {
           generation: result.generation,
           at: new Date().toISOString(),
         }, format));
@@ -1665,6 +1678,19 @@ export async function runWatch(parsed: ParsedArgs): Promise<number> {
 
 function emitWatchLine(line: string): void {
   output.write(`${line}\n`);
+}
+
+/** Names older daemons accept; the daemon itself allows up to 128 characters. */
+const PORTABLE_WATCH_CURSOR_PATTERN = /^[A-Za-z0-9._-]{1,64}$/u;
+
+/**
+ * Returns a derived watch cursor name (one runpane builds from an ID, not one the user typed)
+ * that every daemon accepts. A name that is too long or has other characters becomes
+ * `<prefix>-<first 12 hex chars of its sha256>`, which is stable across runs.
+ */
+function derivedWatchCursorName(prefix: string, name: string): string {
+  if (PORTABLE_WATCH_CURSOR_PATTERN.test(name)) return name;
+  return `${prefix}-${createHash('sha256').update(name).digest('hex').slice(0, 12)}`;
 }
 
 function watchErrorCode(error: Error): string {
@@ -2626,12 +2652,22 @@ function printPaneArchiveResult(result: PaneArchiveResult): void {
   }
 
   console.log(`Archived pane ${result.paneId}${result.forced ? ' (forced)' : ''}. Worktree cleanup: ${result.worktreeCleanup}.`);
+  printArchiveSkipReason(result.safetyCheck);
+}
+
+function printArchiveSkipReason(
+  safetyCheck: PaneArchiveSafetyCheck,
+  print: (message: string) => void = console.log,
+): void {
+  if (!safetyCheck.reason) return;
+  print(`Safety check skipped: ${safetyCheck.reason}${safetyCheck.worktreeWillRemain ? '; the worktree stays on disk' : ''}.`);
 }
 
 function printArchiveCommitEvidence(
   safetyCheck: PaneArchiveSafetyCheck,
   print: (message: string) => void = console.log,
 ): void {
+  printArchiveSkipReason(safetyCheck, print);
   if (safetyCheck.upstream) {
     print(`Upstream: ${safetyCheck.upstream}${safetyCheck.upstreamRefreshed ? ' (refreshed)' : ''}`);
   }

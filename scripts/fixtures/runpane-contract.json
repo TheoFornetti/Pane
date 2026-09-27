@@ -507,6 +507,56 @@
       "folder-9",
       "--yes",
       "--json"
+    ],
+    [
+      "watch",
+      "--follow",
+      "--quiet",
+      "--json",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "watch",
+      "--follow",
+      "--no-control-lines",
+      "--all-managed"
+    ],
+    [
+      "agent-context",
+      "--command",
+      "panes create",
+      "--json",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "agent-context",
+      "--pane-dir=/tmp/pane"
+    ],
+    [
+      "version",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "panes",
+      "create",
+      "--repo",
+      "active",
+      "--name",
+      "w5a",
+      "--agent",
+      "claude",
+      "--base-branch",
+      "origin/release",
+      "--source",
+      "agent",
+      "--no-focus",
+      "--yes",
+      "--json",
+      "--pane-dir",
+      "/tmp/pane"
     ]
   ],
   "help": {

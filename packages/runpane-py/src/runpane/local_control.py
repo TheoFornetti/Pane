@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -236,15 +237,20 @@ def run_watch(parsed: Any) -> int:
         idle_after_ms = defaults["idleAfterMs"] if parsed.follow else 0
     effective_agents_only = None if parsed.include_shells else (True if parsed.agents_only or parsed.follow else None)
     include_held_input = True if parsed.include_held_input and not parsed.no_held_input else None
+    # Lines mode turns presence into STUCK; JSON mode passes heldInputPresent through as the equivalent.
     include_held_input_presence = (
         True if defaults["includeHeldInputPresence"]
-        and not parsed.no_held_input and parsed.follow and output_format == "lines" else None
+        and not parsed.no_held_input and parsed.follow else None
     )
     cadence_value_flag_present = has_cadence_value_flag(parsed)
     # Cadence state lives in the daemon per named consumer, so an anonymous follower names itself.
     watch_as = parsed.watch_as
     if watch_as is None and parsed.follow:
-        watch_as = os.environ.get("PANE_PANEL_ID") or (f"follow-{os.getpid()}" if cadence_value_flag_present else None)
+        panel_id = os.environ.get("PANE_PANEL_ID")
+        panel_cursor = derived_watch_cursor_name("panel", panel_id) if panel_id else None
+        watch_as = panel_cursor or (f"follow-{os.getpid()}" if cadence_value_flag_present else None)
+    # --quiet drops lines that only prove liveness; --self-test still prints its WATCH OK result.
+    quiet = bool(parsed.quiet)
     request: Dict[str, Any] = {
         **optional_value("as", watch_as),
         **optional_value("since", parsed.watch_since),
@@ -314,27 +320,30 @@ def run_watch(parsed: Any) -> int:
                 time.sleep(1)
                 continue
             if failing_code:
-                emit_watch_non_entry("_reconnected", output_format, generation=result.get("generation"))
+                if not quiet:
+                    emit_watch_non_entry("_reconnected", output_format, generation=result.get("generation"))
                 failing_code = None
             if not armed and (parsed.follow or parsed.self_test):
-                emit_watch_non_entry(
-                    "_ok",
-                    output_format,
-                    generation=result.get("generation"),
-                    epoch=result.get("epoch"),
-                )
+                if parsed.self_test or not quiet:
+                    emit_watch_non_entry(
+                        "_ok",
+                        output_format,
+                        generation=result.get("generation"),
+                        epoch=result.get("epoch"),
+                    )
                 armed = True
                 if parsed.self_test:
                     return 0
             print_workspace_wait_result(result, output_format)
             now_ms = time.monotonic() * 1_000
             if heartbeat_ms > 0 and now_ms - last_heartbeat_at >= heartbeat_ms:
-                emit_watch_non_entry(
-                    "_heartbeat",
-                    output_format,
-                    generation=result.get("generation"),
-                    at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                )
+                if not quiet:
+                    emit_watch_non_entry(
+                        "_heartbeat",
+                        output_format,
+                        generation=result.get("generation"),
+                        at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    )
                 last_heartbeat_at = now_ms
             if not watch_as:
                 request["since"] = result.get("generation")
@@ -346,6 +355,20 @@ def run_watch(parsed: Any) -> int:
         return 0
 
     return 0
+
+
+# Names older daemons accept; the daemon itself allows up to 128 characters.
+PORTABLE_WATCH_CURSOR_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+def derived_watch_cursor_name(prefix: str, name: str) -> str:
+    """Return a derived watch cursor name (built from an ID, not typed by the user) that every daemon accepts.
+
+    A name that is too long or has other characters becomes `<prefix>-<first 12 hex chars of its sha256>`.
+    """
+    if PORTABLE_WATCH_CURSOR_PATTERN.fullmatch(name):
+        return name
+    return f"{prefix}-{hashlib.sha256(name.encode('utf-8')).hexdigest()[:12]}"
 
 
 def effective_watch_heartbeat_ms(seconds: float) -> float:
@@ -1156,10 +1179,20 @@ def print_pane_archive_result(result: Dict[str, Any]) -> None:
 
     forced = " (forced)" if result.get("forced") else ""
     print(f"Archived pane {result.get('paneId')}{forced}. Worktree cleanup: {result.get('worktreeCleanup')}.")
+    print_archive_skip_reason(result.get("safetyCheck") or {})
+
+
+def print_archive_skip_reason(safety_check: Dict[str, Any], file: Any = None) -> None:
+    reason = safety_check.get("reason")
+    if not reason:
+        return
+    remains = "; the worktree stays on disk" if safety_check.get("worktreeWillRemain") else ""
+    print(f"Safety check skipped: {reason}{remains}.", file=file if file is not None else sys.stdout)
 
 
 def print_archive_commit_evidence(safety_check: Dict[str, Any], file: Any = None) -> None:
     destination = file if file is not None else sys.stdout
+    print_archive_skip_reason(safety_check, destination)
     upstream = safety_check.get("upstream")
     if upstream:
         refreshed = " (refreshed)" if safety_check.get("upstreamRefreshed") else ""

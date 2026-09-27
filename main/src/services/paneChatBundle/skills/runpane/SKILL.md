@@ -81,6 +81,12 @@ While one workstream waits, continue the others.
 - Create panes and panels in the background with `--source agent` and
   `--no-focus` where supported. Check the returned focus state. If a pane
   steals focus anyway, report it with `runpane doctor --report`.
+- For work on a named branch,
+  `runpane panes create --base <ref> --branch <name> --prompt-file <file>`
+  replaces `git worktree add` plus `panes adopt`. Pane creates the worktree on
+  exactly that branch, slashes included, and fails if the branch already
+  exists. Adopt only a worktree that already exists; to send it a prompt,
+  pass `--launch --prompt-file <file>`.
 
 ## Dispatch
 

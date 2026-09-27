@@ -31,6 +31,9 @@ they win where the two differ:
   authority.
 - Durable records live where `runpane` says. The status board is optional,
   on request.
+- A new workspace on a named branch comes from
+  `runpane panes create --base <ref> --branch <name> --prompt-file <file>`,
+  which replaces `git worktree add` plus `panes adopt`.
 
 ## Intake and routing
 

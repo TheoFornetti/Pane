@@ -77,7 +77,9 @@ delegated work.
 For a new Pane, work starts only after the association exists:
 
 - Create it without an implementation prompt, associate it, verify, then
-  submit the prompt.
+  submit the prompt. For a specific base or branch name, create it with
+  \`runpane panes create --base <ref> --branch <name>\`; that replaces
+  \`git worktree add\` plus \`panes adopt\`.
 - If a trusted caller associates it automatically, verify that result before
   work starts.
 - Otherwise capture the returned Pane ID and run the same association command

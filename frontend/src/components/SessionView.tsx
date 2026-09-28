@@ -384,6 +384,10 @@ export const SessionView = memo(() => {
     const handlePanelUpdated = (updatedPanel: ToolPanel) => {
       if (updatedPanel.sessionId === sid) {
         updatePanelState(updatedPanel);
+        if (updatedPanel.state.isActive && updatedPanel.metadata?.openPlacement) {
+          const current = usePanelStore.getState().layouts[sid];
+          if (current) applyLayout(sid, activatePanelInLayout(current, updatedPanel.id));
+        }
       }
     };
 

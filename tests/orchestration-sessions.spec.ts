@@ -1336,6 +1336,26 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   await fileTab.click();
   await expect(fileTab).toHaveAttribute('aria-selected', 'true');
   await expect.poll(readPanels).toHaveLength(3);
+  const editorLines = page.locator('.monaco-editor .view-lines').filter({ visible: true });
+  await expect(editorLines).toContainText('Session notes');
+  await page.evaluate(async () => {
+    const originalInvoke = window.electronAPI.invoke;
+    Object.assign(window.electronAPI, {
+      invoke: (channel: string, ...args: unknown[]) => channel === 'file:read'
+        ? Promise.resolve({ success: true, content: 'Updated Session notes' })
+        : originalInvoke(channel, ...args),
+    });
+    const response = await window.electronAPI.panels.getSessionPanels('__orchestration_session_toolsterminal__');
+    const editor = response.data?.find(panel => panel.type === 'editor');
+    if (!editor) throw new Error('Expected the open notes editor');
+    // SAFETY: installElectronApiMock installs the same event the desktop receives.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { emitPanelUpdated: (panel: ToolPanel) => void } };
+    mockWindow.__paneTestElectronMock.emitPanelUpdated({
+      ...editor,
+      state: { ...editor.state, customState: { ...editor.state.customState, reopenedAt: '2026-09-28T12:00:00.000Z' } },
+    });
+  });
+  await expect(editorLines).toContainText('Updated Session notes');
   const path = testInfo.outputPath('session-tools.png');
   await page.screenshot({ path });
   await testInfo.attach('session-tools.png', { path, contentType: 'image/png' });
@@ -1370,16 +1390,17 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await page.getByTestId('orchestration-session-plans').click();
   const titleBarTabs = page.getByTestId('session-workspace-tabs');
   await expect(titleBarTabs.getByRole('tab').first()).toBeVisible();
-  const openPage = (id: string, title: string) => page.evaluate(({ id, title }) => {
+  const openPage = (id: string, title: string, active = true, reused = false) => page.evaluate(({ id, title, active, reused }) => {
     // SAFETY: installElectronApiMock adds these controls before the app loads.
-    const mockWindow = window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void } };
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void; emitPanelUpdated: (panel: ToolPanel) => void } };
     const now = new Date(0).toISOString();
-    mockWindow.__paneTestElectronMock.emitPanelCreated({
+    const emit = reused ? mockWindow.__paneTestElectronMock.emitPanelUpdated : mockWindow.__paneTestElectronMock.emitPanelCreated;
+    emit({
       id, sessionId: '__orchestration_session_plansterminal__', type: 'browser', title,
-      state: { isActive: true, hasBeenViewed: false, customState: { currentUrl: 'about:blank' } },
+      state: { isActive: active, hasBeenViewed: false, customState: { currentUrl: 'about:blank' } },
       metadata: { createdAt: now, lastActiveAt: now, position: 5, openPlacement: 'split' },
     });
-  }, { id, title });
+  }, { id, title, active, reused });
 
   await openPage('plan-page', 'plan.html');
   const groupStrips = page.locator('.panel-group-tab-bar');
@@ -1389,7 +1410,9 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(0);
 
-  await openPage('report-page', 'report.html');
+  await openPage('report-page', 'report.html', false);
+  await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
+  await openPage('report-page', 'report.html', true, true);
   await expect(groupStrips).toHaveCount(2);
   await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(2);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'report.html' })).toHaveAttribute('aria-selected', 'true');

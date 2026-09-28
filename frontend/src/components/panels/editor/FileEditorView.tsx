@@ -237,6 +237,18 @@ export function FileEditorView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath]);
 
+  // Reopening an agent-written file refreshes clean buffers; pending user edits win.
+  const lastReopenedAt = useRef(initialState?.reopenedAt);
+  useEffect(() => {
+    const reopenedAt = initialState?.reopenedAt;
+    if (reopenedAt === lastReopenedAt.current) return;
+    if (loading) return;
+    lastReopenedAt.current = reopenedAt;
+    if (!reopenedAt || hasUnsavedChanges) return;
+    void loadFile({ name: filePath.split('/').pop() || '', path: filePath, isDirectory: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialState?.reopenedAt, loading]);
+
   // Terminal links / re-opens can ask for a specific position. Matched by
   // file path; a tab that mounts after the request restores the position
   // from its persisted panel state instead.

@@ -399,6 +399,8 @@ export function codexResumeBase(command: string): string | undefined {
   const operands = new Set(['-c', '--config', '-m', '--model', '-p', '--profile', '-C', '--cd', '-s', '--sandbox', '-a', '--ask-for-approval', '-i', '--image', '--remote', '--remote-auth-token-env', '--enable', '--disable', '--add-dir']);
   for (let i = executable + 1; i < tokens.length; i += 1) {
     const token = tokens[i];
+    // Everything after the option terminator belongs to the launch prompt.
+    if (token === '--') return command.slice(0, spans[i].start).trimEnd();
     if (operands.has(token)) { i += 1; continue; }
     if (token.startsWith('-')) continue;
     if (CODEX_SUBCOMMANDS.has(token)) return undefined;

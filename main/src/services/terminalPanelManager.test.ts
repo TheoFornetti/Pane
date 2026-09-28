@@ -903,6 +903,10 @@ describe('TerminalPanelManager hidden output delivery', () => {
   it.each([
     ['CODEX_HOME="/tmp/my codex" codex "fix bug"', 'CODEX_HOME="/tmp/my codex" codex resume "thread-1"'],
     ['codex --cd "$HOME/repo" "fix bug"', 'codex --cd "$HOME/repo" resume "thread-1"'],
+    ['codex -- "fix bug"', 'codex resume "thread-1"'],
+    ['codex -- "review"', 'codex resume "thread-1"'],
+    ['codex --cd "$HOME/repo" -- "--model is broken"', 'codex --cd "$HOME/repo" resume "thread-1"'],
+    ['codex --', 'codex resume "thread-1"'],
   ])('preserves shell argument spelling on resume: %s', (command, expected) => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     expect(manager.resolveCliLaunchCommand('panel', command, {

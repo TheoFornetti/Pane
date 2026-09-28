@@ -430,6 +430,18 @@ export const RUNPANE_CONTRACT = {
       ]
     },
     {
+      "name": "panels open",
+      "summary": "Open a URL or file as a browser/editor tab in a Pane, in split view beside the agent by default.",
+      "usage": [
+        "runpane panels open [--pane <pane-id>] (--url <url>|--file <path>) [--title <title>] [--split|--tab] [--focus|--no-focus] [--source user|agent] --yes [--json]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "panelOpenRequest",
+        "panelOpenResult"
+      ]
+    },
+    {
       "name": "panels list",
       "summary": "List tool panels inside a Pane session.",
       "usage": [
@@ -1346,6 +1358,16 @@ export const RUNPANE_CONTRACT = {
         "description": "Terminal tab title. Defaults to the selected agent title or Terminal."
       },
       {
+        "name": "--url",
+        "value": "<url>",
+        "description": "http(s) or file URL for panels open; pane:// link for links open."
+      },
+      {
+        "name": "--file",
+        "value": "<path>",
+        "description": "File inside the Pane worktree to open; HTML renders in a browser tab."
+      },
+      {
         "name": "--initial-input",
         "value": "<text>",
         "aliases": [
@@ -1522,11 +1544,6 @@ export const RUNPANE_CONTRACT = {
         "description": "Doc path for docs read."
       },
       {
-        "name": "--url",
-        "value": "<pane-url>",
-        "description": "pane:// link for links open."
-      },
-      {
         "name": "--toolsets",
         "value": "<name,...>",
         "description": "MCP toolsets for runpane mcp."
@@ -1583,6 +1600,14 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--focus",
         "description": "Explicitly focus the created pane or panel."
+      },
+      {
+        "name": "--split",
+        "description": "Open the tab in split view beside the primary tab group (default for panels open)."
+      },
+      {
+        "name": "--tab",
+        "description": "Open the tab in the current tab group instead of split view."
       },
       {
         "name": "--pinned",
@@ -2116,6 +2141,7 @@ export const RUNPANE_CONTRACT = {
         "",
         "Commands:",
         "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [options]",
+        "  runpane panels open (--url <url>|--file <path>) [--split|--tab] --yes [--json]",
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels screen --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
@@ -2280,6 +2306,28 @@ export const RUNPANE_CONTRACT = {
         "  --source <user|agent>         Mark the mutation source; agent implies background creation.",
         "  --wait-ready                  Wait until the terminal tool is ready.",
         "  --ready-timeout-ms <ms>       Readiness wait timeout.",
+        "  --yes                         Skip confirmation prompts.",
+        "  --json                        Print JSON output."
+      ],
+      "panels open": [
+        "Open a URL or file as a browser/editor tab in a Pane, in split view beside the agent by default.",
+        "",
+        "Usage:",
+        "  runpane panels open [--pane <pane-id>] (--url <url>|--file <path>) [--title <title>] [--split|--tab] [--focus|--no-focus] [--source user|agent] --yes [--json]",
+        "",
+        "Opens a tab inside a Pane (default: the Pane of the calling panel, from PANE_SESSION_ID). Use it to show the user an HTML page, plan, report, local dev server, or file beside the conversation. --url opens a browser tab (http, https, or file). --file opens a file inside the Pane worktree: .html/.htm files render in a browser tab, other files open in an editor tab. Tabs open in split view beside the agent by default; --tab keeps them in the current group. An existing tab showing the same URL or file is reused. Never raises or focuses the Pane window.",
+        "",
+        "Options:",
+        "  --pane <pane-id>              Pane to open the tab in; defaults to PANE_SESSION_ID.",
+        "  --url <url>                   http(s) or file URL to open in a browser tab.",
+        "  --file <path>                 File inside the Pane worktree (relative or absolute).",
+        "  --title <title>               Tab title override.",
+        "  --split                       Open in split view beside the agent (default).",
+        "  --tab                         Open in the current tab group instead.",
+        "  --no-focus                    Open without selecting the tab.",
+        "  --focus                       Select the tab (default); never raises the window.",
+        "  --source <user|agent>         Mutation source.",
+        "  --pane-dir <path>             Connect to a specific Pane data directory.",
         "  --yes                         Skip confirmation prompts.",
         "  --json                        Print JSON output."
       ],
@@ -3194,6 +3242,7 @@ export const RUNPANE_CONTRACT = {
         "",
         "Commands:",
         "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [options]",
+        "  runpane panels open (--url <url>|--file <path>) [--split|--tab] --yes [--json]",
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels screen --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
@@ -3350,6 +3399,28 @@ export const RUNPANE_CONTRACT = {
         "  --source <user|agent>         Mark the mutation source; agent implies background creation.",
         "  --wait-ready                  Wait until the terminal tool is ready.",
         "  --ready-timeout-ms <ms>       Readiness wait timeout.",
+        "  --yes                         Skip confirmation prompts.",
+        "  --json                        Print JSON output."
+      ],
+      "panels open": [
+        "Open a URL or file as a browser/editor tab in a Pane, in split view beside the agent by default.",
+        "",
+        "Usage:",
+        "  python -m runpane panels open [--pane <pane-id>] (--url <url>|--file <path>) [--title <title>] [--split|--tab] [--focus|--no-focus] [--source user|agent] --yes [--json]",
+        "",
+        "Opens a tab inside a Pane (default: the Pane of the calling panel, from PANE_SESSION_ID). Use it to show the user an HTML page, plan, report, local dev server, or file beside the conversation. --url opens a browser tab (http, https, or file). --file opens a file inside the Pane worktree: .html/.htm files render in a browser tab, other files open in an editor tab. Tabs open in split view beside the agent by default; --tab keeps them in the current group. An existing tab showing the same URL or file is reused. Never raises or focuses the Pane window.",
+        "",
+        "Options:",
+        "  --pane <pane-id>              Pane to open the tab in; defaults to PANE_SESSION_ID.",
+        "  --url <url>                   http(s) or file URL to open in a browser tab.",
+        "  --file <path>                 File inside the Pane worktree (relative or absolute).",
+        "  --title <title>               Tab title override.",
+        "  --split                       Open in split view beside the agent (default).",
+        "  --tab                         Open in the current tab group instead.",
+        "  --no-focus                    Open without selecting the tab.",
+        "  --focus                       Select the tab (default); never raises the window.",
+        "  --source <user|agent>         Mutation source.",
+        "  --pane-dir <path>             Connect to a specific Pane data directory.",
         "  --yes                         Skip confirmation prompts.",
         "  --json                        Print JSON output."
       ],
@@ -3933,6 +4004,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup: completed` once the worktree is gone from its path and from git; `trashDeletion: pending` means its files are still being deleted in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane.",
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
       "`runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.",
+      "`runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. HTML files render in a browser tab and other files open in an editor tab; an existing tab showing the same target is reused. It activates the tab inside the Pane but never raises or focuses the Pane window.",
       "`runpane panels list` lists tool panels inside one Pane session.",
       "`runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.",
       "`runpane panels input` sends exact input bytes to one terminal panel. Prefer `--input-file` for newlines, Ctrl-C, quotes, or shell-sensitive text.",
@@ -4773,6 +4845,31 @@ export const RUNPANE_CONTRACT = {
       [
         "lock",
         "--help"
+      ],
+      [
+        "panels",
+        "open",
+        "--pane",
+        "session-1",
+        "--file",
+        "plan.html",
+        "--title",
+        "Plan",
+        "--split",
+        "--no-focus",
+        "--source",
+        "agent",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panels",
+        "open",
+        "--url",
+        "http://localhost:3000",
+        "--tab",
+        "--yes",
+        "--json"
       ]
     ],
     "topLevelHelpIncludes": [
@@ -8222,6 +8319,97 @@ export const RUNPANE_CONTRACT = {
       },
       "additionalProperties": false
     },
+    "panelOpenRequest": {
+      "type": "object",
+      "required": [
+        "paneId"
+      ],
+      "properties": {
+        "paneId": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "filePath": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "placement": {
+          "enum": [
+            "split",
+            "tab"
+          ]
+        },
+        "noFocus": {
+          "type": "boolean"
+        },
+        "focus": {
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "user",
+            "agent"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelOpenResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "paneId",
+        "panelId",
+        "type",
+        "title",
+        "placement",
+        "active",
+        "reused"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "browser",
+            "editor"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "filePath": {
+          "type": "string"
+        },
+        "placement": {
+          "enum": [
+            "split",
+            "tab"
+          ]
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "reused": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "panelSubmitComposerRequest": {
       "type": "object",
       "required": [
@@ -9316,6 +9504,22 @@ export const RUNPANE_CONTRACT = {
             "--no-focus",
             "--focus",
             "--wait-ready",
+            "--yes",
+            "--json"
+          ]
+        },
+        {
+          "name": "panels open",
+          "summary": "Show the user an HTML page, plan, report, dev server URL, or file as a tab in split view beside the agent.",
+          "arguments": [
+            "--pane <pane-id>",
+            "--url <url>",
+            "--file <path>",
+            "--title <title>",
+            "--split",
+            "--tab",
+            "--no-focus",
+            "--source <user|agent>",
             "--yes",
             "--json"
           ]
@@ -11007,6 +11211,89 @@ export const RUNPANE_CONTRACT = {
           "`panels create` is for visible helper/reviewer tabs, not the agent's default private delegation mechanism.",
           "For agent-created panels, prefer --source agent or --no-focus to avoid stealing focus from the user or implementation tab.",
           "With --tool-command, --agent names the agent the command runs (a wrapper such as `agent-farm run`): Pane launches the command unchanged and treats the panel as that agent. Without --agent, Pane detects Claude Code, Codex and Cursor from the foreground process or the agent's screen."
+        ]
+      },
+      "panels open": {
+        "name": "panels open",
+        "summary": "Open a URL or file as a browser/editor tab in a Pane, in split view beside the agent by default.",
+        "details": "Opens a tab inside a Pane (default: the Pane of the calling panel, from PANE_SESSION_ID). Use it to show the user an HTML page, plan, report, local dev server, or file beside the conversation. --url opens a browser tab (http, https, or file). --file opens a file inside the Pane worktree: .html/.htm files render in a browser tab, other files open in an editor tab. Tabs open in split view beside the agent by default; --tab keeps them in the current group. An existing tab showing the same URL or file is reused. Never raises or focuses the Pane window.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": false,
+            "description": "Pane to open the tab in; defaults to PANE_SESSION_ID (the calling panel's Pane, including a Session orchestrator's)."
+          },
+          {
+            "name": "--url",
+            "value": "<url>",
+            "required": false,
+            "description": "http(s) or file URL to open in a browser tab. Pass exactly one of --url or --file."
+          },
+          {
+            "name": "--file",
+            "value": "<path>",
+            "required": false,
+            "description": "File inside the Pane worktree, relative or absolute. .html/.htm renders in a browser tab; other files open in an editor tab."
+          },
+          {
+            "name": "--title",
+            "value": "<title>",
+            "required": false,
+            "description": "Tab title override."
+          },
+          {
+            "name": "--split",
+            "required": false,
+            "description": "Open in split view beside the primary tab group (default)."
+          },
+          {
+            "name": "--tab",
+            "required": false,
+            "description": "Open in the current tab group instead of split view."
+          },
+          {
+            "name": "--no-focus",
+            "required": false,
+            "description": "Open the tab without selecting it."
+          },
+          {
+            "name": "--focus",
+            "required": false,
+            "description": "Select the tab (default). Never raises or focuses the Pane window."
+          },
+          {
+            "name": "--source",
+            "value": "<user|agent>",
+            "required": false,
+            "description": "Mutation source."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane panels open --file plan.html --source agent --yes --json",
+          "runpane panels open --url http://localhost:3000 --source agent --yes --json",
+          "runpane panels open --pane <pane-id> --file src/app.ts --tab --source agent --yes --json"
+        ],
+        "jsonSchemas": [
+          "panelOpenRequest",
+          "panelOpenResult"
+        ],
+        "notes": [
+          "Prefer this over opening the system browser when showing the user a page, plan, report, or dev server.",
+          "Write plans and reports as self-contained HTML files, then open them with --file; rerunning the command on the same file reuses its tab.",
+          "Opening a tab does not steal window focus; use `panes focus` only on explicit user request."
         ]
       },
       "panels submit-composer": {

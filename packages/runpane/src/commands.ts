@@ -39,6 +39,9 @@ export interface ParsedArgs {
   agent?: RunpaneAgent;
   toolCommand?: string;
   title?: string;
+  url?: string;
+  file?: string;
+  placement?: 'split' | 'tab';
   initialInput?: string;
   initialInputFile?: string;
   asFilePointer?: boolean;
@@ -93,7 +96,6 @@ export interface ParsedArgs {
   message?: string;
   query?: string;
   doc?: string;
-  url?: string;
   keys?: string[];
   toolsets?: string[];
   readOnly?: boolean;
@@ -394,6 +396,13 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.focus = true;
     return;
   }
+  if (flag === '--split' || flag === '--tab') {
+    if (parsed.placement && parsed.placement !== flag.slice(2)) {
+      throw new Error('Use either --split or --tab, not both.');
+    }
+    parsed.placement = flag === '--split' ? 'split' : 'tab';
+    return;
+  }
   if (flag === '--pinned') {
     parsed.pinned = true;
     return;
@@ -512,6 +521,14 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--path') {
     parsed.repoPath = value;
+    return;
+  }
+  if (flag === '--url') {
+    parsed.url = value;
+    return;
+  }
+  if (flag === '--file') {
+    parsed.file = value;
     return;
   }
   if (flag === '--name') {
@@ -822,6 +839,7 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'lock release'
     || command === 'lock list'
     || command === 'panels create'
+    || command === 'panels open'
     || command === 'panels list'
     || command === 'panels output'
     || command === 'panels input'

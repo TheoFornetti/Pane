@@ -1160,16 +1160,19 @@ describe('TerminalPanelManager agent session capture', () => {
     disposeFlowControlRecord(terminal.flowControl);
   });
 
-  it.each(['unknown-launcher', 'claude'])('captures an explicitly reported ID from %s across output chunks and persists it', (command) => {
+  it.each([undefined, 'claude', 'codex'] as const)('captures a reported ID with detected identity %s across output chunks', agentType => {
+    const command = 'unknown-launcher';
     const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager());
     const terminal = createTerminal();
-    terminal.agentType = undefined;
+    terminal.agentType = agentType;
     mockPanel('claude', command);
     const panel = panelManager.getPanel('panel-1');
     if (!panel) throw new Error('Missing panel fixture');
-    panel.state.customState = { initialCommand: command, customResume: {
+    panel.state.customState = { initialCommand: command, agentType, customResume: {
       mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --continue {sessionId}',
     } };
+    manager.captureAgentSessionId(terminal, `To continue, run codex resume ${CURSOR_CHAT_ID}\r\n`);
+    expect(terminal.capturedAgentSessionId).toBeUndefined();
     manager.captureAgentSessionId(terminal, '\r\nPANE_AGENT_SESSION_');
     expect(terminal.capturedAgentSessionId).toBeUndefined();
     manager.captureAgentSessionId(terminal, 'ID=custom-thread-123\r\n');
@@ -1177,6 +1180,25 @@ describe('TerminalPanelManager agent session capture', () => {
     expect(panelManager.updatePanel).toHaveBeenCalledWith('panel-1', { state: expect.objectContaining({
       customState: expect.objectContaining({ agentSessionId: 'custom-thread-123' }),
     }) });
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('keeps an allocated custom resume ID after detecting Codex', () => {
+    const manager = testAccess<AgentSessionCaptureAccess & LaunchCommandAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({ agentType: 'codex' });
+    mockPanel('codex', 'wrapper');
+    const panel = panelManager.getPanel('panel-1');
+    if (!panel) throw new Error('Missing panel fixture');
+    const customState: TerminalPanelState = {
+      initialCommand: 'wrapper', agentType: 'codex', agentSessionId: 'allocated-thread', customResumeStarted: true,
+      customResume: { mode: 'generated', initialTemplate: '{command} --id {sessionId}', resumeTemplate: '{command} --continue {sessionId}' },
+    };
+    panel.state.customState = customState;
+    manager.captureAgentSessionId(terminal, `To continue, run codex resume ${CURSOR_CHAT_ID}\r\n`);
+    expect(panelManager.updatePanel).not.toHaveBeenCalled();
+    const launch = manager.resolveCliLaunchCommand('panel-1', 'wrapper', customState);
+    expect(launch.commandToRun).toBe('wrapper --continue "allocated-thread"');
+    expect(launch.customState.agentType).toBe('codex');
     disposeFlowControlRecord(terminal.flowControl);
   });
 

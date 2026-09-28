@@ -887,6 +887,17 @@ describe('TerminalPanelManager hidden output delivery', () => {
     }).commandToRun).toBe(expected);
   });
 
+  it.each([
+    'claude --debug-file /tmp/claude.log',
+    'claude --permission-prompt-tool mcp__pane-permissions__approve_permission',
+    'claude --future-setting value',
+  ])('keeps option operands on Claude resume: %s', command => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    expect(manager.resolveCliLaunchCommand('panel', command, {
+      agentType: 'claude', agentSessionId: '22222222-2222-4222-8222-222222222222', hasClaudeSessionId: true,
+    }).commandToRun).toBe(`${command} --resume "22222222-2222-4222-8222-222222222222"`);
+  });
+
   it('allocates a Claude session when resume flags appear only inside an option value', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const command = 'claude --append-system-prompt "use -c for config"';

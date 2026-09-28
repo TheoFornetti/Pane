@@ -360,14 +360,16 @@ export function claudeResumeBase(command: string): string {
   if (!tokens) return command;
   const executable = tokens.findIndex(token => /(?:^|[\\/])claude(?:\.exe|\.cmd)?$/i.test(token));
   if (executable < 0) return command;
-  const operands = new Set(['--model', '--fallback-model', '--permission-mode', '--append-system-prompt', '--system-prompt', '--system-prompt-file', '--append-system-prompt-file', '--settings', '--setting-sources', '--agent', '--agents', '--effort', '--output-format', '--input-format', '--max-turns', '--max-budget-usd', '--json-schema', '--name']);
+  const operands = new Set(['--model', '--fallback-model', '--permission-mode', '--append-system-prompt', '--system-prompt', '--system-prompt-file', '--append-system-prompt-file', '--settings', '--setting-sources', '--agent', '--agents', '--effort', '--output-format', '--input-format', '--max-turns', '--max-budget-usd', '--json-schema', '--name', '--debug-file', '--permission-prompt-tool']);
+  const flags = new Set(['--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', '--verbose', '--strict-mcp-config', '--no-session-persistence', '--disable-slash-commands', '--chrome', '--no-chrome', '--ide']);
   // These options accept multiple values; their boundary is ambiguous.
   const variadic = new Set(['--allowedTools', '--allowed-tools', '--disallowedTools', '--disallowed-tools', '--tools', '--add-dir', '--mcp-config', '--plugin-dir']);
   for (let i = executable + 1; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (variadic.has(token)) return command;
     if (operands.has(token)) { i += 1; continue; }
-    if (token.startsWith('-')) continue;
+    if (flags.has(token) || (token.startsWith('--') && token.includes('='))) continue;
+    if (token.startsWith('-')) return command;
     return `${command.slice(0, spans[i].start).trimEnd()} ${command.slice(spans[i].end).trimStart()}`.trim();
   }
   return command;

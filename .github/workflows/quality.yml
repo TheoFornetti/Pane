@@ -3,8 +3,8 @@ name: Code Quality
 on:
   push:
     branches: [ main ]
+  # Stacked and integration PRs need the same gates before they reach main.
   pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 # A new push to a PR cancels that PR's in-flight run. Every other event gets

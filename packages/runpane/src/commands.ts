@@ -96,7 +96,6 @@ export interface ParsedArgs {
   message?: string;
   query?: string;
   doc?: string;
-  url?: string;
   keys?: string[];
   toolsets?: string[];
   readOnly?: boolean;

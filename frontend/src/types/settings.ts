@@ -38,6 +38,7 @@ export type SettingsSettingId =
   | 'mcp-toolsets'
   | 'agent-skill'
   | 'agent-context'
+  | 'session-defaults'
   | 'claude-executable'
   | 'commit-footer'
   | 'git-attribution'

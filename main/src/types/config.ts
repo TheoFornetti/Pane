@@ -60,6 +60,9 @@ export interface AppConfig {
   defaultModel?: string;
   // Default agent used by the global Pane Chat orchestrator terminal
   defaultOrchestratorAgent?: PaneChatAgent;
+  defaultSessionCommand?: string;
+  defaultSessionResume?: CustomCommandResume | null;
+  defaultSessionProfile?: string;
   // Auto-check for updates
   autoCheckUpdates?: boolean;
   // Start Pane automatically when the user logs in
@@ -181,6 +184,9 @@ export interface UpdateConfigRequest {
   defaultPermissionMode?: 'approve' | 'ignore';
   defaultModel?: string;
   defaultOrchestratorAgent?: PaneChatAgent;
+  defaultSessionCommand?: string;
+  defaultSessionResume?: CustomCommandResume | null;
+  defaultSessionProfile?: string;
   autoCheckUpdates?: boolean;
   autoStartOnBoot?: boolean;
   keepAwakeWhileSessionsActive?: boolean;

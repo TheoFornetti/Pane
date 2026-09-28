@@ -364,6 +364,7 @@ export class ConfigManager extends EventEmitter {
   }
 
   async updateConfig(updates: Partial<AppConfig>): Promise<AppConfig> {
+    if (updates.defaultSessionResume) validateCustomCommandResume(updates.defaultSessionResume);
     for (const command of updates.customCommands ?? []) {
       if (command.resume) validateCustomCommandResume(command.resume);
     }
@@ -392,6 +393,13 @@ export class ConfigManager extends EventEmitter {
           : this.config.remoteDaemon,
       };
 
+      if (updates.agentContext !== undefined) {
+        decodeBoundary(updates.agentContext, boundary.object({
+          managedAgentsMd: boundary.optional(boundary.boolean),
+          homeSkill: boundary.optional(boundary.boolean),
+          defaultsVersion: boundary.optional(boundary.number),
+        }));
+      }
       this.validateAppearanceUpdate(updates, next);
       await this.writeConfigToDisk(next);
       this.config = next;

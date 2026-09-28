@@ -1,3 +1,4 @@
+import * as claudeTranscripts from './claudeSessionTranscript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
@@ -827,6 +828,128 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(result.customState.initialInputSentAt).toEqual(expect.any(String));
   });
 
+  it('preserves custom native arguments on resume without submitting input', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const id = '22222222-2222-4222-8222-222222222222';
+    const claude = manager.resolveCliLaunchCommand('panel', 'claude --model "my model" --permission-mode plan "implement the task"', {
+      agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
+    });
+    expect(claude.commandToRun).toBe(`claude --model "my model" --permission-mode plan --resume "${id}"`);
+    expect(claude.customState.initialInputSentAt).toBeUndefined();
+    const codex = manager.resolveCliLaunchCommand('panel', 'codex --model test --sandbox read-only', {
+      agentType: 'codex', agentSessionId: id, wasInterrupted: true,
+    });
+    expect(codex.commandToRun).toBe(`codex --model test --sandbox read-only resume "${id}"`);
+    expect(codex.customState.initialInputSentAt).toBeUndefined();
+  });
+
+  it('does not mistake a Codex option value for a subcommand on resume', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const command = 'codex -c model_instructions_file="/tmp/review.md"';
+    const result = manager.resolveCliLaunchCommand('panel', command, { agentType: 'codex', agentSessionId: 'saved-thread', wasInterrupted: true });
+    expect(result.commandToRun).toBe(`${command} resume "saved-thread"`);
+  });
+
+  it('uses generic templates to allocate and resume a wrapper conversation without changing its saved command', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const command = 'my-launcher profile --label "review work"';
+    const customResume = { mode: 'generated', initialTemplate: '{command} -- --session-id {sessionId}', resumeTemplate: '{command} -- --resume {sessionId}' } satisfies NonNullable<TerminalPanelState['customResume']>;
+    const first = manager.resolveCliLaunchCommand('panel', command, { initialCommand: command, customResume });
+    expect(first.customState.agentSessionId).toMatch(/^[a-f0-9-]{36}$/);
+    expect(first.commandToRun).toBe(`${command} -- --session-id "${first.customState.agentSessionId}"`);
+    expect(first.customState.initialCommand).toBe(command);
+    const restarted = testAccess<LaunchCommandAccess>(new TerminalPanelManager()).resolveCliLaunchCommand('panel', command, first.customState);
+    expect(restarted.commandToRun).toBe(`${command} -- --resume "${first.customState.agentSessionId}"`);
+    expect(restarted.customState.initialInputSentAt).toBeUndefined();
+  });
+
+  it('resumes direct Claude only when the allocated conversation has a transcript', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const lookup = vi.spyOn(claudeTranscripts, 'findClaudeSessionTranscript').mockReturnValue(undefined);
+    const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(true);
+    try {
+      const command = 'claude --model sonnet';
+      const first = manager.resolveCliLaunchCommand('panel', command, { initialCommand: command, customResume: {
+        mode: 'claude', initialTemplate: '{command} -- --session-id {sessionId}', resumeTemplate: '{command} -- --resume {sessionId}',
+      } });
+      expect(manager.resolveCliLaunchCommand('panel', command, first.customState).commandToRun).toBe(first.commandToRun);
+      lookup.mockReturnValue('/private/transcript.jsonl');
+      expect(manager.resolveCliLaunchCommand('panel', command, first.customState).commandToRun)
+        .toBe(`${command} -- --resume "${first.customState.agentSessionId}"`);
+    } finally { lookup.mockRestore(); readable.mockRestore(); }
+  });
+
+  it('resumes wrapped Claude by its recorded conversation without assuming the app configuration matches its launcher', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(true);
+    try {
+      const command = 'any-launcher my-profile';
+      const first = manager.resolveCliLaunchCommand('panel', command, { initialCommand: command, customResume: {
+        mode: 'claude', initialTemplate: '{command} -- --session-id {sessionId}', resumeTemplate: '{command} -- --resume {sessionId}',
+      } });
+      expect(manager.resolveCliLaunchCommand('panel', command, first.customState).commandToRun)
+        .toBe(`${command} -- --resume "${first.customState.agentSessionId}"`);
+    } finally { readable.mockRestore(); }
+  });
+
+  it('keeps an env prefix and home paths when resuming a Codex command with a prompt', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const result = manager.resolveCliLaunchCommand('panel', 'CODEX_HOME=~/codex-work codex --yolo "fix the bug"', {
+      agentType: 'codex', agentSessionId: 'thread-1', wasInterrupted: true,
+    });
+    expect(result.commandToRun).toBe('CODEX_HOME=~/codex-work codex --yolo resume "thread-1"');
+  });
+
+  it.each([
+    ['CODEX_HOME="/tmp/my codex" codex "fix bug"', 'CODEX_HOME="/tmp/my codex" codex resume "thread-1"'],
+    ['codex --cd "$HOME/repo" "fix bug"', 'codex --cd "$HOME/repo" resume "thread-1"'],
+    ['codex -- "fix bug"', 'codex resume "thread-1"'],
+    ['codex -- "review"', 'codex resume "thread-1"'],
+    ['codex --cd "$HOME/repo" -- "--model is broken"', 'codex --cd "$HOME/repo" resume "thread-1"'],
+    ['codex --', 'codex resume "thread-1"'],
+  ])('preserves shell argument spelling on resume: %s', (command, expected) => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    expect(manager.resolveCliLaunchCommand('panel', command, {
+      agentType: 'codex', agentSessionId: 'thread-1', wasInterrupted: true,
+    }).commandToRun).toBe(expected);
+  });
+
+  it.each([
+    'claude --debug-file /tmp/claude.log',
+    'claude --permission-prompt-tool mcp__pane-permissions__approve_permission',
+    'claude --future-setting value',
+  ])('keeps option operands on Claude resume: %s', command => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    expect(manager.resolveCliLaunchCommand('panel', command, {
+      agentType: 'claude', agentSessionId: '22222222-2222-4222-8222-222222222222', hasClaudeSessionId: true,
+    }).commandToRun).toBe(`${command} --resume "22222222-2222-4222-8222-222222222222"`);
+  });
+
+  it('allocates a Claude session when resume flags appear only inside an option value', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const command = 'claude --append-system-prompt "use -c for config"';
+    const result = manager.resolveCliLaunchCommand('panel', command, { agentType: 'claude' });
+    expect(result.commandToRun).toBe(`${command} --session-id ${result.customState.agentSessionId}`);
+  });
+
+  it('resumes wrapped Codex by captured ID and never guesses the latest conversation', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const command = 'another-wrapper run profile';
+    const state: TerminalPanelState = { customResume: {
+      mode: 'codex', initialTemplate: '{command}', resumeTemplate: '{command} -- resume {sessionId}',
+    }, wasInterrupted: true };
+    expect(manager.resolveCliLaunchCommand('panel', command, state).commandToRun).toBe(command);
+    expect(manager.resolveCliLaunchCommand('panel', command, { ...state, agentSessionId: 'saved-thread' }).commandToRun)
+      .toBe(`${command} -- resume "saved-thread"`);
+  });
+
+  it('rejects resume templates that cannot identify the saved conversation', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    expect(() => manager.resolveCliLaunchCommand('panel', 'wrapper', { customResume: {
+      mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --latest',
+    } })).toThrow('must contain {sessionId}');
+  });
+
   it('keeps resumed Claude input composer-bound', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
 
@@ -843,7 +966,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     );
 
     expect(result.commandToRun).toBe(
-      'claude --resume "22222222-2222-4222-8222-222222222222" --dangerously-skip-permissions',
+      'claude --dangerously-skip-permissions --resume "22222222-2222-4222-8222-222222222222"',
     );
     expect(result.customState).not.toHaveProperty('initialInputSentAt');
   });
@@ -951,7 +1074,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
 
     expect(result).toMatchObject({
-      commandToRun: `codex resume --yolo -c 'agents.explorer.config_file="/data/.codex/agents/explorer.toml"' "thread-1"`,
+      commandToRun: `codex --yolo -c 'agents.explorer.config_file="/data/.codex/agents/explorer.toml"' resume "thread-1"`,
       isCliCommand: true,
     });
   });
@@ -965,7 +1088,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       agentSessionId: 'thread-1',
     });
 
-    expect(result).toMatchObject({ commandToRun: 'codex resume --yolo "thread-1"' });
+    expect(result).toMatchObject({ commandToRun: 'codex --yolo resume "thread-1"' });
   });
 
   it('keeps Enter as the default initial input submit strategy', async () => {
@@ -1038,6 +1161,48 @@ describe('TerminalPanelManager agent session capture', () => {
         customState: expect.objectContaining({ agentType: 'cursor', agentSessionId: CURSOR_CHAT_ID }),
       }),
     });
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it.each([undefined, 'claude', 'codex'] as const)('captures a reported ID with detected identity %s across output chunks', agentType => {
+    const command = 'unknown-launcher';
+    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager());
+    const terminal = createTerminal();
+    terminal.agentType = agentType;
+    mockPanel('claude', command);
+    const panel = panelManager.getPanel('panel-1');
+    if (!panel) throw new Error('Missing panel fixture');
+    panel.state.customState = { initialCommand: command, agentType, customResume: {
+      mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --continue {sessionId}',
+    } };
+    manager.captureAgentSessionId(terminal, `To continue, run codex resume ${CURSOR_CHAT_ID}\r\n`);
+    expect(terminal.capturedAgentSessionId).toBeUndefined();
+    manager.captureAgentSessionId(terminal, '\r\nPANE_AGENT_SESSION_');
+    expect(terminal.capturedAgentSessionId).toBeUndefined();
+    manager.captureAgentSessionId(terminal, 'ID=custom-thread-123\r\n');
+    expect(terminal.capturedAgentSessionId).toBe('custom-thread-123');
+    expect(panelManager.updatePanel).toHaveBeenCalledWith('panel-1', { state: expect.objectContaining({
+      customState: expect.objectContaining({ agentSessionId: 'custom-thread-123' }),
+    }) });
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('keeps an allocated custom resume ID after detecting Codex', () => {
+    const manager = testAccess<AgentSessionCaptureAccess & LaunchCommandAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({ agentType: 'codex' });
+    mockPanel('codex', 'wrapper');
+    const panel = panelManager.getPanel('panel-1');
+    if (!panel) throw new Error('Missing panel fixture');
+    const customState: TerminalPanelState = {
+      initialCommand: 'wrapper', agentType: 'codex', agentSessionId: 'allocated-thread', customResumeStarted: true,
+      customResume: { mode: 'generated', initialTemplate: '{command} --id {sessionId}', resumeTemplate: '{command} --continue {sessionId}' },
+    };
+    panel.state.customState = customState;
+    manager.captureAgentSessionId(terminal, `To continue, run codex resume ${CURSOR_CHAT_ID}\r\n`);
+    expect(panelManager.updatePanel).not.toHaveBeenCalled();
+    const launch = manager.resolveCliLaunchCommand('panel-1', 'wrapper', customState);
+    expect(launch.commandToRun).toBe('wrapper --continue "allocated-thread"');
+    expect(launch.customState.agentType).toBe('codex');
     disposeFlowControlRecord(terminal.flowControl);
   });
 

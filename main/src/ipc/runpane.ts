@@ -1066,16 +1066,16 @@ export function registerRunpaneHandlers(
       let panel: ToolPanel;
       if (existing) {
         const title = normalized.title && normalized.title !== existing.title ? normalized.title : undefined;
-        // Agents reopen a page after rewriting it; the stamp makes an open tab reload.
-        const state = target.type === 'browser'
-          ? { ...existing.state, customState: { ...(existing.state.customState ?? {}), reopenedAt: new Date().toISOString() } }
-          : undefined;
-        if (title || state) {
-          await panelManager.updatePanel(existing.id, { title, state });
-        }
         if (activate) {
           await panelManager.setActivePanel(pane.id, existing.id);
         }
+        // Publish the final active state and reload signal together for desktop consumers.
+        const current = panelManager.getPanel(existing.id) ?? existing;
+        const state = {
+          ...current.state,
+          customState: { ...(current.state.customState ?? {}), reopenedAt: new Date().toISOString() },
+        };
+        await panelManager.updatePanel(existing.id, { title, state });
         panel = panelManager.getPanel(existing.id) ?? existing;
       } else {
         panel = await panelManager.createPanel({
@@ -3695,7 +3695,9 @@ async function resolvePanelOpenFile(services: AppServices, pane: Session, rawPat
   }
 
   const basePath = pathResolver.toFileSystem(pane.worktreePath);
-  const requested = path.isAbsolute(rawPath) ? path.relative(basePath, rawPath) : rawPath;
+  const requested = path.isAbsolute(rawPath)
+    ? path.relative(basePath, pathResolver.toFileSystem(rawPath))
+    : rawPath;
   const relativePath = path.normalize(requested);
   if (!relativePath || relativePath === '.' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
     throw new Error(`File path must be inside the Pane worktree: ${rawPath}`);

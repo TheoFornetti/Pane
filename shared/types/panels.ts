@@ -198,6 +198,8 @@ export type EditorDiffRef = { kind: 'scope'; scope: DiffScope; previousPath?: st
 
 export interface EditorPanelState {
   filePath: string;
+  /** Reload an agent-reopened file when this editor has no pending edits. */
+  reopenedAt?: string;
   /** When set, the tab shows this file's diff instead of an editable file. */
   diff?: EditorDiffRef;
   isPreview?: boolean;

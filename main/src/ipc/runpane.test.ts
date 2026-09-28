@@ -6377,14 +6377,17 @@ describe('runpane IPC handlers', () => {
     });
 
     it('opens URLs and reuses a tab already showing the same URL', async () => {
-      vi.mocked(panelManager.getPanelsForSession).mockReturnValue([{
+      const existing: ToolPanel = {
         id: 'existing-browser',
         sessionId: session.id,
         type: 'browser',
         title: 'localhost:3000',
         state: { isActive: false, customState: { currentUrl: 'http://localhost:3000/' } },
         metadata: { createdAt: '', lastActiveAt: '', position: 1 },
-      }]);
+      };
+      vi.mocked(panelManager.getPanelsForSession).mockReturnValue([existing]);
+      vi.mocked(panelManager.getPanel).mockReturnValue(existing);
+      vi.mocked(panelManager.setActivePanel).mockImplementation(async () => { existing.state.isActive = true; });
       const registry = createRegistry(openServices({ ...session, worktreePath: worktree }));
 
       const result = await registry.invoke('runpane:panels:open', [{ paneId: session.id, url: 'http://localhost:3000' }]);
@@ -6393,7 +6396,7 @@ describe('runpane IPC handlers', () => {
       expect(panelManager.setActivePanel).toHaveBeenCalledWith(session.id, 'existing-browser');
       // Reopening stamps the tab so an open page reloads with the latest content.
       expect(panelManager.updatePanel).toHaveBeenCalledWith('existing-browser', expect.objectContaining({
-        state: expect.objectContaining({ customState: expect.objectContaining({ currentUrl: 'http://localhost:3000/', reopenedAt: expect.any(String) }) }),
+        state: expect.objectContaining({ isActive: true, customState: expect.objectContaining({ currentUrl: 'http://localhost:3000/', reopenedAt: expect.any(String) }) }),
       }));
       expect(result).toMatchObject({ panelId: 'existing-browser', type: 'browser', reused: true });
     });

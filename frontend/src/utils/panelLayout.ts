@@ -156,12 +156,12 @@ export function addPanelToGroup(
  * in a new right-hand group when the layout has only one. Idempotent like
  * addPanelToGroup.
  */
-export function placePanelInSplit(root: PanelLayoutNode, panelId: string): PanelLayoutNode {
+export function placePanelInSplit(root: PanelLayoutNode, panelId: string, activate = true): PanelLayoutNode {
   if (allPanelIds(root).includes(panelId)) return root;
   const primary = primaryGroup(root);
   const side = allGroups(root).filter(group => group.id !== primary.id).pop();
   return side
-    ? addPanelToGroup(root, side.id, panelId)
+    ? addPanelToGroup(root, side.id, panelId, { activate })
     : splitGroup(root, primary.id, panelId, 'row', true);
 }
 

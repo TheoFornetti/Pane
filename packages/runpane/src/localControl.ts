@@ -460,6 +460,30 @@ interface PaneFocusResult {
   focused: true;
 }
 
+interface PanelOpenRequest {
+  paneId: string;
+  url?: string;
+  filePath?: string;
+  title?: string;
+  placement: 'split' | 'tab';
+  noFocus?: boolean;
+  focus?: boolean;
+  source?: 'user' | 'agent';
+}
+
+interface PanelOpenResult {
+  ok: true;
+  paneId: string;
+  panelId: string;
+  type: 'browser' | 'editor';
+  title: string;
+  url?: string;
+  filePath?: string;
+  placement: 'split' | 'tab';
+  active: boolean;
+  reused: boolean;
+}
+
 interface PaneArchiveSafetyCheck {
   performed: boolean;
   hasUncommittedChanges?: boolean;
@@ -1111,6 +1135,8 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
     codex: boundary.nonEmptyString,
     cursor: boundary.nonEmptyString,
   }),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
   goal: boundary.string,
   context: boundary.string,
   decisions: boundary.array(boundary.string),
@@ -1440,6 +1466,18 @@ const paneFocusResultSchema: BoundarySchema<PaneFocusResult> = boundary.object({
   paneId: boundary.string,
   panelId: boundary.optional(boundary.string),
   focused: boundary.literal(true),
+});
+const panelOpenResultSchema: BoundarySchema<PanelOpenResult> = boundary.object({
+  ok: boundary.literal(true),
+  paneId: boundary.string,
+  panelId: boundary.string,
+  type: boundary.enumeration('browser', 'editor'),
+  title: boundary.string,
+  url: boundary.optional(boundary.string),
+  filePath: boundary.optional(boundary.string),
+  placement: boundary.enumeration('split', 'tab'),
+  active: boundary.boolean,
+  reused: boundary.boolean,
 });
 export const panelListResultSchema: BoundarySchema<PanelListResult> = boundary.object({
   ok: boundary.literal(true),
@@ -1961,6 +1999,8 @@ function parseSessionCreatePayload(value: JsonValue): SessionCreatePayload {
   return decodeBoundary(value, boundary.object({
     name: boundary.nonEmptyString,
     agent: boundary.optional(boundary.enumeration('codex', 'claude', 'cursor')),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
     goal: boundary.optional(boundary.string),
     context: boundary.optional(boundary.string),
     decisions: boundary.optional(boundary.array(boundary.string)),
@@ -1977,6 +2017,8 @@ function parseSessionUpdatePayload(value: JsonValue): SessionUpdatePayload {
     archived: boundary.optional(boundary.boolean),
     isPinned: boundary.optional(boundary.boolean),
     agent: boundary.optional(boundary.enumeration('codex', 'claude', 'cursor')),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
     goal: boundary.optional(boundary.string),
     context: boundary.optional(boundary.string),
     decisions: boundary.optional(boundary.array(boundary.string)),
@@ -2226,6 +2268,7 @@ export async function runPanesAdopt(parsed: ParsedArgs): Promise<number> {
       ...decoded,
       panes: decoded.panes.map((pane, index) => ({
         ...pane,
+        pinned: resolvePinnedOverride(parsed) ?? pane.pinned ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
         tool: parsePaneToolSpecPayload(pane.tool, index),
       })),
       associateSession: parsed.noAssociate ? undefined : resolveAssociateSession(parsed) ?? decoded.associateSession,
@@ -2245,7 +2288,7 @@ export async function runPanesAdopt(parsed: ParsedArgs): Promise<number> {
       name: parsed.name,
       baseBranch: parsed.baseBranch,
       folder: parsed.folder,
-      pinned: resolvePinnedOverride(parsed) ?? true,
+      pinned: resolvePinnedOverride(parsed) ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
       tool,
       resume: parsed.resume,
       launch: parsed.launch || undefined,
@@ -2444,6 +2487,45 @@ export async function runPanelsCreate(parsed: ParsedArgs): Promise<number> {
   }
 
   return result.ok ? 0 : 1;
+}
+
+export async function runPanelsOpen(parsed: ParsedArgs): Promise<number> {
+  const paneId = parsed.paneId || process.env.PANE_SESSION_ID;
+  if (!paneId) {
+    throw new Error('runpane panels open requires --pane (or PANE_SESSION_ID from a Pane terminal).');
+  }
+  if (Boolean(parsed.url) === Boolean(parsed.file)) {
+    throw new Error('runpane panels open requires exactly one of --url or --file.');
+  }
+  if (parsed.noFocus && parsed.focus) {
+    throw new Error('Use either --focus or --no-focus, not both.');
+  }
+
+  const request: PanelOpenRequest = {
+    paneId,
+    url: parsed.url || undefined,
+    filePath: parsed.file || undefined,
+    title: parsed.title || undefined,
+    placement: parsed.placement ?? 'split',
+    noFocus: parsed.noFocus || undefined,
+    focus: parsed.focus || undefined,
+    source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
+  };
+
+  await confirmPanelOpen(parsed, request);
+
+  const result = await invokeDaemon('runpane:panels:open', [request], panelOpenResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    const target = result.url ?? result.filePath ?? result.title;
+    console.log(`${result.reused ? 'Reused' : 'Opened'} ${result.type} panel ${result.panelId} in pane ${result.paneId} (${result.placement}): ${target}`);
+  }
+
+  return 0;
 }
 
 export async function runPanelsOutput(parsed: ParsedArgs): Promise<number> {
@@ -2826,9 +2908,9 @@ export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCr
       request.concurrency = parsed.concurrency;
     }
     const pinnedOverride = resolvePinnedOverride(parsed);
-    if (pinnedOverride !== undefined) {
-      request.panes = request.panes.map(item => ({ ...item, pinned: pinnedOverride }));
-    }
+    request.panes = request.panes.map(item => ({
+      ...item, pinned: pinnedOverride ?? item.pinned ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
+    }));
     applyPaneFocusOptions(parsed, request);
     request.associateSession = parsed.noAssociate ? undefined : resolveAssociateSession(parsed) ?? request.associateSession;
     return request;
@@ -2853,7 +2935,7 @@ export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCr
       worktreeName: parsed.worktreeName,
       branch: parsed.branch,
       baseBranch: parsed.baseBranch,
-      pinned: resolvePinnedOverride(parsed) ?? true,
+      pinned: resolvePinnedOverride(parsed) ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
       tool,
     }],
     dryRun: parsed.dryRun || undefined,
@@ -3083,6 +3165,26 @@ async function confirmPaneFocus(parsed: ParsedArgs, request: PaneFocusRequest): 
   try {
     const panelSuffix = request.panelId ? ` (panel ${request.panelId})` : '';
     const answer = (await rl.question(`Focus pane ${request.paneId}${panelSuffix}? [y/N] `)).trim().toLowerCase();
+    if (answer !== 'y' && answer !== 'yes') {
+      throw new Error('Cancelled.');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function confirmPanelOpen(parsed: ParsedArgs, request: PanelOpenRequest): Promise<void> {
+  if (parsed.yes) {
+    return;
+  }
+
+  if (!isInteractiveShell()) {
+    throw new Error('runpane panels open mutates Pane state. Rerun with --yes in non-interactive shells.');
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    const answer = (await rl.question(`Open ${request.url ?? request.filePath} in pane ${request.paneId}? [y/N] `)).trim().toLowerCase();
     if (answer !== 'y' && answer !== 'yes') {
       throw new Error('Cancelled.');
     }

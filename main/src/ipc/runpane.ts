@@ -1073,7 +1073,7 @@ export function registerRunpaneHandlers(
         const current = panelManager.getPanel(existing.id) ?? existing;
         const state = {
           ...current.state,
-          customState: { ...(current.state.customState ?? {}), reopenedAt: new Date().toISOString() },
+          customState: { ...(current.state.customState ?? {}), reopenedAt: new Date().toISOString(), reopenedWithFocus: activate },
         };
         await panelManager.updatePanel(existing.id, { title, state });
         panel = panelManager.getPanel(existing.id) ?? existing;

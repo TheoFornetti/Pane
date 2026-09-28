@@ -200,6 +200,7 @@ export interface EditorPanelState {
   filePath: string;
   /** Reload an agent-reopened file when this editor has no pending edits. */
   reopenedAt?: string;
+  reopenedWithFocus?: boolean;
   /** When set, the tab shows this file's diff instead of an editable file. */
   diff?: EditorDiffRef;
   isPreview?: boolean;
@@ -239,6 +240,7 @@ export interface BrowserPanelState {
   isPopup?: boolean;
   /** Set when an agent reopens this page (runpane panels open); the tab reloads to show the latest file. */
   reopenedAt?: string;
+  reopenedWithFocus?: boolean;
 }
 
 export interface ToolPanelMetadata {

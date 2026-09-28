@@ -50,6 +50,7 @@ import {
   updateSizes,
   findGroupContainingPanel,
   activatePanelInLayout,
+  shouldActivateReopenedPanel,
   subsetInsertIndex,
   mergeAllGroups,
   type DropZone,
@@ -383,8 +384,10 @@ export const SessionView = memo(() => {
 
     const handlePanelUpdated = (updatedPanel: ToolPanel) => {
       if (updatedPanel.sessionId === sid) {
+        const previous = usePanelStore.getState().panels[sid]?.find(panel => panel.id === updatedPanel.id);
+        const shouldFocus = shouldActivateReopenedPanel(updatedPanel, previous);
         updatePanelState(updatedPanel);
-        if (updatedPanel.state.isActive && updatedPanel.metadata?.openPlacement) {
+        if (shouldFocus) {
           const current = usePanelStore.getState().layouts[sid];
           if (current) applyLayout(sid, activatePanelInLayout(current, updatedPanel.id));
         }

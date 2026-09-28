@@ -116,3 +116,5 @@ three words of the command. Saved profiles are shared through app configuration.
 Use the pencil beside a saved profile to rename it; the menu and future tabs use
 the new name. Existing tabs keep their titles. Hover a profile to see its full
 name and command.
+
+Resume commands retain the original shell quoting and environment assignments when removing a launch prompt. Custom Claude launchers may choose a separate configuration directory; Pane trusts their recorded conversation IDs instead of checking the app configuration for their transcripts.

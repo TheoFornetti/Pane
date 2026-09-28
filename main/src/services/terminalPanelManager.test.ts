@@ -831,7 +831,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   it('preserves custom native arguments on resume without submitting input', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const id = '22222222-2222-4222-8222-222222222222';
-    const claude = manager.resolveCliLaunchCommand('panel', 'claude --model "my model" --permission-mode plan', {
+    const claude = manager.resolveCliLaunchCommand('panel', 'claude --model "my model" --permission-mode plan "implement the task"', {
       agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
     });
     expect(claude.commandToRun).toBe(`claude --model "my model" --permission-mode plan --resume "${id}"`);
@@ -863,12 +863,12 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(restarted.customState.initialInputSentAt).toBeUndefined();
   });
 
-  it('resumes wrapped Claude only when the allocated conversation has a transcript', () => {
+  it('resumes direct Claude only when the allocated conversation has a transcript', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const lookup = vi.spyOn(claudeTranscripts, 'findClaudeSessionTranscript').mockReturnValue(undefined);
     const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(true);
     try {
-      const command = 'any-launcher my-profile';
+      const command = 'claude --model sonnet';
       const first = manager.resolveCliLaunchCommand('panel', command, { initialCommand: command, customResume: {
         mode: 'claude', initialTemplate: '{command} -- --session-id {sessionId}', resumeTemplate: '{command} -- --resume {sessionId}',
       } });
@@ -879,9 +879,9 @@ describe('TerminalPanelManager hidden output delivery', () => {
     } finally { lookup.mockRestore(); readable.mockRestore(); }
   });
 
-  it('resumes wrapped Claude by its recorded conversation when Pane cannot see the transcripts', () => {
+  it('resumes wrapped Claude by its recorded conversation without assuming the app configuration matches its launcher', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
-    const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(false);
+    const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(true);
     try {
       const command = 'any-launcher my-profile';
       const first = manager.resolveCliLaunchCommand('panel', command, { initialCommand: command, customResume: {
@@ -898,6 +898,16 @@ describe('TerminalPanelManager hidden output delivery', () => {
       agentType: 'codex', agentSessionId: 'thread-1', wasInterrupted: true,
     });
     expect(result.commandToRun).toBe('CODEX_HOME=~/codex-work codex --yolo resume "thread-1"');
+  });
+
+  it.each([
+    ['CODEX_HOME="/tmp/my codex" codex "fix bug"', 'CODEX_HOME="/tmp/my codex" codex resume "thread-1"'],
+    ['codex --cd "$HOME/repo" "fix bug"', 'codex --cd "$HOME/repo" resume "thread-1"'],
+  ])('preserves shell argument spelling on resume: %s', (command, expected) => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    expect(manager.resolveCliLaunchCommand('panel', command, {
+      agentType: 'codex', agentSessionId: 'thread-1', wasInterrupted: true,
+    }).commandToRun).toBe(expected);
   });
 
   it('allocates a Claude session when resume flags appear only inside an option value', () => {

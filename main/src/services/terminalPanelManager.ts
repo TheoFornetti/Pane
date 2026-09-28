@@ -1,6 +1,6 @@
 import { withRunpaneOnPath } from './runpaneShim';
 import { validateCustomCommandResume, customResumeAgentType } from '../../../shared/types/customCommandResume';
-import { codexResumeBase, hasClaudeResumeFlag } from './agents/agentIdentity';
+import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag } from './agents/agentIdentity';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeSessionTranscript';
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
@@ -362,7 +362,8 @@ export class TerminalPanelManager extends EventEmitter {
       const hasConversation = Boolean(customState.agentSessionId && (customState.customResumeStarted || customState.wasInterrupted));
       // Claude resumes only an ID that has a transcript. When Pane can't see
       // the transcripts, trust the recorded conversation like other modes.
-      const checkTranscript = config.mode === 'claude' && !isWSL && canReadClaudeTranscripts();
+      const directClaude = /^claude(?:\s|$)/.test(initialCommand) && config.resumeTemplate.startsWith('{command} ');
+      const checkTranscript = config.mode === 'claude' && directClaude && !isWSL && canReadClaudeTranscripts();
       const transcript = checkTranscript && sessionId ? findClaudeSessionTranscript(sessionId) : undefined;
       const shouldResume = hasConversation && (!checkTranscript || Boolean(transcript));
       const template = shouldResume ? config.resumeTemplate : config.initialTemplate || '{command}';
@@ -453,7 +454,7 @@ export class TerminalPanelManager extends EventEmitter {
 
       return {
         commandToRun: canResumeClaudeSession
-          ? `${initialCommand} --resume ${this.quoteCommandArgument(claudeSessionId)}`
+          ? `${claudeResumeBase(initialCommand)} --resume ${this.quoteCommandArgument(claudeSessionId)}`
           : `${initialCommand} --session-id ${claudeSessionId}${initialPromptArg}`,
         customState: nextState,
         isCliCommand: true,

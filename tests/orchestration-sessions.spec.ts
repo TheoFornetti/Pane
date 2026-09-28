@@ -1356,6 +1356,48 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
     });
   });
   await expect(editorLines).toContainText('Updated Session notes');
+  await page.evaluate(async () => {
+    const originalInvoke = window.electronAPI.invoke;
+    // SAFETY: the fixture installs these event controls; this test owns the read resolver.
+    const controls = window as typeof window & {
+      __finishEditorRead?: () => void;
+      __paneTestElectronMock: { emitPanelUpdated: (panel: ToolPanel) => void };
+    };
+    Object.assign(window.electronAPI, {
+      invoke: (channel: string, ...args: unknown[]) => {
+        if (channel === 'file:read') return new Promise(resolve => {
+          controls.__finishEditorRead = () => resolve({ success: true, content: 'External replacement' });
+        });
+        return originalInvoke(channel, ...args);
+      },
+    });
+    const response = await window.electronAPI.panels.getSessionPanels('__orchestration_session_toolsterminal__');
+    const editor = response.data?.find(panel => panel.type === 'editor');
+    if (!editor) throw new Error('Expected the open notes editor');
+    controls.__paneTestElectronMock.emitPanelUpdated({
+      ...editor,
+      state: { ...editor.state, customState: { ...editor.state.customState, reopenedAt: '2026-09-28T12:01:00.000Z' } },
+    });
+  });
+  await expect.poll(() => page.evaluate(() => '__finishEditorRead' in window)).toBe(true);
+  const editorInput = page.locator('.monaco-editor textarea.inputarea').filter({ visible: true });
+  await editorInput.focus();
+  await editorInput.press('End');
+  await page.keyboard.type(' local edit');
+  await page.evaluate(() => {
+    // SAFETY: the preceding poll confirmed that the pending file read installed this resolver.
+    (window as typeof window & { __finishEditorRead: () => void }).__finishEditorRead();
+  });
+  await expect(editorLines).toContainText('Updated Session notes local edit');
+  // Restore immediate reads for the close/reopen checks below.
+  await page.evaluate(() => {
+    const originalInvoke = window.electronAPI.invoke;
+    Object.assign(window.electronAPI, {
+      invoke: (channel: string, ...args: unknown[]) => channel === 'file:read'
+        ? Promise.resolve({ success: true, content: 'Updated Session notes local edit' })
+        : originalInvoke(channel, ...args),
+    });
+  });
   const path = testInfo.outputPath('session-tools.png');
   await page.screenshot({ path });
   await testInfo.attach('session-tools.png', { path, contentType: 'image/png' });
@@ -1397,7 +1439,7 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
     const emit = reused ? mockWindow.__paneTestElectronMock.emitPanelUpdated : mockWindow.__paneTestElectronMock.emitPanelCreated;
     emit({
       id, sessionId: '__orchestration_session_plansterminal__', type: 'browser', title,
-      state: { isActive: active, hasBeenViewed: false, customState: { currentUrl: 'about:blank' } },
+      state: { isActive: active, hasBeenViewed: false, customState: { currentUrl: 'about:blank', reopenedAt: reused ? new Date().toISOString() : undefined, reopenedWithFocus: reused && active } },
       metadata: { createdAt: now, lastActiveAt: now, position: 5, openPlacement: 'split' },
     });
   }, { id, title, active, reused });
@@ -1415,6 +1457,17 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await openPage('report-page', 'report.html', true, true);
   await expect(groupStrips).toHaveCount(2);
   await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(2);
+  await expect(groupStrips.nth(1).getByRole('tab', { name: 'report.html' })).toHaveAttribute('aria-selected', 'true');
+  await page.evaluate(() => {
+    // SAFETY: the fixture installs these event controls; this test owns the read resolver.
+    const controls = window as typeof window & { __paneTestElectronMock: { emitPanelUpdated: (panel: ToolPanel) => void } };
+    const now = new Date().toISOString();
+    controls.__paneTestElectronMock.emitPanelUpdated({
+      id: 'plan-page', sessionId: '__orchestration_session_plansterminal__', type: 'browser', title: 'plan.html',
+      state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank', reopenedAt: now, reopenedWithFocus: false } },
+      metadata: { createdAt: now, lastActiveAt: now, position: 5, openPlacement: 'split' },
+    });
+  });
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'report.html' })).toHaveAttribute('aria-selected', 'true');
   const screenshot = testInfo.outputPath('session-split-tabs.png');
   await page.screenshot({ path: screenshot });

@@ -13,6 +13,7 @@ import { OuterResizeSeparator } from './ui/OuterResizeSeparator';
 import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
 import {
   activatePanelInLayout,
+  shouldActivateReopenedPanel,
   addPanelToGroup,
   createSingleGroupLayout,
   findGroup,
@@ -71,7 +72,10 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
     store.setLayout(sessionId, repaired);
     store.setFocusedGroup(sessionId, focusedGroupId);
     const focusedPanelId = findGroup(repaired.root, focusedGroupId)?.activePanelId;
-    if (focusedPanelId && store.activePanels[sessionId] !== focusedPanelId) store.setActivePanel(sessionId, focusedPanelId);
+    if (focusedPanelId && store.activePanels[sessionId] !== focusedPanelId) {
+      store.setActivePanel(sessionId, focusedPanelId);
+      void panelApi.setActivePanel(sessionId, focusedPanelId).catch(() => {});
+    }
     clearTimeout(persistTimer.current);
     persistTimer.current = setTimeout(() => {
       panelApi.setLayout(sessionId, repaired).catch(() => {});
@@ -109,9 +113,11 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
     });
     const updated = events.onPanelUpdated(panel => {
       if (panel.sessionId !== sessionId) return;
+      const previous = usePanelStore.getState().panels[sessionId]?.find(saved => saved.id === panel.id);
+      const shouldFocus = shouldActivateReopenedPanel(panel, previous);
       usePanelStore.getState().updatePanelState(panel);
       const current = usePanelStore.getState().layouts[sessionId];
-      if (current && panel.state.isActive && STAGE_PANEL_TYPES.has(panel.type)) {
+      if (current && shouldFocus && STAGE_PANEL_TYPES.has(panel.type)) {
         applyLayout(activatePanelInLayout(current, panel.id));
       }
     });

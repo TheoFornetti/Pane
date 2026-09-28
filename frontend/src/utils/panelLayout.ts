@@ -11,6 +11,7 @@ import type {
   PanelGroupNode,
   PanelLayoutNode,
   SessionPanelLayout,
+  ToolPanel,
 } from '../../../shared/types/panels';
 
 interface ReconciledPanelLayout {
@@ -770,4 +771,13 @@ export function dropZoneFor(
   ];
   edges.sort((a, b) => a[1] - b[1]);
   return edges[0][0];
+}
+
+/** Only a new, explicitly focused reopen request may change the selected tab. */
+export function shouldActivateReopenedPanel(panel: ToolPanel, previous?: ToolPanel): boolean {
+  const state = panel.state.customState;
+  const before = previous?.state.customState;
+  return !!state && 'reopenedAt' in state && !!state.reopenedAt
+    && 'reopenedWithFocus' in state && state.reopenedWithFocus === true
+    && (!before || !('reopenedAt' in before) || before.reopenedAt !== state.reopenedAt);
 }

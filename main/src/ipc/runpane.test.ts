@@ -458,7 +458,7 @@ describe('runpane IPC handlers', () => {
         initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-1', initialCommand: launch ? 'codex --yolo' : undefined }),
       }));
       if (!launch) {
-        expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, 'codex resume --yolo "thread-1"');
+        expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, 'codex --yolo resume "thread-1"');
       }
       expect(services.sessionManager.emitSessionCreated).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'stopped' }),

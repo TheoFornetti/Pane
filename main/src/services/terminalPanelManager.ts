@@ -297,7 +297,7 @@ export class TerminalPanelManager extends EventEmitter {
       if (template.includes('{sessionId}') && !sessionId) throw new Error('No session ID is available for this launch template');
       const commandToRun = template.replace(/\{command\}|\{sessionId\}/g, token =>
         token === '{command}' ? initialCommand : this.quoteCommandArgument(sessionId!));
-      const agentType = customResumeAgentType(config);
+      const agentType = customResumeAgentType(config) ?? customState.agentType;
       return { commandToRun, isCliCommand: true, customState: {
         ...customState, agentType, agentSessionId: sessionId, customResumeStarted: true,
         isCliPanel: true, isCliReady: false, wasInterrupted: undefined,
@@ -621,10 +621,10 @@ export class TerminalPanelManager extends EventEmitter {
       2000
     );
 
-    const reported = customState.customResume?.mode === 'reported'
+    if (customState.customResume?.mode === 'generated') return;
+    const agentSessionId = customState.customResume?.mode === 'reported'
       ? Array.from(terminal.agentSessionScrapeBuffer.matchAll(/(?:^|[\r\n])PANE_AGENT_SESSION_ID=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})(?=[\r\n])/g)).at(-1)?.[1]
-      : undefined;
-    const agentSessionId = reported ?? this.extractAgentSessionId(terminal.agentType, terminal.agentSessionScrapeBuffer);
+      : this.extractAgentSessionId(terminal.agentType, terminal.agentSessionScrapeBuffer);
     if (!agentSessionId) return;
 
     const agentType = this.resolveTerminalAgentType(customState);
@@ -1744,7 +1744,7 @@ export class TerminalPanelManager extends EventEmitter {
     customState: TerminalPanelState | undefined,
   ): CliAgentType | undefined {
     if (customState?.customResume) {
-      return customResumeAgentType(customState.customResume);
+      return customResumeAgentType(customState.customResume) ?? customState.agentType;
     }
     return customState?.agentType ?? resolveAgentTypeFromCommand(customState?.initialCommand);
   }

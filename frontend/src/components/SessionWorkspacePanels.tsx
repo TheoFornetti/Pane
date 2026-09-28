@@ -103,12 +103,17 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
       const focused = findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root);
       // Agents open pages and files beside the conversation by default.
       const root = panel.metadata?.openPlacement === 'split'
-        ? placePanelInSplit(current.root, panel.id)
+        ? placePanelInSplit(current.root, panel.id, panel.state.isActive)
         : addPanelToGroup(current.root, focused.id, panel.id, { activate: panel.state.isActive });
       if (root !== current.root) applyLayout({ ...current, root });
     });
     const updated = events.onPanelUpdated(panel => {
-      if (panel.sessionId === sessionId) usePanelStore.getState().updatePanelState(panel);
+      if (panel.sessionId !== sessionId) return;
+      usePanelStore.getState().updatePanelState(panel);
+      const current = usePanelStore.getState().layouts[sessionId];
+      if (current && panel.state.isActive && STAGE_PANEL_TYPES.has(panel.type)) {
+        applyLayout(activatePanelInLayout(current, panel.id));
+      }
     });
     const deleted = events.onPanelDeleted(event => {
       if (event.sessionId !== sessionId) return;

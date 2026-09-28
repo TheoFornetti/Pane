@@ -369,7 +369,7 @@ export const SessionView = memo(() => {
               || primaryGroup(currentLayout.root);
             // Agents open pages and files beside their conversation.
             const nextRoot = panel.metadata?.openPlacement === 'split'
-              ? placePanelInSplit(currentLayout.root, panel.id)
+              ? placePanelInSplit(currentLayout.root, panel.id, panel.state.isActive)
               : addPanelToGroup(currentLayout.root, group.id, panel.id, {
                 activate: panel.state.isActive,
               });

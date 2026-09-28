@@ -290,43 +290,38 @@ export const SessionView = memo(() => {
           return (a.metadata?.position ?? 0) - (b.metadata?.position ?? 0);
         });
 
+        let stored: SessionPanelLayout | null = null;
         try {
-          const stored = await panelApi.getLayout(sid);
-          // Recompute live ids from the store at set time: panel:created
-          // events that landed while this load was in flight are in the store
-          // but not in the loadedPanels snapshot. Reconciling against the
-          // current store adopts them as orphans instead of dropping them.
-          const nowPanels = usePanelStore.getState().panels[sid] || [];
-          const pinnedNow = getDockTerminalPanel(nowPanels);
-          const liveIdsNow: string[] = [];
-          const splitIdsNow = new Set<string>();
-          for (const p of nowPanels) {
-            if (p.id === pinnedNow?.id || isInspectorPanelType(p.type)) continue;
-            liveIdsNow.push(p.id);
-            if (p.metadata?.openPlacement === 'split') splitIdsNow.add(p.id);
-          }
-          // Treat unknown future layout versions as no stored layout rather
-          // than reconciling a shape this build doesn't understand.
-          const versionOk = stored?.version === 1;
-          const base = (versionOk ? stored : null) ?? createSingleGroupLayout(
-            sortedLive.map(p => p.id),
-            fallbackActiveId,
-          );
-          const { layout: reconciledLayout } = reconcileLayout(base, liveIdsNow, splitIdsNow);
-          const layout = fallbackActiveId
-            ? activatePanelInLayout(reconciledLayout, fallbackActiveId)
-            : reconciledLayout;
-          setLayoutInStore(sid, layout);
-          setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
+          stored = await panelApi.getLayout(sid);
         } catch (err) {
           console.warn('[SessionView] Failed to load layout, creating default:', err);
-          const layout = createSingleGroupLayout(
-            sortedLive.map(p => p.id),
-            fallbackActiveId,
-          );
-          setLayoutInStore(sid, layout);
-          setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
         }
+        // Recompute live ids from the store at set time: panel:created
+        // events that landed while this load was in flight are in the store
+        // but not in the loadedPanels snapshot. Reconciling against the
+        // current store adopts them as orphans instead of dropping them.
+        const nowPanels = usePanelStore.getState().panels[sid] || [];
+        const pinnedNow = getDockTerminalPanel(nowPanels);
+        const liveIdsNow: string[] = [];
+        const splitIdsNow = new Set<string>();
+        for (const p of nowPanels) {
+          if (p.id === pinnedNow?.id || isInspectorPanelType(p.type)) continue;
+          liveIdsNow.push(p.id);
+          if (p.metadata?.openPlacement === 'split') splitIdsNow.add(p.id);
+        }
+        // Treat unknown future layout versions as no stored layout rather
+        // than reconciling a shape this build doesn't understand.
+        const versionOk = stored?.version === 1;
+        const base = (versionOk ? stored : null) ?? createSingleGroupLayout(
+          sortedLive.filter(p => !splitIdsNow.has(p.id)).map(p => p.id),
+          fallbackActiveId,
+        );
+        const { layout: reconciledLayout } = reconcileLayout(base, liveIdsNow, splitIdsNow);
+        const layout = fallbackActiveId
+          ? activatePanelInLayout(reconciledLayout, fallbackActiveId)
+          : reconciledLayout;
+        setLayoutInStore(sid, layout);
+        setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
       });
     }
 

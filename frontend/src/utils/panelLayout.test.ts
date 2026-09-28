@@ -421,6 +421,16 @@ describe('reconcile', () => {
     expect(groups.map(g => g.panelIds)).toEqual([['agent', 'tab'], ['page']]);
   });
 
+  it('rebuilds an empty layout with agent-opened pages beside the conversation', () => {
+    const { layout: result } = reconcile(createSingleGroupLayout([], null), ['plan', 'agent', 'report'], new Set(['plan', 'report']));
+    expect(allGroups(result.root).map(g => g.panelIds)).toEqual([['agent'], ['plan', 'report']]);
+  });
+
+  it('uses the first page as the primary group when only split panels remain', () => {
+    const { layout: result } = reconcile(createSingleGroupLayout([], null), ['plan', 'report'], new Set(['plan', 'report']));
+    expect(allGroups(result.root).map(g => g.panelIds)).toEqual([['plan'], ['report']]);
+  });
+
   it('reports no change for a layout matching the live panels', () => {
     const layout = layoutOf(split('s1', 'row', [group('g1', ['a']), group('g2', ['b'])]));
     const { layout: result, changed } = reconcile(layout, ['a', 'b']);

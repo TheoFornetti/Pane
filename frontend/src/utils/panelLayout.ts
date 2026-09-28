@@ -519,11 +519,15 @@ export function reconcile(
   // If the tree collapsed, recreate with a single group
   if (root.type === 'group' && root.panelIds.length === 0 && livePanelIds.length > 0) {
     changed = true;
+    // Keep agent-opened splits unassigned so the placement pass can put them
+    // beside the conversation. With only split panels, one anchors the layout.
+    const primaryIds = livePanelIds.filter(id => !splitPanelIds.has(id));
+    const initialIds = primaryIds.length > 0 ? primaryIds : livePanelIds.slice(0, 1);
     root = {
       type: 'group',
       id: root.id,
-      panelIds: [...livePanelIds],
-      activePanelId: livePanelIds[0],
+      panelIds: initialIds,
+      activePanelId: initialIds[0],
     };
   }
 

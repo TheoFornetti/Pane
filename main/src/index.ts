@@ -119,7 +119,7 @@ import { startHeadlessPaneProcess } from './daemon/startHeadless';
 import { runRemoteSetupCli } from './daemon/setupRemoteHostCli';
 import { PowerSaveManager } from './services/powerSaveManager';
 import { warmShellPath } from './utils/shellPath';
-import { APP_MENU_ACTION_CHANNEL, attachEditContextMenu, installApplicationMenu } from './services/nativeMenus';
+import { APP_MENU_ACTION_CHANNEL, attachEditContextMenu, installApplicationMenu, type AppMenuAction } from './services/nativeMenus';
 import { fitBoundsToWorkAreas, parseSavedWindowState, trackWindowState, WINDOW_STATE_KEY } from './utils/windowState';
 
 export let mainWindow: BrowserWindow | null = null;
@@ -143,6 +143,8 @@ let shutdownInProgress = false;
 let appIsQuitting = false;
 let mainWindowRevealed = false;
 let flushWindowState: (() => void) | null = null;
+// A menu action chosen before the window is revealed waits for the renderer.
+let pendingMenuAction: AppMenuAction | null = null;
 const RENDERER_READY_CHANNEL = 'window:renderer-ready';
 const RENDERER_READY_TIMEOUT_MS = 3_000;
 interface AnalyticsLaunchContext {
@@ -252,6 +254,15 @@ function openPaneLink(link: string): void {
   }).catch((error) => console.warn('[Main] Could not open pane link:', error));
 }
 let powerSaveManager: PowerSaveManager | null = null;
+
+function sendMenuAction(action: AppMenuAction): void {
+  if (!mainWindowRevealed || !mainWindow || mainWindow.isDestroyed()) {
+    pendingMenuAction = action;
+    return;
+  }
+  showMainWindow();
+  mainWindow.webContents.send(APP_MENU_ACTION_CHANNEL, action);
+}
 
 function showMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -478,6 +489,10 @@ async function createWindow() {
     if (savedWindowState?.isMaximized) win.maximize();
     else win.show();
     if (savedWindowState?.isFullScreen) win.setFullScreen(true);
+    if (pendingMenuAction) {
+      win.webContents.send(APP_MENU_ACTION_CHANNEL, pendingMenuAction);
+      pendingMenuAction = null;
+    }
   };
   const onRendererReady = (event: IpcMainEvent) => {
     if (event.sender === win.webContents) revealWindow('renderer ready');
@@ -1275,13 +1290,7 @@ if (launchRemoteSetup) {
     if (process.platform === 'darwin') {
       app.dock?.setIcon(path.join(__dirname, '../assets/icon-macos.png'));
     }
-    installApplicationMenu({
-      isPackaged: app.isPackaged,
-      onAction: (action) => {
-        showMainWindow();
-        mainWindow?.webContents.send(APP_MENU_ACTION_CHANNEL, action);
-      },
-    });
+    installApplicationMenu({ isPackaged: app.isPackaged, onAction: sendMenuAction });
 
     // A second Pane launched only to open a link hands it to the running Pane and exits.
     if (pendingPaneLink && process.platform !== 'darwin' && await forwardPaneLinkToRunningPane(pendingPaneLink, getAppDirectory())) {

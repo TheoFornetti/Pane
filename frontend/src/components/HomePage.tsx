@@ -20,7 +20,7 @@ import { DISCORD_INVITE_URL, DiscordIcon } from './DiscordIcon';
 const HIDE_DISCORD_PREFERENCE = 'hide_discord';
 
 const actionCardClassName =
-  'flex min-h-[9.2rem] min-w-0 w-full flex-col items-center justify-center gap-3 rounded-xl bg-surface-secondary p-6 text-center transition-colors hover:bg-surface-hover cursor-pointer';
+  'flex min-h-[9.2rem] min-w-0 w-full flex-col items-center justify-center gap-3 rounded-xl bg-surface-secondary p-6 text-center transition-colors hover:bg-surface-hover cursor-default';
 
 const paneAscii = String.raw`
 ░█████████                                    
@@ -377,7 +377,7 @@ export function HomePage() {
                 trigger={
                   <button
                     type="button"
-                    className="flex cursor-pointer items-center gap-2 rounded-md border border-border-secondary bg-surface-tertiary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive"
+                    className="flex cursor-default items-center gap-2 rounded-md border border-border-secondary bg-surface-tertiary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive"
                   >
                     <span>{getThemeLabel(theme)}</span>
                     <ChevronDown className="w-3 h-3 text-text-tertiary" />
@@ -442,7 +442,7 @@ export function HomePage() {
                   trigger={
                     <button
                       type="button"
-                      className="flex cursor-pointer items-center gap-2 rounded-md border border-border-secondary bg-surface-tertiary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive"
+                      className="flex cursor-default items-center gap-2 rounded-md border border-border-secondary bg-surface-tertiary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive"
                     >
                       <span>
                         {preferredShell === 'auto'

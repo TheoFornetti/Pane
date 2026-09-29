@@ -387,7 +387,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
           <div
             className={cn(
               "group relative inline-flex items-center justify-center whitespace-nowrap select-none",
-              isDisabled ? "cursor-not-allowed" : "cursor-pointer",
+              isDisabled ? "cursor-not-allowed" : "cursor-default",
               compact
                 ? cn(
                     "h-6 text-[11px]",

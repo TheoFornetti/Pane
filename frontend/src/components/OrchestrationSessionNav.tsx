@@ -555,7 +555,7 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
                     data-testid={`create-session-agent-${option.id}`}
                     htmlFor={`create-session-agent-input-${option.id}`}
                     className={cn(
-                      'flex cursor-pointer items-center justify-between rounded border px-3 py-2 text-left text-sm transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-interactive',
+                      'flex cursor-default items-center justify-between rounded border px-3 py-2 text-left text-sm transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-interactive',
                       selected ? 'border-interactive bg-surface-selected text-text-primary' : 'border-border-primary text-text-secondary hover:bg-surface-hover hover:text-text-primary',
                     )}
                   >
@@ -580,7 +580,7 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
             </div>
           </fieldset>
           <details className="space-y-3">
-            <summary className="cursor-pointer text-sm font-medium text-text-secondary">Launch command and behavior</summary>
+            <summary className="cursor-default text-sm font-medium text-text-secondary">Launch command and behavior</summary>
             <SessionLaunchFields
               resume={customResume}
               onResumeChange={value => { userEditedLaunch.current = true; setCustomResume(value); }}

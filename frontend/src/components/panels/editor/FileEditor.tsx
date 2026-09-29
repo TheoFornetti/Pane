@@ -963,7 +963,7 @@ function HeadlessFileTree({
                 if (element) itemElementRefs.current.set(data.path, element);
                 else itemElementRefs.current.delete(data.path);
               }}
-              className={`flex items-center px-2 py-1 hover:bg-surface-hover cursor-pointer group ${
+              className={`flex items-center px-2 py-1 hover:bg-surface-hover cursor-default group ${
                 isItemSelected ? 'bg-interactive' : ''
               } ${
                 isOpenFile && !isItemSelected ? 'bg-surface-hover/60' : ''

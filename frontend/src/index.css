@@ -34,6 +34,49 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/*
+ * App chrome behaves like a native window: labels and controls are not
+ * drag-selectable, the cursor stays an arrow (Tailwind's preflight gives every
+ * button a hand), and nothing rubber-bands or chains scroll to the page.
+ * Content that people copy opts back in below or with `select-text`.
+ */
+body {
+  user-select: none;
+  cursor: default;
+}
+
+* {
+  overscroll-behavior: none;
+}
+
+@layer base {
+  button,
+  [role="button"] {
+    cursor: default;
+  }
+}
+
+input,
+textarea,
+[contenteditable="true"],
+pre,
+code,
+[role="alert"],
+[role="tooltip"],
+.markdown-preview,
+.nb-preview,
+.log-line,
+.diff-style-root {
+  user-select: text;
+}
+
+/* Rings on buttons and menu items appear for keyboard focus only. */
+:is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary):focus:not(:focus-visible) {
+  outline: none !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+}
+
 /* Light surfaces read crisper with the platform's default (subpixel) smoothing. */
 body.light,
 body.light-rounded,

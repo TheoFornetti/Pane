@@ -595,7 +595,7 @@ function SessionOverviewPanel({ record, overview, error, onRefresh, onUpdate, on
 
         <div className="border-t border-border-primary pt-3">
           <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">Activity</h3>
-          <div className="space-y-2">
+          <div className="select-text space-y-2">
             {(overview?.activity ?? record.activity).slice(0, 12).map(activity => (
               <div key={activity.id} className="border-l-2 border-border-primary pl-2">
                 <p className="text-text-secondary">{activity.message}</p>

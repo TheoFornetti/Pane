@@ -669,6 +669,18 @@ function App() {
     };
   }, [isLoaded]);
 
+  // Main keeps the window hidden until the first frame with sessions is painted.
+  useEffect(() => {
+    if (!isLoaded) return;
+    const frame = requestAnimationFrame(() => window.electronAPI?.notifyRendererReady?.());
+    return () => cancelAnimationFrame(frame);
+  }, [isLoaded]);
+
+  useEffect(() => window.electronAPI?.events?.onAppMenuAction?.((action) => {
+    if (action === 'open-settings') openSettings();
+    else setIsAboutOpen(true);
+  }), [openSettings]);
+
   const loadNextPendingPermission = useCallback(async () => {
     try {
       const result = await API.permissions.getPending();

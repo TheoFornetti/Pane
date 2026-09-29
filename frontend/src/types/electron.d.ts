@@ -110,6 +110,7 @@ interface ElectronAPI {
   appearanceSnapshot?: import('../../../shared/types/appearance').AppearanceSnapshot;
   setTitleBarOverlay: (colors: { color: string; symbolColor: string }) => Promise<IPCResponse>;
   setBackgroundColor: (payload: { theme: import('../../../shared/types/appearance').Theme; color: string }) => Promise<IPCResponse>;
+  notifyRendererReady: () => void;
 
   // Version checking
   checkForUpdates: () => Promise<IPCResponse<VersionInfo>>;
@@ -464,6 +465,7 @@ interface ElectronAPI {
     onZombieProcessesDetected: (callback: (data: { sessionId?: string | null; pids?: number[]; message: string }) => void) => () => void;
 
     // Window focus state from BrowserWindow (more reliable than document.hasFocus())
+    onAppMenuAction: (callback: (action: 'open-about' | 'open-settings') => void) => () => void;
     onWindowFocusChanged: (callback: (focused: boolean) => void) => () => void;
     onRemoteDaemonResyncRequested: (callback: () => void) => () => void;
 

@@ -350,6 +350,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     invokeIpc('window:set-title-bar-overlay', colors),
   setBackgroundColor: (payload: { theme: Theme; color: string }): Promise<IPCResponse> =>
     invokeIpc('window:set-background-color', payload),
+  // The window stays hidden until the first render with data; see createWindow.
+  notifyRendererReady: (): void => ipcRenderer.send('window:renderer-ready'),
 
   // Version checking
   checkForUpdates: (): Promise<IPCResponse> => invokeIpc('version:check-for-updates'),
@@ -999,6 +1001,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     // Window focus state from BrowserWindow (more reliable than document.hasFocus())
+    onAppMenuAction: (callback: (action: 'open-about' | 'open-settings') => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, action: 'open-about' | 'open-settings') => callback(action);
+      ipcRenderer.on('app:menu-action', wrappedCallback);
+      return () => ipcRenderer.removeListener('app:menu-action', wrappedCallback);
+    },
     onWindowFocusChanged: (callback: (focused: boolean) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, focused: boolean) => callback(focused);
       ipcRenderer.on('window:focus-changed', wrappedCallback);

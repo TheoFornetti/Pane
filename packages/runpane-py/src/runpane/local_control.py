@@ -1704,6 +1704,7 @@ def print_panel_wait_result(result: Dict[str, Any]) -> None:
 
     state = result.get("state") or {}
     status_parts = [
+        "stopped" if state.get("running") is False else None,
         "initialized" if state.get("initialized") else "not-initialized",
         state.get("activityStatus"),
         None if state.get("isCliReady") is None else "cli-ready" if state.get("isCliReady") else "cli-not-ready",

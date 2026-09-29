@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import { Laptop, Plug, Radio, Server } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { API } from '../utils/api';
@@ -27,21 +27,29 @@ export function RemoteHostSwitcher({
   onOpenHosting,
 }: RemoteHostSwitcherProps) {
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
+  // Main does not serialize client transitions, so one switch at a time.
+  const [switching, setSwitching] = useState(false);
   const remote = connectionState.mode === 'remote';
   const activeStatusText = connectionState.status === 'connected'
     ? 'Connected'
     : connectionState.status === 'error' ? 'Connection failed' : 'Connecting';
 
   const switchTo = async (profileId: string) => {
-    if (profileId === model.selectedId) return;
+    // Picking the current host again retries it after a failed connection.
+    if (switching || (profileId === model.selectedId && connectionState.status !== 'error')) return;
     const updates = profileId === LOCAL_RUNTIME_ID
       ? { activeProfileId: null, mode: 'local' as const }
       : { activeProfileId: profileId, mode: 'remote' as const };
     // A failed switch still lands in the pushed connection state, which the
     // trigger's dot reports; the log keeps the reason.
-    const response = await API.remoteDaemon.updateClientState(updates);
-    if (!response.success) console.error('Failed to switch remote host:', response.error);
-    await fetchConfig().catch(() => undefined);
+    setSwitching(true);
+    try {
+      const response = await API.remoteDaemon.updateClientState(updates);
+      if (!response.success) console.error('Failed to switch remote host:', response.error);
+      await fetchConfig().catch(() => undefined);
+    } finally {
+      setSwitching(false);
+    }
   };
 
   const items: DropdownItem[] = [
@@ -52,6 +60,7 @@ export function RemoteHostSwitcher({
         ? `${activeStatusText} · ${profile.baseUrl}`
         : profile.baseUrl,
       icon: Server,
+      disabled: switching,
       onClick: () => void switchTo(profile.id),
     })),
     {
@@ -59,6 +68,7 @@ export function RemoteHostSwitcher({
       label: 'This computer',
       description: remote ? 'Disconnect and use the local runtime' : 'Using the local runtime',
       icon: Laptop,
+      disabled: switching,
       onClick: () => void switchTo(LOCAL_RUNTIME_ID),
     },
   ];

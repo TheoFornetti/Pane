@@ -1821,7 +1821,7 @@ export function registerGitHandlers(
     let wslDistribution: string | null = null;
 
     if (wslInfo) {
-      const wslError = validateWSLAvailable(wslInfo.distro);
+      const wslError = await validateWSLAvailable(wslInfo.distro);
       if (wslError) {
         return { success: false, error: wslError };
       }

@@ -1,4 +1,4 @@
-import { execSync as nodeExecSync, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
@@ -120,18 +120,6 @@ export function posixJoin(...segments: string[]): string {
 }
 
 /**
- * Escape a string for use inside a bash -c "..." double-quoted context.
- * Only escapes bash special characters (\, ", `, $).
- */
-export function escapeForBashDoubleQuote(str: string): string {
-  return str
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/`/g, '\\`')
-    .replace(/\$/g, '\\$');
-}
-
-/**
  * Build args array for invoking wsl.exe directly via execFileSync/execFile.
  * Bypasses cmd.exe entirely, avoiding all cmd.exe escaping issues (%, ^, &, etc.).
  * If cwd provided, cd to it first inside the bash -c command.
@@ -180,12 +168,13 @@ export function buildWSLENV(varNames: readonly string[]): string {
 export function getWSLShellSpawn(distro: string, cwd?: string): WSLShellSpawn {
   // Use bash -c "cd ... && exec bash" instead of --cd flag.
   // The --cd flag is broken on many WSL versions (e.g., 2.5.9.0) for Linux paths.
-  const args = ['-d', distro, '--'];
+  // --exec runs bash directly; `--` would pass the command line through the
+  // user's default shell first, which re-parses the quoting.
+  const args = ['-d', distro, '--exec', 'bash'];
   if (cwd) {
-    const escapedCwd = escapeForBashDoubleQuote(cwd);
-    args.push('bash', '-c', `cd '${escapedCwd}' && exec bash --login`);
+    args.push('-c', `cd ${escapeForBash(cwd)} && exec bash --login`);
   } else {
-    args.push('bash', '--login');
+    args.push('--login');
   }
   return { path: 'wsl.exe', name: 'wsl', args };
 }
@@ -232,32 +221,40 @@ export async function bumpWSLInotifyLimits(distros: string[]): Promise<void> {
   );
 }
 
+type RunWSL = (args: string[]) => Promise<Buffer>;
+
+const runWSL: RunWSL = async args =>
+  (await execFileAsync('wsl.exe', args, { encoding: 'buffer', timeout: 5000 })).stdout;
+
 /**
  * Validate that WSL is available and the specified distro is installed.
  * Returns error message if invalid, null if OK.
  */
-export function validateWSLAvailable(distro: string): string | null {
+export async function validateWSLAvailable(distro: string, run: RunWSL = runWSL): Promise<string | null> {
   try {
-    nodeExecSync('wsl.exe --version', { encoding: 'utf-8', timeout: 5000 });
+    await run(['--version']);
   } catch {
     return 'WSL is not installed or not available on this system.';
   }
 
+  let distros: string[];
   try {
-    const output = nodeExecSync('wsl.exe -l -q', { encoding: 'utf-8', timeout: 5000 });
-    // wsl -l -q outputs distro names, one per line (may have UTF-16 BOM/null chars)
-    const distros = output
-      .replaceAll('\0', '') // strip null chars from UTF-16
-      .split('\n')
+    const output = await run(['-l', '-q']);
+    // wsl.exe writes UTF-16LE unless WSL_UTF8=1 is set, in which case it writes UTF-8.
+    const text = output.includes(0) ? output.toString('utf16le') : output.toString('utf8');
+    distros = text
+      .replace(/^\uFEFF/, '')
+      .replaceAll('\0', '')
+      .split(/\r?\n/)
       .map(d => d.trim())
       .filter(Boolean);
-    const found = distros.some(d => d.toLowerCase() === distro.toLowerCase());
-    if (!found) {
-      return `WSL distribution '${distro}' is not installed. Available: ${distros.join(', ')}`;
-    }
   } catch {
     return 'Failed to list WSL distributions.';
   }
 
-  return null; // All good
+  const found = distros.some(d => d.toLowerCase() === distro.toLowerCase());
+  if (!found) {
+    return `WSL distribution '${distro}' is not installed. Available: ${distros.join(', ')}`;
+  }
+  return null;
 }

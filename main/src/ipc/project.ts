@@ -134,7 +134,7 @@ export function registerProjectHandlers(
       const { path: actualPath, wsl_enabled: wslEnabled, wsl_distribution: wslDistribution, pathResolver, commandRunner } = registration;
       let isGitRepo = false;
       if (wslDistribution) {
-        const wslError = validateWSLAvailable(wslDistribution);
+        const wslError = await validateWSLAvailable(wslDistribution);
         if (wslError) return { success: false, error: wslError };
       }
 

@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { ipcMain, powerMonitor } from 'electron';
 import type { AppServices } from './types';
 import { registerAppHandlers } from './app';
 import { registerUpdaterHandlers } from './updater';
@@ -56,6 +56,9 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
     rendererEventSink,
     analyticsManager: services.analyticsManager,
   });
+  // Pause the remote connection while the system sleeps and reconnect on wake.
+  powerMonitor.on('suspend', () => remotePaneClientController.suspend());
+  powerMonitor.on('resume', () => remotePaneClientController.resume());
   const bridgeRouter = createDaemonBridgeRouter(commandRegistry);
 
   registerAppHandlers(ipcMain, services);

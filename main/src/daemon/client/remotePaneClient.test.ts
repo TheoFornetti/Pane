@@ -254,6 +254,42 @@ describe('RemotePaneClient', () => {
 
     await client.disconnect();
   });
+
+  it('stays quiet while suspended for system sleep and reconnects on resume', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const connectionStates: string[] = [];
+
+    const client = new RemotePaneClient({
+      id: 'profile-sleep',
+      label: 'Remote host',
+      baseUrl: server.baseUrl,
+      token: 'secret-token',
+      transport: 'http+sse',
+    }, {
+      heartbeatStaleTimeoutMs: 20,
+      reconnectInitialDelayMs: 5,
+      reconnectMaxDelayMs: 20,
+      onConnectionStateChange(status) {
+        connectionStates.push(status);
+      },
+    });
+
+    await client.connect({ retryOnInitialFailure: false });
+    client.suspend();
+    const statesAtSuspend = connectionStates.length;
+
+    // Several heartbeat and backoff windows pass while the machine sleeps.
+    await sleep(150);
+    expect(server.getEventRequestCount()).toBe(1);
+    expect(connectionStates.slice(statesAtSuspend)).toEqual([]);
+
+    client.resume();
+    await waitFor(() => server.getEventRequestCount() === 2);
+    await waitFor(() => connectionStates.at(-1) === 'connected');
+
+    await client.disconnect();
+  });
 });
 
 describe('RemotePaneClientController', () => {

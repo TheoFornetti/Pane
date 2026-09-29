@@ -36,6 +36,7 @@ from .local_control import (
     run_panels_submit,
     run_panels_submit_composer,
     run_panels_wait,
+    run_panels_resume,
     run_panes_archive,
     run_panes_create,
     run_panes_focus,
@@ -333,6 +334,8 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_panels_submit_composer(parsed)
     if parsed.command == "panels wait":
         return run_panels_wait(parsed)
+    if parsed.command == "panels resume":
+        return run_panels_resume(parsed)
     if parsed.command == "panels last-message":
         return run_panels_last_message(parsed)
     if parsed.command == "report":
@@ -1034,6 +1037,7 @@ def is_runpane_local_command(command: str) -> bool:
         "panels submit",
         "panels submit-composer",
         "panels wait",
+        "panels resume",
         "panels last-message",
         "report",
         "agents doctor",

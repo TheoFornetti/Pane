@@ -847,6 +847,7 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'panels submit'
     || command === 'panels submit-composer'
     || command === 'panels wait'
+    || command === 'panels resume'
     || command === 'panels last-message'
     || command === 'report'
     || command === 'workspace state'

@@ -194,7 +194,7 @@ export function ArchiveProgress() {
                     {getStatusText(task.status)}
                   </div>
                   {task.error && (
-                    <div className="text-xs text-status-error pl-5 mt-1">
+                    <div className="select-text text-xs text-status-error pl-5 mt-1">
                       {task.error}
                     </div>
                   )}

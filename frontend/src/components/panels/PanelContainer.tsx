@@ -20,7 +20,7 @@ const PanelErrorFallback: React.FC<{ error: Error; resetErrorBoundary: () => voi
 }) => (
   <div className="flex flex-col items-center justify-center h-full text-status-error p-4">
     <p className="text-lg font-semibold mb-2">Panel Error</p>
-    <p className="text-sm text-text-secondary mb-4">{error.message}</p>
+    <p className="select-text text-sm text-text-secondary mb-4">{error.message}</p>
     <button
       onClick={resetErrorBoundary}
       className="px-4 py-2 bg-interactive text-text-on-interactive rounded hover:bg-interactive-hover"

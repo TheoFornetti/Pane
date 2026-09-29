@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BarChart3, BookOpen, ChevronDown, ChevronRight, Info, FolderGit2, Home, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, BarChart3, BookOpen, ChevronDown, ChevronRight, Info, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -25,7 +25,9 @@ import { useSessionNavigationHotkeys } from '../hooks/useSessionNavigationHotkey
 import { useRemoteRuntimeState } from '../hooks/useRemoteRuntimeState';
 import { useAppBuildInfo } from '../hooks/useAppBuildInfo';
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
-import { getRemoteFooterStatus } from '../utils/remoteRuntimePresentation';
+import { getRemoteFooterStatus, getRemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
+import { RemoteHostSwitcher } from './RemoteHostSwitcher';
+import { useConfigStore } from '../stores/configStore';
 import { usePanelStore } from '../stores/panelStore';
 import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
 import { createProjectById, getPinnedSessions, groupSessionsByProject } from '../utils/sessionOrdering';
@@ -69,6 +71,7 @@ interface SidebarProps {
   onAboutClick: () => void;
   onSettingsClick: () => void;
   onRemoteSettingsClick: () => void;
+  onManageRemoteConnectionsClick: () => void;
   width: number;
   onResize: (e: React.MouseEvent) => void;
   collapsed?: boolean;
@@ -95,7 +98,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick }: SidebarProps) {
+export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, onManageRemoteConnectionsClick, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
@@ -190,6 +193,39 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     </div>
   );
   const showRemoteDesktopLink = remoteConnectionState.mode === 'remote' && remoteConnectionState.status === 'connected';
+  const remoteProfiles = useConfigStore((state) => state.config?.remoteDaemon?.client.profiles);
+  const fetchConfig = useConfigStore((state) => state.fetchConfig);
+  // Profiles live in the config store; a host imported or connected outside
+  // Settings shows up here once the connection it caused is pushed.
+  useEffect(() => {
+    void fetchConfig().catch(() => undefined);
+  }, [fetchConfig, remoteConnectionState.mode, remoteConnectionState.activeProfileId]);
+  const remoteHostSwitcher = useMemo(
+    () => getRemoteHostSwitcherModel(remoteConnectionState, remoteHostState, remoteProfiles ?? []),
+    [remoteConnectionState, remoteHostState, remoteProfiles],
+  );
+  const renderRemoteHostSwitcher = (trigger: React.ReactElement, position: 'bottom-left' | 'top-right') => (
+    <RemoteHostSwitcher
+      trigger={trigger}
+      position={position}
+      model={remoteHostSwitcher}
+      profiles={remoteProfiles ?? []}
+      connectionState={remoteConnectionState}
+      onManageConnections={onManageRemoteConnectionsClick}
+      onOpenHosting={onRemoteSettingsClick}
+    />
+  );
+  const railRemoteDot = (
+    <button
+      type="button"
+      data-compact-rail-item
+      onClick={remoteHostSwitcher.visible ? undefined : onRemoteSettingsClick}
+      aria-label={remoteFooterStatus.ariaLabel}
+      className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
+    >
+      <span className={`h-2.5 w-2.5 rounded-full ${remoteFooterStatus.dotClassName}`} />
+    </button>
+  );
   const handleOpenRemoteDesktop = useCallback(() => {
     void window.electronAPI.openExternal(REMOTE_DESKTOP_URL).catch(error => {
       console.error('Failed to open Remote Desktop:', error);
@@ -391,6 +427,20 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         position="bottom-left"
         width="sm"
       />
+      {!collapsed && remoteHostSwitcher.visible && renderRemoteHostSwitcher(
+        <button
+          type="button"
+          aria-label={`Agents run on ${remoteHostSwitcher.label}. Switch host`}
+          className="ml-1 flex h-6 max-w-[180px] items-center gap-1.5 rounded-full border border-border-primary bg-surface-secondary pl-2 pr-1.5 text-[12px] text-text-primary hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+        >
+          {remoteHostSwitcher.dotClassName
+            ? <span className={`h-2 w-2 shrink-0 rounded-full ${remoteHostSwitcher.dotClassName}`} />
+            : <Laptop className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />}
+          <span className="truncate">{remoteHostSwitcher.label}</span>
+          <ChevronDown className="h-3 w-3 shrink-0 text-text-tertiary" />
+        </button>,
+        'bottom-left',
+      )}
     </>
   );
 
@@ -628,15 +678,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           {/* Bottom actions */}
           <div className="flex shrink-0 flex-col items-center gap-1 border-t border-border-primary py-2">
             <Tooltip content={remoteFooterTooltip} side="right" interactive delay={250}>
-              <button
-                type="button"
-                data-compact-rail-item
-                onClick={onRemoteSettingsClick}
-                aria-label={remoteFooterStatus.ariaLabel}
-                className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
-              >
-                <span className={`h-2.5 w-2.5 rounded-full ${remoteFooterStatus.dotClassName}`} />
-              </button>
+              {remoteHostSwitcher.visible ? renderRemoteHostSwitcher(railRemoteDot, 'top-right') : railRemoteDot}
             </Tooltip>
             <Tooltip content={hotkeyDisplay('open-settings') ? <Kbd>{hotkeyDisplay('open-settings')}</Kbd> : undefined} side="right">
               <button

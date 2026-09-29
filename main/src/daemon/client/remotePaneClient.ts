@@ -138,6 +138,8 @@ export class RemotePaneClient {
   private closedByClient = false;
   /** Set while the system sleeps: no stream, heartbeat or reconnect until resume(). */
   private suspended = false;
+  /** Bumped per stream and on suspend; callbacks from an older stream are ignored. */
+  private streamGeneration = 0;
   private readonly inputQueue = new RemoteInputQueue((channel, args, signal) =>
     this.invokeRequest(channel, args, signal));
 
@@ -210,6 +212,7 @@ export class RemotePaneClient {
   suspend(): void {
     if (this.closedByClient || this.suspended) return;
     this.suspended = true;
+    this.streamGeneration += 1;
     this.clearReconnectTimer();
     this.clearHeartbeatStaleTimer();
     this.eventParser.reset();
@@ -265,6 +268,8 @@ export class RemotePaneClient {
 
   private async openEventStream(isReconnect: boolean): Promise<void> {
     this.clearReconnectTimer();
+    const generation = ++this.streamGeneration;
+    const isStale = (): boolean => generation !== this.streamGeneration;
     this.onConnectionStateChange?.(isReconnect ? 'reconnecting' : 'connecting', null, {
       lastSeenAt: this.lastSeenAt,
     });
@@ -286,6 +291,14 @@ export class RemotePaneClient {
 
       const rejectBeforeReady = (message: string, destroyStream = false): void => {
         if (settled) {
+          return;
+        }
+
+        if (isStale()) {
+          // A newer stream owns the shared fields; this attempt just ends.
+          settled = true;
+          clearHandshakeTimer();
+          resolve();
           return;
         }
 
@@ -333,10 +346,16 @@ export class RemotePaneClient {
           return;
         }
 
+        if (isStale()) {
+          response.destroy();
+          return;
+        }
+
         this.eventResponse = response;
         this.eventParser.reset();
 
         response.on('data', (chunk: Buffer) => {
+          if (isStale()) return;
           const events = this.eventParser.push(chunk);
           for (const event of events) {
             if (event.event === 'ready') {
@@ -383,7 +402,7 @@ export class RemotePaneClient {
         response.on('error', (error) => {
           const message = getErrorMessage(error, 'Remote daemon event stream errored');
           if (readyReceived) {
-            this.handleUnexpectedDisconnect(message, false);
+            if (!isStale()) this.handleUnexpectedDisconnect(message, false);
             return;
           }
 
@@ -393,7 +412,7 @@ export class RemotePaneClient {
         response.on('end', () => {
           const message = 'Remote daemon event stream ended';
           if (readyReceived) {
-            this.handleUnexpectedDisconnect(message, false);
+            if (!isStale()) this.handleUnexpectedDisconnect(message, false);
             return;
           }
 
@@ -403,7 +422,7 @@ export class RemotePaneClient {
         response.on('close', () => {
           const message = 'Remote daemon event stream closed';
           if (readyReceived) {
-            this.handleUnexpectedDisconnect(message, false);
+            if (!isStale()) this.handleUnexpectedDisconnect(message, false);
             return;
           }
 

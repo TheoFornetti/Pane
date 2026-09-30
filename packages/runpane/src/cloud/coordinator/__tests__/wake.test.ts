@@ -210,6 +210,28 @@ describe('WakeService.wake', () => {
     assert.equal((await idle.runOnce()).results[0].decision, 'stopped');
   });
 
+  it('a user wake of an awake host restarts the safe streak; a peer wake does not', async () => {
+    const { wake, provider, probe, directory, activity, alerts } = setup([sandbox('bx_a', 'running')]);
+    const idle = new IdleStopper({ directory, provider, probe, activity, alerts }, {
+      requiredConsecutiveSafe: 2,
+      wakeGraceMs: 600_000,
+      dryRun: false,
+    });
+    assert.notEqual((await idle.runOnce()).results[0].decision, 'stopped');
+    await wake.wake('s1', { wait: false }, { role: 'peer', id: 'peer-a' });
+    assert.equal((await idle.runOnce()).results[0].decision, 'stopped');
+
+    const user = setup([sandbox('bx_a', 'running')]);
+    const userIdle = new IdleStopper({ directory: user.directory, provider: user.provider, probe: user.probe, activity: user.activity, alerts: user.alerts }, {
+      requiredConsecutiveSafe: 2,
+      wakeGraceMs: 600_000,
+      dryRun: false,
+    });
+    await userIdle.runOnce();
+    await user.wake.wake('s1', { wait: false }, { role: 'user', id: 'user:laptop' });
+    assert.notEqual((await userIdle.runOnce()).results[0].decision, 'stopped');
+  });
+
   it('refuses a peer waking its own sandbox', async () => {
     const { wake, provider } = setup([sandbox('bx_a', 'stopped')]);
     assert.equal(status(await wake.wake('s1', { wait: false }, { role: 'peer', id: 's1' })), 'error:peer-wake-refused');

@@ -149,6 +149,10 @@ export class WakeService {
       if (!wait) return this.report(entry, 'waking', null, 'resume requested');
     } else if (sandbox.state === 'missing' || sandbox.state === 'failed') {
       return this.classify(entry, sandbox);
+    } else if (caller?.role !== 'peer') {
+      // The user is back on an awake host: idle-stop starts its safe streak over. A peer's wake does not,
+      // or asking every few minutes would keep the host up forever.
+      this.deps.activity.resetSafe(entry.sandboxId);
     }
 
     let last: CloudHostReport | null = null;

@@ -1585,7 +1585,8 @@ export const RUNPANE_CONTRACT = {
       "summary": "Let a cloud Session reach one GitHub repository: generates an ed25519 key inside the sandbox and registers its public half as a read-only deploy key with your GitHub credential, which never enters the sandbox.",
       "usage": [
         "runpane cloud github connect <host> --repo <owner/name> [--read-write] [--token-file <path|->] [--json]",
-        "runpane cloud github connect <host> --repo <owner/name> --pat-file <path|-> [--json]"
+        "runpane cloud github connect <host> --repo <owner/name> --pat-file <path|-> [--json]",
+        "runpane cloud github connect <host> --repo <owner/name> --broker [--token-file <path|->] [--json]"
       ],
       "mutates": true,
       "wrappers": [
@@ -1596,7 +1597,7 @@ export const RUNPANE_CONTRACT = {
       "name": "cloud github disconnect",
       "summary": "Remove a cloud Session's GitHub access: deletes its deploy key on GitHub and the key (or token) files in the sandbox.",
       "usage": [
-        "runpane cloud github disconnect <host> [--repo <owner/name>] [--token-file <path|->] [--json]"
+        "runpane cloud github disconnect <host> [--repo <owner/name>] [--broker] [--token-file <path|->] [--json]"
       ],
       "mutates": true,
       "wrappers": [
@@ -1620,6 +1621,44 @@ export const RUNPANE_CONTRACT = {
         "runpane cloud git push <host> --path <dir> --branch <branch> [--repo <owner/name>] [--prefix <prefix/>] [--force] [--token-file <path|->] [--json]"
       ],
       "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud agent github",
+      "summary": "Inside a cloud Session: push a branch, open draft pull requests and issues, comment and read GitHub through the coordinator's broker. The Session holds no GitHub write credential; branches land under cloud/<host>/.",
+      "usage": [
+        "runpane cloud agent github status [--json]",
+        "runpane cloud agent github push [--path <dir>] [--branch <branch>] [--repo <owner/name>] [--force] [--json]",
+        "runpane cloud agent github pr create --title <title> (--body <text>|--body-file <path|->) [--base <branch>] [--branch <branch>] [--no-push] [--repo <owner/name>] [--json]",
+        "runpane cloud agent github pr edit|close|comment <number> [--title <title>] [--body <text>|--body-file <path|->] [--repo <owner/name>] [--json]",
+        "runpane cloud agent github issue create --title <title> (--body <text>|--body-file <path|->) [--label <name>]... [--repo <owner/name>] [--json]",
+        "runpane cloud agent github issue comment|close <number> [--body <text>|--body-file <path|->] [--repo <owner/name>] [--json]",
+        "runpane cloud agent github read <path> [--repo <owner/name>] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud agent gh",
+      "summary": "The gh compatibility shim a cloud Session runs as ~/.local/bin/gh: pr create|view|list|comment|close|edit, issue create|view|list|comment|close and auth status, through the coordinator's broker. Everything else exits 2.",
+      "usage": [
+        "runpane cloud agent gh <pr|issue|auth> <verb> [gh flags]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud agent git-credential",
+      "summary": "The git credential helper a cloud Session runs as ~/.local/bin/git-credential-runpane: answers git with the broker's read-only, one-repository token for https://github.com/<repo> (GitHub App mode).",
+      "usage": [
+        "runpane cloud agent git-credential get"
+      ],
       "wrappers": [
         "npm"
       ]
@@ -2214,7 +2253,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panes move --pane <pane-id> --folder <folder-id> --yes [--json] [--pane-dir <path>]",
         "  runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]",
         "  runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]",
-        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|github|git> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|github|git|agent> [options]",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -3352,7 +3391,7 @@ export const RUNPANE_CONTRACT = {
         "  --boat-org <org|personal>      Bill this sandbox to that boat wallet instead of the saved one.",
         "  --repo <https-url>             Repository to clone into the sandbox: public HTTPS, or a private GitHub one with --github.",
         "  --ref <ref>                    Branch or tag to check out.",
-        "  --github                       Clone --repo over a deploy key generated in the sandbox (private repositories; see runpane cloud github connect).",
+        "  --github                       Private GitHub --repo. With the coordinator's GitHub broker on, the Session publishes through it (gh shim; App mode also reads through it); otherwise a read-only deploy key generated in the sandbox.",
         "  --read-write                   With --github: a writable deploy key.",
         "  --github-token-file <path>     With --github: your GitHub token file instead of `gh auth token`.",
         "  --size <small|default|large>   Machine size.",
@@ -3647,7 +3686,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|github|git> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|github|git|agent> [options]",
         "",
         "Run each Pane Session on its own cloud sandbox with a normal Pane daemon, paired to your Pane apps as a remote host.",
         "Keys stay on this machine (~/.config/runpane-cloud, 0600). Pane desktop only lists the saved remote hosts.",
@@ -3659,6 +3698,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane cloud github connect <host> --repo <owner/name> [--read-write] [--token-file <path|->] [--json]",
         "  runpane cloud github connect <host> --repo <owner/name> --pat-file <path|-> [--json]",
+        "  runpane cloud github connect <host> --repo <owner/name> --broker [--token-file <path|->] [--json]",
         "",
         "Let a cloud Session reach one GitHub repository: generates an ed25519 key inside the sandbox and registers its public half as a read-only deploy key with your GitHub credential, which never enters the sandbox.",
         "",
@@ -3668,17 +3708,19 @@ export const RUNPANE_CONTRACT = {
         "  --read-write            Register a writable deploy key: anything in the Session could push to any branch. Prefer runpane cloud git push.",
         "  --token-file <path|->   Your GitHub token in a file (or - for stdin) instead of `gh auth token`; it stays on this machine.",
         "  --pat-file <path|->     Use this fine-grained personal access token instead of a deploy key; kept in a 0600 file in the sandbox. Classic tokens are refused.",
+        "  --broker                Publish through the coordinator's GitHub broker instead: the Session pushes to cloud/<host>/*, opens draft PRs and issues (gh shim); no write credential enters it.",
         "  --json                  Print machine-readable output."
       ],
       "cloud github disconnect": [
         "Usage:",
-        "  runpane cloud github disconnect <host> [--repo <owner/name>] [--token-file <path|->] [--json]",
+        "  runpane cloud github disconnect <host> [--repo <owner/name>] [--broker] [--token-file <path|->] [--json]",
         "",
         "Remove a cloud Session's GitHub access: deletes its deploy key on GitHub and the key (or token) files in the sandbox.",
         "",
         "Options:",
         "  <host>                  The cloud Session.",
         "  --repo <owner/name>     Which repository, when the Session has several.",
+        "  --broker                Remove the repository from the coordinator broker's allowlist for this Session (and its gh shim when none is left).",
         "  --token-file <path|->   Your GitHub token in a file (or - for stdin) instead of `gh auth token`; it stays on this machine.",
         "  --json                  Print machine-readable output."
       ],
@@ -3707,6 +3749,49 @@ export const RUNPANE_CONTRACT = {
         "  --force                 Overwrite the target branch when it has diverged (it is always under the prefix).",
         "  --token-file <path|->   Your GitHub token in a file (or - for stdin) instead of `gh auth token`; it stays on this machine.",
         "  --json                  Print machine-readable output."
+      ],
+      "cloud agent github": [
+        "Usage:",
+        "  runpane cloud agent github status [--json]",
+        "  runpane cloud agent github push [--path <dir>] [--branch <branch>] [--repo <owner/name>] [--force] [--json]",
+        "  runpane cloud agent github pr create --title <title> (--body <text>|--body-file <path|->) [--base <branch>] [--branch <branch>] [--no-push] [--repo <owner/name>] [--json]",
+        "  runpane cloud agent github pr edit|close|comment <number> [--title <title>] [--body <text>|--body-file <path|->] [--repo <owner/name>] [--json]",
+        "  runpane cloud agent github issue create --title <title> (--body <text>|--body-file <path|->) [--label <name>]... [--repo <owner/name>] [--json]",
+        "  runpane cloud agent github issue comment|close <number> [--body <text>|--body-file <path|->] [--repo <owner/name>] [--json]",
+        "  runpane cloud agent github read <path> [--repo <owner/name>] [--json]",
+        "",
+        "Inside a cloud Session: push a branch, open draft pull requests and issues, comment and read GitHub through the coordinator's broker. The Session holds no GitHub write credential; branches land under cloud/<host>/.",
+        "",
+        "Options:",
+        "  --path <dir>          The git checkout (default: the current directory).",
+        "  --branch <branch>     The local branch (default: the current one); it lands on GitHub as cloud/<host>/<branch>.",
+        "  --repo <owner/name>   The GitHub repository (default: the checkout's origin remote).",
+        "  --force               push: overwrite cloud/<host>/<branch> when it has diverged.",
+        "  --title <title>       Pull request or issue title.",
+        "  --body <text>         Body text.",
+        "  --body-file <path|->  Body from a file, or - for stdin.",
+        "  --base <branch>       pr create: the base branch (default: the repository's default branch).",
+        "  --no-push             pr create: do not push the branch first.",
+        "  --label <name>        issue create: an existing label (repeatable).",
+        "  --json                Print machine-readable output.",
+        "",
+        "Pull requests always open as drafts. Merging, reviews, releases and writes to the default branch are refused by the broker."
+      ],
+      "cloud agent gh": [
+        "Usage:",
+        "  runpane cloud agent gh <pr|issue|auth> <verb> [gh flags]",
+        "",
+        "The gh compatibility shim a cloud Session runs as ~/.local/bin/gh: pr create|view|list|comment|close|edit, issue create|view|list|comment|close and auth status, through the coordinator's broker. Everything else exits 2.",
+        "",
+        "Installed as ~/.local/bin/gh by runpane cloud new --github or runpane cloud github connect --broker when the coordinator's broker is on."
+      ],
+      "cloud agent git-credential": [
+        "Usage:",
+        "  runpane cloud agent git-credential get",
+        "",
+        "The git credential helper a cloud Session runs as ~/.local/bin/git-credential-runpane: answers git with the broker's read-only, one-repository token for https://github.com/<repo> (GitHub App mode).",
+        "",
+        "Configured by runpane cloud new --github or runpane cloud github connect --broker (App mode) for https://github.com only."
       ]
     },
     "pip": {
@@ -5005,7 +5090,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|github|git> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|github|git|agent> [options]",
         "",
         "`runpane cloud` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud"
@@ -5014,13 +5099,14 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane cloud github connect <host> --repo <owner/name> [--read-write] [--token-file <path|->] [--json]",
         "  runpane cloud github connect <host> --repo <owner/name> --pat-file <path|-> [--json]",
+        "  runpane cloud github connect <host> --repo <owner/name> --broker [--token-file <path|->] [--json]",
         "",
         "`runpane cloud github connect` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud github connect"
       ],
       "cloud github disconnect": [
         "Usage:",
-        "  runpane cloud github disconnect <host> [--repo <owner/name>] [--token-file <path|->] [--json]",
+        "  runpane cloud github disconnect <host> [--repo <owner/name>] [--broker] [--token-file <path|->] [--json]",
         "",
         "`runpane cloud github disconnect` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud github disconnect"
@@ -5038,6 +5124,33 @@ export const RUNPANE_CONTRACT = {
         "",
         "`runpane cloud git push` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud git push"
+      ],
+      "cloud agent github": [
+        "Usage:",
+        "  runpane cloud agent github status [--json]",
+        "  runpane cloud agent github push [--path <dir>] [--branch <branch>] [--repo <owner/name>] [--force] [--json]",
+        "  runpane cloud agent github pr create --title <title> (--body <text>|--body-file <path|->) [--base <branch>] [--branch <branch>] [--no-push] [--repo <owner/name>] [--json]",
+        "  runpane cloud agent github pr edit|close|comment <number> [--title <title>] [--body <text>|--body-file <path|->] [--repo <owner/name>] [--json]",
+        "  runpane cloud agent github issue create --title <title> (--body <text>|--body-file <path|->) [--label <name>]... [--repo <owner/name>] [--json]",
+        "  runpane cloud agent github issue comment|close <number> [--body <text>|--body-file <path|->] [--repo <owner/name>] [--json]",
+        "  runpane cloud agent github read <path> [--repo <owner/name>] [--json]",
+        "",
+        "`runpane cloud agent github` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud agent github"
+      ],
+      "cloud agent gh": [
+        "Usage:",
+        "  runpane cloud agent gh <pr|issue|auth> <verb> [gh flags]",
+        "",
+        "`runpane cloud agent gh` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud agent gh"
+      ],
+      "cloud agent git-credential": [
+        "Usage:",
+        "  runpane cloud agent git-credential get",
+        "",
+        "`runpane cloud agent git-credential` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud agent git-credential"
       ]
     }
   },
@@ -15633,6 +15746,11 @@ export const RUNPANE_CONTRACT = {
             "description": "Use this fine-grained personal access token instead of a deploy key; kept in a 0600 file in the sandbox. Classic tokens are refused."
           },
           {
+            "name": "--broker",
+            "required": false,
+            "description": "Publish through the coordinator's GitHub broker: the Session pushes to cloud/<host>/*, opens draft PRs and issues (gh shim); no write credential enters it."
+          },
+          {
             "name": "--json",
             "required": false,
             "description": "Print machine-readable output."
@@ -15668,6 +15786,11 @@ export const RUNPANE_CONTRACT = {
             "value": "<path|->",
             "required": false,
             "description": "Your GitHub token in a file (or - for stdin) instead of `gh auth token`; it stays on this machine."
+          },
+          {
+            "name": "--broker",
+            "required": false,
+            "description": "Remove the repository from the coordinator broker's allowlist for this Session."
           },
           {
             "name": "--json",
@@ -15765,6 +15888,110 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud agent github": {
+        "name": "cloud agent github",
+        "summary": "Inside a cloud Session: push a branch, open draft pull requests and issues, comment and read GitHub through the coordinator's broker. The Session holds no GitHub write credential; branches land under cloud/<host>/.",
+        "details": "Runs inside a cloud Session and talks only to the runpane cloud coordinator, with the Session's own caller token from ~/.config/runpane-cloud/peers.json. push bundles the branch against origin's default branch and the coordinator pushes it to cloud/<host>/<branch>; pr create pushes first, then opens a draft pull request.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<subcommand>",
+            "required": true,
+            "description": "status, push, pr create|edit|close|comment, issue create|comment|close, or read <path>."
+          },
+          {
+            "name": "--path",
+            "value": "<dir>",
+            "required": false,
+            "description": "The git checkout (default: the current directory)."
+          },
+          {
+            "name": "--branch",
+            "value": "<branch>",
+            "required": false,
+            "description": "The local branch (default: the current one)."
+          },
+          {
+            "name": "--repo",
+            "value": "<owner/name>",
+            "required": false,
+            "description": "The GitHub repository (default: the origin remote)."
+          },
+          {
+            "name": "--title",
+            "value": "<title>",
+            "required": false,
+            "description": "Pull request or issue title."
+          },
+          {
+            "name": "--body",
+            "value": "<text>",
+            "required": false,
+            "description": "Body text."
+          },
+          {
+            "name": "--body-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "Body from a file, or - for stdin."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud agent github push",
+          "runpane cloud agent github pr create --title \"Fix the flaky test\" --body-file notes.md",
+          "runpane cloud agent github issue create --title \"Crash on start\" --body \"Steps: ...\""
+        ],
+        "notes": [
+          "Runs inside a cloud Session only; it needs the coordinator named in ~/.config/runpane-cloud/peers.json."
+        ]
+      },
+      "cloud agent gh": {
+        "name": "cloud agent gh",
+        "summary": "The gh compatibility shim a cloud Session runs as ~/.local/bin/gh: pr create|view|list|comment|close|edit, issue create|view|list|comment|close and auth status, through the coordinator's broker. Everything else exits 2.",
+        "details": "Maps the common gh verbs onto the coordinator's GitHub broker. gh pr create pushes the branch through the broker first and always opens a draft. gh api, merges, reviews, releases, --jq and --web exit 2.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<gh arguments>",
+            "required": true,
+            "description": "The gh command line, e.g. pr create --title T --body B."
+          }
+        ],
+        "examples": [
+          "gh pr create --title \"Fix\" --body \"Details\"",
+          "gh issue list --state open"
+        ],
+        "notes": [
+          "Runs inside a cloud Session only; it needs the coordinator named in ~/.config/runpane-cloud/peers.json."
+        ]
+      },
+      "cloud agent git-credential": {
+        "name": "cloud agent git-credential",
+        "summary": "The git credential helper a cloud Session runs as ~/.local/bin/git-credential-runpane: answers git with the broker's read-only, one-repository token for https://github.com/<repo> (GitHub App mode).",
+        "details": "Reads git's credential request on stdin and prints username/password from POST /cloud/github/token. store and erase do nothing; in PAT mode it answers nothing and the deploy key is used.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "get",
+            "required": true,
+            "description": "git's credential operation."
+          }
+        ],
+        "examples": [
+          "git fetch origin"
+        ],
+        "notes": [
+          "Runs inside a cloud Session only; it needs the coordinator named in ~/.config/runpane-cloud/peers.json."
         ]
       }
     },

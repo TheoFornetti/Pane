@@ -6,6 +6,8 @@ import { runCloudCommand, type CloudDeps } from './commands';
  * The desktop app never manages machines (#695); it only sees the saved remote host profiles.
  */
 export async function runCloud(argv: readonly string[], deps?: CloudDeps): Promise<number> {
+  // Inside a Session: talks only to the coordinator, so none of the laptop's state is loaded.
+  if (argv[0] === 'agent') return (await import('./agent')).runCloudAgent(argv.slice(1));
   const args = parseCloudArgs(argv);
   // Loaded lazily so the rest of the CLI never pays for the cloud modules.
   const resolved = deps ?? (await import('./wiring')).createDefaultCloudDeps();

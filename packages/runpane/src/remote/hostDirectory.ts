@@ -102,6 +102,16 @@ function peersFilePath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
+ * Inside a cloud Session: the coordinator and this Session's own caller token, from the peers list
+ * `runpane cloud` writes there (0600). Null when this machine has no peers list or it names none.
+ */
+export function readSessionCoordinator(env: NodeJS.ProcessEnv = process.env): { coordinator: CoordinatorRef; source: string } | null {
+  const source = peersFilePath(env);
+  const directory = readDirectoryFile(source);
+  return directory?.coordinator ? { coordinator: directory.coordinator, source } : null;
+}
+
+/**
  * Resolves `--host`/`--thread` to a daemon profile. Every run re-reads the
  * files, so a coordinator re-push after a re-enrol takes effect at once.
  */

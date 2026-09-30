@@ -384,7 +384,73 @@ never wake it.
 ## 8. GitHub access (private repositories and pushing)
 
 A cloud Session never gets your own GitHub credential (your `gh` login or token reaches every repository
-you can). Instead it gets access to **one repository at a time**, and your laptop publishes its work.
+you can). Instead it gets access to **one repository at a time**. Its work is published either by the
+coordinator's GitHub broker (below; no laptop needed once set up) or by your laptop (`cloud git push`).
+
+### Publish through the coordinator (GitHub broker)
+
+When the coordinator holds a GitHub App or fine-grained token (`runpane cloud coordinator github set`, see
+[RUNPANE_CLOUD_COORDINATOR.md](RUNPANE_CLOUD_COORDINATOR.md)), a Session pushes branches and opens pull
+requests and issues **itself**, through the coordinator. Your laptop can be closed. The Session never holds
+a credential that can write to GitHub; the coordinator only writes inside that Session's own branch
+namespace.
+
+Give a Session a repository (setup, once, from the laptop):
+
+```bash
+runpane cloud new --repo https://github.com/<owner>/<repo> --github --yes    # a new Session
+runpane cloud github connect "api work" --repo <owner>/<repo> --broker        # an existing, awake one
+```
+
+Both add the repository to the Session's entry in the coordinator's directory (`github.repos`, its
+per-Session allowlist) and install, in the Session:
+
+- **`~/.local/bin/gh`**, a `gh` look-alike: `gh pr create|view|list|comment|close|edit`,
+  `gh issue create|view|list|comment|close` and `gh auth status`, mapped onto the broker. Every other gh
+  command (`gh api`, `gh pr merge`, reviews, releases, ...) exits 2 with "not available in a runpane cloud
+  Session (broker allowlist)". `~/.local/bin` is put first on `PATH`, ahead of any real `gh`.
+- **`runpane cloud agent github ...`**, the same through runpane (all take `--json`):
+
+  ```bash
+  runpane cloud agent github push [--branch <b>] [--force]           # -> cloud/<host>/<b>
+  runpane cloud agent github pr create --title T --body-file notes.md  # pushes, then a DRAFT PR
+  runpane cloud agent github pr edit|close|comment <n> ...
+  runpane cloud agent github issue create|comment|close ...
+  runpane cloud agent github read pulls/12/files                     # read-only GitHub REST
+  runpane cloud agent github status
+  ```
+
+- A short section in the agents' global instructions (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`): how to
+  push and open PRs and issues, that PRs are drafts, and that `master`/`main` is off-limits.
+
+What happens on a push: the Session bundles the branch against `origin/<default branch>` (the whole branch
+when they share no history) and uploads it; the coordinator pushes it to **`cloud/<host>/<branch>`**. It
+refuses the default branch, tags, deletes, other Sessions' namespaces and any change under
+`.github/workflows/`. Pull requests always open as **drafts** and carry a footer naming the Session. A plain
+`git push` to GitHub still fails in the Session: there is no write credential there.
+
+The Session calls the coordinator with its own caller token from its peers list
+(`~/.config/runpane-cloud/peers.json`, written by `new`); nothing new is copied in. The coordinator also
+checks the call comes from that Session's tailnet node.
+
+**Reading (clone and fetch)** depends on the coordinator's credential:
+
+- **GitHub App:** git asks `~/.local/bin/git-credential-runpane` (configured for `https://github.com` only),
+  which gets a **read-only, one-repository token that expires within an hour** from the coordinator. No
+  deploy key: `new --github` clones over `https://github.com/<owner>/<repo>.git`.
+- **Fine-grained token:** it can't make read-only tokens, so the Session reads over a read-only deploy key
+  as below (`new --github` and `connect --broker` add one, with your laptop's `gh`, once).
+
+If the coordinator has no broker (or it doesn't reach the repository, or you pass `--read-write`),
+`new --github` falls back to the deploy key and `cloud git push` below, and says so.
+
+```bash
+runpane cloud github list                                        # shows "coordinator broker" rows
+runpane cloud github disconnect "api work" --repo <owner>/<repo> --broker
+```
+
+`disconnect --broker` takes the repository off the Session's allowlist (the coordinator refuses it at once)
+and removes the shim, helper and notes when none is left.
 
 ### Let a Session read a repository (deploy key, the default)
 
@@ -600,6 +666,10 @@ Session (wake it first). Run it once on Sessions created with an older `runpane`
 | `github connect` says your credential cannot add deploy keys | Deploy keys need admin on the repository. Use an admin's token (`--token-file`), or a fine-grained token (`--pat-file`) |
 | `git clone git@github.com:<owner>/<repo>` in a Session asks for a password or says `Permission denied (publickey)` | Clone over the alias `connect` printed: `git@github.com-<owner>-<repo>:<owner>/<repo>.git`. Plain `github.com` has no key |
 | `git push` inside a Session fails with `ERROR: The key you are authenticating with has been marked as read only` | Expected with the default read-only key. Run `runpane cloud git push <host> --path <dir> --branch <branch>` from the laptop |
+| `gh ...` in a Session exits 2 with "not available in a runpane cloud Session (broker allowlist)" | On purpose: only the pr/issue verbs and `gh auth status` go through the broker. See `runpane cloud agent github --help` |
+| `gh`/`runpane cloud agent github` says "No runpane cloud coordinator is configured here" | The Session's peers list names no coordinator. From the laptop: `runpane cloud github connect <host> --repo <owner>/<repo> --broker` (rewrites it) |
+| `gh`/`runpane cloud agent github` fails with `repo-not-allowed` | The repository isn't in this Session's allowlist: `runpane cloud github connect <host> --repo <owner>/<repo> --broker` |
+| `runpane cloud agent github push` says "has no commits that origin/<default> lacks" | Commit first; or `git fetch origin` if the default branch moved |
 | `cloud git push` fails fetching commits (`not our ref` / `unadvertised object`) | The Session's `origin/*` refs name commits GitHub no longer has (a force-push or deleted branch upstream). Run `git fetch --prune origin` in the Session, then push again |
 | `status` says `lost` | The sandbox is gone on boat's side. `runpane cloud destroy <host> --yes` removes the tailnet device and the local record |
 | A tailnet host name got a `-1` suffix | A device with that name already existed. `destroy` deletes the device first; if you re-enrol a node by hand, delete the old device in the Tailscale admin console first |
@@ -624,4 +694,6 @@ readiness (`readiness.state`: `starting`, `ready` or `degraded`).
 | `~/.config/runpane-cloud/hosts/<host>.json`, `.pairing` | one saved cloud Session and its pairing code (0600) |
 | `~/.config/runpane-cloud/coordinator.json` | the coordinator's address and your caller token (0600) |
 | `~/.config/runpane-cloud/hosts/<host>.json` (`meta.github`) | the Session's GitHub connections: repository, deploy key id and fingerprint (no secrets) |
+| `~/.config/runpane-cloud/hosts/<host>.json` (`meta.githubBroker`) | the repositories the coordinator's GitHub broker acts on for the Session (the directory's `github.repos`) |
+| `~/.local/bin/gh`, `~/.local/bin/git-credential-runpane` (in the sandbox) | the gh shim and the git credential helper; both run `runpane cloud agent ...` and hold no credential |
 | `~/.pane/config.json` | Pane desktop's saved remote hosts; `new`, `sync` and `destroy` update it. Override with `--desktop-dir` or `RUNPANE_CLOUD_DESKTOP_DIR` (`PANE_DIR` is ignored on purpose) |

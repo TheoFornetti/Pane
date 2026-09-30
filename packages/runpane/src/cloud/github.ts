@@ -4,6 +4,7 @@ import type { CloudDeps } from './commands';
 import type { GitHubApi } from './githubApi';
 import { MAX_SANDBOX_READ_BYTES, type CloudProvider, type SandboxHandle } from './provider';
 import { findHost, type CloudHostRecord, type GitHubGrant, type GitHubTokenSource } from './store';
+import { brokerCloneScript, brokerReaches, disableBroker, enableBroker, readBrokerStatus, type CoordinatorGitHubStatus } from './githubBroker';
 import { hostProvider } from './wallet';
 
 /**
@@ -33,7 +34,9 @@ const GITHUB_USAGE = `Usage:
       Generate a deploy key inside the Session and register it on the repository (read-only by default).
   runpane cloud github connect <host> --repo <owner/name> --pat-file <path|-> [--json]
       Use a fine-grained personal access token for that repository instead.
-  runpane cloud github disconnect <host> [--repo <owner/name>] [--token-file <path|->] [--json]
+  runpane cloud github connect <host> --repo <owner/name> --broker [--token-file <path|->] [--json]
+      Let the Session push, open draft PRs and issues through the coordinator's GitHub broker (gh shim).
+  runpane cloud github disconnect <host> [--repo <owner/name>] [--broker] [--token-file <path|->] [--json]
   runpane cloud github list [<host>] [--json]`;
 
 const GIT_USAGE = `Usage:
@@ -418,11 +421,12 @@ function oneHost(flags: Flags, usage: string): string {
 }
 
 async function githubConnect(argv: readonly string[], deps: CloudDeps): Promise<number> {
-  const flags = parseFlags(argv, ['--repo', '--token-file', '--pat-file'], ['--read-write', '--json'], GITHUB_USAGE);
+  const flags = parseFlags(argv, ['--repo', '--token-file', '--pat-file'], ['--read-write', '--broker', '--json'], GITHUB_USAGE);
   const record = findHost(await deps.store.listHosts(), oneHost(flags, GITHUB_USAGE));
   const repoSpec = flags.values.get('--repo');
   if (!repoSpec) throw new Error(`runpane cloud github connect needs --repo <owner/name>.\n\n${GITHUB_USAGE}`);
   const repo = parseRepoSpec(repoSpec);
+  if (flags.booleans.has('--broker')) return brokerConnect(record, repo, flags, deps);
   const patFile = flags.values.get('--pat-file');
   const readWrite = flags.booleans.has('--read-write');
   if (patFile && (readWrite || flags.values.has('--token-file'))) {
@@ -453,8 +457,9 @@ async function githubConnect(argv: readonly string[], deps: CloudDeps): Promise<
 }
 
 async function githubDisconnect(argv: readonly string[], deps: CloudDeps): Promise<number> {
-  const flags = parseFlags(argv, ['--repo', '--token-file'], ['--json'], GITHUB_USAGE);
+  const flags = parseFlags(argv, ['--repo', '--token-file'], ['--broker', '--json'], GITHUB_USAGE);
   const record = findHost(await deps.store.listHosts(), oneHost(flags, GITHUB_USAGE));
+  if (flags.booleans.has('--broker')) return brokerDisconnect(record, flags, deps);
   const host = record.profile.cloud.hostname;
   const grants = record.meta.github ?? [];
   const repoSpec = flags.values.get('--repo');
@@ -503,17 +508,22 @@ async function githubList(argv: readonly string[], deps: CloudDeps): Promise<num
   if (flags.positionals.length > 1) throw new Error(GITHUB_USAGE);
   const records = await deps.store.listHosts();
   const only = flags.positionals[0] ? findHost(records, flags.positionals[0]).profile.cloud.hostname : undefined;
-  const rows = records
-    .filter((record) => !only || record.profile.cloud.hostname === only)
-    .flatMap((record) => (record.meta.github ?? []).map((grant) => ({ host: record.profile.cloud.hostname, grant })));
+  const selected = records.filter((record) => !only || record.profile.cloud.hostname === only);
+  const rows = selected.flatMap((record) => (record.meta.github ?? []).map((grant) => ({ host: record.profile.cloud.hostname, grant })));
+  const brokerRows = selected.flatMap((record) => (record.meta.brokerRepos ?? []).map((repo) => ({
+    host: record.profile.cloud.hostname, repo, mode: record.meta.brokerMode ?? 'app',
+  })));
   if (flags.booleans.has('--json')) {
-    deps.stdout(JSON.stringify({ ok: true, grants: rows.map((row) => ({ host: row.host, ...grantJson(row.grant) })) }, null, 2));
-  } else if (rows.length === 0) {
-    deps.stdout('No GitHub connections. Add one with runpane cloud github connect <host> --repo <owner/name>.');
+    deps.stdout(JSON.stringify({ ok: true, grants: rows.map((row) => ({ host: row.host, ...grantJson(row.grant) })), broker: brokerRows }, null, 2));
+  } else if (rows.length === 0 && brokerRows.length === 0) {
+    deps.stdout('No GitHub connections. Add one with runpane cloud github connect <host> --repo <owner/name> [--broker].');
   } else {
     for (const { host, grant } of rows) {
       const access = grant.mode === 'pat' ? 'personal access token' : `deploy key ${String(grant.keyId)}, ${grant.readOnly ? 'read-only' : 'read-write'}`;
       deps.stdout(`${host} -> ${grant.repo}  (${access}, since ${grant.connectedAt})`);
+    }
+    for (const row of brokerRows) {
+      deps.stdout(`${row.host} -> ${row.repo}  (coordinator broker, ${row.mode === 'app' ? 'GitHub App' : 'fine-grained token'}: push to cloud/${row.host}/*, draft PRs, issues)`);
     }
   }
   return 0;
@@ -526,6 +536,77 @@ function grantJson(grant: GitHubGrant): JsonObject {
   if (grant.keyId !== undefined) json.keyId = grant.keyId;
   if (grant.fingerprint) json.fingerprint = grant.fingerprint;
   return json;
+}
+
+// ---------------------------------------------------------------- the coordinator's broker
+
+/** The broker's answer for `repo`, or an error saying what to do; `--broker` and `new --github` share it. */
+async function requireBroker(deps: CloudDeps, repo: string): Promise<CoordinatorGitHubStatus & { mode: 'app' | 'pat' }> {
+  const status = await readBrokerStatus(deps);
+  if ('unavailable' in status) throw new Error(`The coordinator's GitHub broker can't be asked: ${status.unavailable}.`);
+  if (status.mode === 'off') {
+    throw new Error('The coordinator\'s GitHub broker is off. Give it a GitHub App or fine-grained token first: runpane cloud coordinator github set --app-id <id> --private-key-file <pem> (or --pat-file <file>).');
+  }
+  if (!brokerReaches(status, repo)) {
+    throw new Error(`The broker's ${status.mode === 'app' ? 'GitHub App' : 'token'} does not reach ${repo} (it reaches ${status.repos.join(', ')}). Install the App on it, or use a token that covers it.`);
+  }
+  return { ...status, mode: status.mode };
+}
+
+async function brokerConnect(record: CloudHostRecord, repo: string, flags: Flags, deps: CloudDeps): Promise<number> {
+  if (flags.values.has('--pat-file') || flags.booleans.has('--read-write')) {
+    throw new Error('--broker keeps GitHub write access on the coordinator: it does not combine with --pat-file or --read-write.');
+  }
+  const host = record.profile.cloud.hostname;
+  const json = flags.booleans.has('--json');
+  const progress = (line: string) => (json ? deps.stderr(`  - ${line}`) : deps.stdout(`  - ${line}`));
+  const status = await requireBroker(deps, repo);
+  const provider = await hostProvider(deps, await deps.store.readCredentials(), record);
+  const handle = await requireRunning(record, provider);
+  // PAT mode can't mint read tokens: the Session reads over a Phase 2 read-only deploy key.
+  let deployKey: GitHubGrant | undefined = record.meta.github?.find((grant) => grant.repo.toLowerCase() === repo.toLowerCase());
+  if (status.mode === 'pat' && !deployKey) {
+    deployKey = await connectDeployKey(record, handle, deps, { repo, readWrite: false, tokenSource: tokenSourceFrom(flags.values.get('--token-file')), onStep: progress });
+  }
+  const enabled = await enableBroker(record, handle, deps, { repo: deployKey?.repo ?? repo, mode: status.mode });
+  const cloneUrl = status.mode === 'app' ? `https://github.com/${repo}.git` : deployKeyCloneUrl(deployKey?.repo ?? repo);
+  if (json && enabled.shimWarning) deps.stderr(`runpane cloud: ${enabled.shimWarning}`);
+  if (json) {
+    deps.stdout(JSON.stringify({ ok: true, host, repo, broker: { mode: status.mode, repos: enabled.grant.repos }, directory: enabled.directory, peersFile: enabled.peersFile, shimReady: enabled.shimWarning === null, cloneUrl }, null, 2));
+  } else {
+    deps.stdout(`${host} can now push to cloud/${host}/* on ${repo}, and open draft pull requests and issues there, through the coordinator (${status.mode === 'app' ? 'GitHub App' : 'fine-grained token'}).`);
+    deps.stdout(`  inside it: gh pr create ... / runpane cloud agent github push; git clone ${cloneUrl}`);
+    if (!enabled.directory.pushed) deps.stderr(`runpane cloud: the coordinator's directory was not updated (${enabled.directory.reason}); run runpane cloud sync.`);
+    if (enabled.shimWarning) deps.stderr(`runpane cloud: ${enabled.shimWarning}`);
+    if (enabled.peersFile.written === false) deps.stderr(`runpane cloud: ${host}'s peers list was not written (${String(enabled.peersFile.reason)}); the Session can't reach the coordinator until it is.`);
+  }
+  return 0;
+}
+
+async function brokerDisconnect(record: CloudHostRecord, flags: Flags, deps: CloudDeps): Promise<number> {
+  const host = record.profile.cloud.hostname;
+  const repos = record.meta.brokerRepos ?? [];
+  const repoSpec = flags.values.get('--repo');
+  const wanted = repoSpec ? parseRepoSpec(repoSpec) : repos.length === 1 ? repos[0] : undefined;
+  if (!wanted) throw new Error(repos.length === 0 ? `${host} has no broker access. See runpane cloud github list.` : `${host} uses the broker for ${repos.join(', ')}; name one with --repo.`);
+  if (!repos.some((repo) => repo.toLowerCase() === wanted.toLowerCase())) throw new Error(`${host} has no broker access to ${wanted}.`);
+  const provider = await hostProvider(deps, await deps.store.readCredentials(), record);
+  const sandbox = await provider.get(record.profile.cloud.sandboxId);
+  const handle = sandbox.state === 'running' ? provider.handle(record.profile.cloud.sandboxId) : null;
+  const result = await disableBroker(record, handle, deps, wanted);
+  if (flags.booleans.has('--json')) {
+    deps.stdout(JSON.stringify({ ok: true, host, repo: wanted, remaining: result.remaining, directory: result.directory, toolsRemoved: result.toolsRemoved }, null, 2));
+  } else {
+    deps.stdout(`${host} may no longer publish to ${wanted} through the coordinator${result.directory.pushed ? '' : ` (the directory was not updated: ${result.directory.reason}; run runpane cloud sync)`}.`);
+    if (!handle) deps.stdout(`  ${host} is asleep: its gh shim stays until the next connect or disconnect while it is awake; the coordinator already refuses it.`);
+  }
+  return 0;
+}
+
+/** App mode's clone for `new --github`: over https with the helper, once the coordinator knows the Session. */
+export async function cloneThroughBroker(handle: SandboxHandle, repo: string, ref: string | undefined, dir: string): Promise<string> {
+  const stdout = await runChecked(handle, brokerCloneScript(repo, ref, dir), `Cloning ${repo} with the broker's read token`, 600);
+  return markerLines(stdout, 'RP_HEAD')[0] ?? '';
 }
 
 // ---------------------------------------------------------------- git push

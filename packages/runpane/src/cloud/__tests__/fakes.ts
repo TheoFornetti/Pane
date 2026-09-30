@@ -8,6 +8,7 @@ import { NO_COORDINATOR } from '../coordinatorSync';
 import { encodePairingCode } from '../pairing';
 import type { BootstrapPort, ProvisionRequest, TailnetDevice, TailnetPort } from '../ports';
 import type { BundlePushRequest, GitHubPort, GitHubRepoInfo } from '../githubApi';
+import type { CoordinatorGitHubStatus } from '../githubBroker';
 import { CloudProviderError, type CloudProvider, type CloudSandbox, type CloudSize, type CreateSandboxRequest, type SandboxHandle } from '../provider';
 import { createCloudStore, type GitHubTokenSource } from '../store';
 
@@ -63,6 +64,10 @@ interface FakeWorld {
   activeOrg: string;
   /** Provider calls with the wallet the provider was scoped to (`-`: none, boat's active wallet). */
   orgCalls: string[];
+  /** The Session's Pane-bundled runpane predates `cloud agent` (the broker tools' check says "old"). */
+  oldPaneRunpane?: boolean;
+  /** What the coordinator's GET /cloud/github/status answers; undefined: no coordinator to ask. */
+  broker?: CoordinatorGitHubStatus;
 }
 
 /** GitHub as the laptop's credential sees it, plus what the sandbox's git steps report. */
@@ -124,6 +129,8 @@ function createFakeProvider(world: FakeWorld, org?: string): CloudProvider {
       world.calls.push(`script ${id}`);
       world.scripts.push({ sandboxId: id, script });
       if (script.includes('tailscale ip -4')) return { exitCode: 0, stdout: '100.64.0.9\n', stderr: '' };
+      if (script.includes("printf 'RP_HEAD")) return { exitCode: 0, stdout: 'RP_HEAD 0123456789abcdef0123456789abcdef01234567\n', stderr: '' };
+      if (script.includes('echo RP_OK broker-tools')) return { exitCode: 0, stdout: `${world.oldPaneRunpane ? 'RP_SHIM old runpane 2.4.141-old' : 'RP_SHIM ready'}\nRP_OK broker-tools\n`, stderr: '' };
       const github = fakeSandboxGit(world, id, script);
       if (github) return github;
       const install = /install -m 600 (\S+) (\S+peers\.json)/u.exec(script);
@@ -462,15 +469,25 @@ export async function createTestHarness(): Promise<TestHarness> {
     async packCoordinatorApp() {
       return { archiveBase64: 'ZmFrZQ==', version: '2.4.141-test' };
     },
+    async callCoordinatorApi(method, pathAndQuery): Promise<{ status: number; body: JsonValue }> {
+      world.calls.push(`coordinator-api ${method} ${pathAndQuery}`);
+      if (!world.broker) throw new Error('No coordinator client is configured: run runpane cloud coordinator deploy --yes.');
+      if (method === 'GET' && pathAndQuery === '/cloud/github/status') {
+        return { status: 200, body: { ok: true, mode: world.broker.mode, app: world.broker.app ? { slug: world.broker.app } : null, repos: world.broker.repos, caller: null } };
+      }
+      return { status: 404, body: { ok: false, code: 'not-found', message: pathAndQuery } };
+    },
     async probeCoordinatorHealth() {
       return world.coordinatorHealthy ? { ok: true, status: 200, version: '2.4.141-test' } : { ok: false };
     },
     async invokeDaemon(profile, channel, args): Promise<JsonValue | undefined> {
       const host = new URL(profile.baseUrl).hostname.split('.')[0];
       world.calls.push(`invoke ${host} ${channel}`);
+      const request = args[0] ?? {};
+      // Every provisioned host's daemon registers repositories.
+      if (channel === 'runpane:repos:add') return { ok: true, repo: { path: String(request.path), name: String(request.name) } };
       const daemon = world.daemons.get(host);
       if (!daemon) throw new Error('connect ECONNREFUSED');
-      const request = args[0] ?? {};
       switch (channel) {
         case 'runpane:sessions:list':
           return { ok: true, sessions: daemon.sessions.map((session) => ({ id: session.id, name: session.name, archived: session.archived === true })) };

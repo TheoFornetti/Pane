@@ -7,7 +7,8 @@ import { COORDINATOR_LIFECYCLE_USAGE, isCoordinatorLifecycleCommand, runCoordina
 import { COORDINATOR_GITHUB_USAGE, runCoordinatorGitHub } from './coordinatorGithub';
 import { NO_COORDINATOR, pushDirectory, type CoordinatorPushResult } from './coordinatorSync';
 import { syncDesktopProfiles, type DesktopImportResult } from './desktop';
-import { connectDeployKey, deployKeyCloneUrl, parseRepoSpec, revokeGitHubGrants, runGitCommand, runGitHubCommand } from './github';
+import { cloneThroughBroker, connectDeployKey, deployKeyCloneUrl, parseRepoSpec, revokeGitHubGrants, runGitCommand, runGitHubCommand } from './github';
+import { brokerReaches, enableBroker, readBrokerStatus } from './githubBroker';
 import type { GitHubPort } from './githubApi';
 import { decodePairingCode } from './pairing';
 import { pushPeersFile, runPeersCommand } from './peers';
@@ -276,7 +277,17 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const githubRepo = args.github && args.repo ? parseRepoSpec(args.repo) : undefined;
   const githubTokenSource = args.githubTokenFile ? { kind: 'file' as const, path: args.githubTokenFile } : { kind: 'gh' as const };
   if (args.githubTokenFile === '-') throw new Error('new --github-token-file needs a file (the token is read more than once), not stdin.');
-  if (githubRepo) {
+  // With the coordinator's GitHub broker on, the Session publishes through it (phase3-design §4). App mode
+  // also reads through it (no deploy key); PAT mode still reads over a read-only deploy key.
+  let brokerMode: 'app' | 'pat' | null = null;
+  if (githubRepo && settings.coordinator?.deployment && !args.readWrite) {
+    const status = await readBrokerStatus(deps);
+    if ('unavailable' in status) progress(`runpane cloud: not using the coordinator's GitHub broker (${status.unavailable}); falling back to a deploy key.`);
+    else if (status.mode === 'off') progress('runpane cloud: the coordinator\'s GitHub broker is off; using a read-only deploy key (publish with runpane cloud git push).');
+    else if (!brokerReaches(status, githubRepo)) progress(`runpane cloud: the coordinator's GitHub broker does not reach ${githubRepo}; using a read-only deploy key.`);
+    else brokerMode = status.mode;
+  }
+  if (githubRepo && brokerMode !== 'app') {
     const info = await deps.github.api(await deps.github.resolveToken(githubTokenSource)).getRepo(githubRepo);
     if (!info.admin) throw new Error(`Your GitHub credential cannot add deploy keys to ${info.fullName} (that needs admin on the repository).`);
   }
@@ -347,7 +358,9 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     timings.readyMs = deps.now() - started;
     progress(`runpane cloud: sandbox ${sandbox.id} is up; joining the tailnet and installing the Pane daemon...`);
     let cloneRepo = record.meta.repo;
-    if (githubRepo && record.meta.repo) {
+    // App mode clones through the broker once the coordinator knows this Session (below).
+    if (brokerMode === 'app') cloneRepo = undefined;
+    if (githubRepo && record.meta.repo && brokerMode !== 'app') {
       const grant = await connectDeployKey(record, provider.handle(sandbox.id), deps, {
         repo: githubRepo,
         readWrite: args.readWrite,
@@ -398,6 +411,21 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     if (outcome.daemonVersion) record.meta.daemonVersion = outcome.daemonVersion;
     if (coordinatorEnabled) record.meta.coordinatorPairingPath = deps.store.coordinatorPairingPath(hostname);
     await deps.store.writeHost(record);
+    if (githubRepo && brokerMode) {
+      const repo = record.meta.github?.[0]?.repo ?? githubRepo;
+      const enabled = await enableBroker(record, provider.handle(sandbox.id), deps, { repo, mode: brokerMode });
+      if (!enabled.directory.pushed) throw new Error(`the coordinator did not take the directory (${enabled.directory.reason}), so it would refuse this Session's GitHub calls`);
+      if (enabled.peersFile.written === false) throw new Error(`the Session's peers list was not written (${String(enabled.peersFile.reason)}), so it can't reach the coordinator`);
+      progress(`  - github-broker done: ${repo} (${brokerMode === 'app' ? 'GitHub App; fetch uses the broker\'s read-only token' : 'fine-grained token; fetch uses the read-only deploy key'}); gh shim installed`);
+      if (enabled.shimWarning) deps.stderr(`runpane cloud: ${enabled.shimWarning}`);
+      if (brokerMode === 'app' && record.meta.repo) {
+        const dir = `/home/user/${repoDirName(record.meta.repo.url)}`;
+        const head = await cloneThroughBroker(provider.handle(sandbox.id), repo, record.meta.repo.ref, dir);
+        await deps.invokeDaemon(record.profile, 'runpane:repos:add', [{ path: dir, name: repoDirName(record.meta.repo.url) }], 60_000);
+        progress(`  - clone done over https (git asks the broker for a read-only token when GitHub wants one): ${head.slice(0, 12)}`);
+      }
+      timings.githubBrokerMs = deps.now() - started;
+    }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     if (args.keepOnFailure) {
@@ -408,6 +436,8 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
         await revokeGitHubGrants(record, deps);
         await destroyHost(record, provider, deps.bootstrap.createTailnet(tailnetCredentials), deps);
         await deps.store.removeHost(hostname);
+        // The broker step may already have told the coordinator about this Session.
+        if (record.meta.brokerRepos) await pushDirectory(deps);
       } catch (cleanupError) {
         deps.stderr(`runpane cloud: cleanup failed too: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}. Run runpane cloud destroy ${hostname} --yes.`);
       }
@@ -429,6 +459,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       desktop: desktopSummary(desktop),
       coordinator,
       peersFile,
+      githubBroker: record.meta.brokerRepos ? { repos: record.meta.brokerRepos, mode: record.meta.brokerMode ?? 'app' } : null,
       agentCredentials: agentCredentialsSummary(credentials),
       timings,
     }, null, 2));
@@ -442,6 +473,9 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     }
     printDesktopOutcome(deps, desktop, hostname);
     printCoordinatorOutcome(deps, coordinator);
+    if (record.meta.brokerRepos) {
+      deps.stdout(`  github: ${record.meta.brokerRepos.join(', ')} through the coordinator's broker; inside the Session, gh pr create / runpane cloud agent github push publish to cloud/${hostname}/<branch> (draft PRs only).`);
+    }
     const agents = agentCredentialsSummary(credentials);
     deps.stdout(agents.length > 0
       ? `  agents: signed in with the saved ${agents.join(' and ')}.`

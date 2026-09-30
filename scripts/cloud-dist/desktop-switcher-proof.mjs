@@ -147,7 +147,7 @@ try {
 
     if (env.REPO && env.PANE_NAME) {
       const existing = page.getByRole('button', { name: env.PANE_NAME, exact: true });
-      if (await existing.isVisible().catch(() => false)) {
+      if (await existing.waitFor({ timeout: 5000 }).then(() => true, () => false)) {
         await existing.click();
       } else {
         await repoButton.click();
@@ -174,8 +174,21 @@ try {
       await shot('terminal');
     }
   } else {
-    // Give the connect attempt time to fail the way it does for a user, then read what the UI says.
-    await page.waitForTimeout(Number(env.ASLEEP_WAIT_MS ?? 20_000));
+    // Give the connect attempt time to fail the way it does for a user, sampling what the UI says.
+    const timeline = [];
+    const waitMs = Number(env.ASLEEP_WAIT_MS ?? 20_000);
+    while (Date.now() - pickedAt < waitMs) {
+      const labels = await page.evaluate(() => [...new Set(
+        [...document.querySelectorAll('[aria-label]')]
+          .map((element) => element.getAttribute('aria-label') ?? '')
+          .filter((label) => /switch host|remote runtime|cloud host|connect/i.test(label)),
+      )]);
+      const sample = `${String(Math.round((Date.now() - pickedAt) / 1000)).padStart(3)} s  ${labels.join(' | ')}`;
+      if (timeline.at(-1)?.slice(6) !== sample.slice(6)) timeline.push(sample);
+      await page.waitForTimeout(2000);
+    }
+    fs.writeFileSync(path.join(out, 'asleep-timeline.txt'), `${timeline.join('\n')}\n`);
+    log('asleep timeline:', timeline.join(' || '));
     await shot('asleep-sidebar');
     const chipLabel = await switcherChip.first().getAttribute('aria-label');
     await switcherChip.first().click();

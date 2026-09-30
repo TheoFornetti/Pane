@@ -12,7 +12,7 @@
 . "$E2E_LIB/provision.sh"; . "$E2E_LIB/fixtures.sh"; . "$E2E_LIB/cli.sh"
 export E2E_DAEMON_DEB_URL="${E2E_DAEMON_DEB_URL-$(dist_url deb)}"
 e2e_init M4-coordinator
-wait_start_budget 6
+wait_start_budget 4
 cli_resolve || { rec cli BLOCKED "runpane CLI under test not installable"; exit 1; }
 E2E_TARGET="${E2E_TARGET_OVERRIDE:-${E2E_CLI_SOURCE##*/}}"; export E2E_TARGET
 
@@ -78,68 +78,60 @@ os=$(cl boat get "$O_ID" --field state); ss_=$(cl boat get "$S_ID" --field state
   && rec reconcile.orphan-stop-only PASS "orphan $O_ID stopped (state=$os, still exists: not deleted); listed Session untouched ($ss_)" "$E2E_RUN_DIR/reconcile-orphan.json" \
   || rec reconcile.orphan-stop-only FAIL "orphan=$os session=$ss_" "$E2E_RUN_DIR/reconcile-orphan.json"
 
-# ---- idle-stop
+# ---- the always-on part: one `serve` process runs the idle-stop loop and the HTTP API (its streak and resume
+#      counts live in that process, as in production). Short interval; runaway guard at 1 resume/hour.
+python3 - "$CFG" <<'PY'
+import json,sys
+p=sys.argv[1]; c=json.load(open(p))
+c["idleStop"]={"enabled":True,"intervalSeconds":20,"requiredConsecutiveSafe":2,"wakeGraceSeconds":600}
+c["reconcile"]={"enabled":False}
+c["guards"]={"maxResumesPerSandboxPerHour":1}
+json.dump(c,open(p,"w"),indent=1)
+PY
 rp_in "$S_ID" panels submit --panel "$SHELL_PANEL" --text 'for i in $(seq 1 90); do echo busy $i; sleep 1; done' --yes --json >/dev/null
-sleep 3
-i1=$(coord idle-check 2>>"$E2E_RUN_DIR/coord-stderr.log"); i2=$(coord idle-check 2>>"$E2E_RUN_DIR/coord-stderr.log"); printf '%s\n%s\n' "$i1" "$i2" | ev idle-busy.json >/dev/null
-st=$(cl boat get "$S_ID" --field state)
-[[ "$st" =~ ^(idle|ready|running)$ ]] && rec idle-stop.refuses-busy PASS "two idle-checks while the shell prints: Session left running ($st)" "$E2E_RUN_DIR/idle-busy.json" \
-  || rec idle-stop.refuses-busy FAIL "Session state after busy idle-checks: $st" "$E2E_RUN_DIR/idle-busy.json"
-log "waiting for the output window (default 120 s) to pass"
-stopped=""; end=$(( $(date +%s) + 420 )); grep -q 'safe-to-stop-unsupported' "$E2E_RUN_DIR/idle-busy.json" && end=$(( $(date +%s) + 40 ))
-while [ "$(date +%s)" -lt "$end" ]; do
-  coord idle-check >> "$E2E_RUN_DIR/idle-quiet.jsonl" 2>>"$E2E_RUN_DIR/coord-stderr.log"
-  st_now=$(cl boat get "$S_ID" --field state); [[ "$st_now" =~ ^(archiving|archived)$ ]] && { stopped=1; break; }
-  sleep 30
-done
-cl boat wait "$S_ID" archived --timeout 120 >/dev/null
-if [ -n "$stopped" ] && [ "$(cl boat get "$S_ID" --field state)" = archived ]; then
-  rec idle-stop.stops-idle PASS "idle Session stopped after consecutive safe answers" "$E2E_RUN_DIR/idle-quiet.jsonl"
-elif grep -q 'safe-to-stop-unsupported' "$E2E_RUN_DIR/idle-quiet.jsonl"; then
-  rec idle-stop.stops-idle BLOCKED "daemon under test has no safe-to-stop (coordinator reports 'unsupported' and correctly never stops); needs m2-safestop-health merged" "$E2E_RUN_DIR/idle-quiet.jsonl"
-  cl boat stop "$S_ID" >/dev/null; cl boat wait "$S_ID" archived --timeout 120 >/dev/null   # the wake checks below need it asleep
-else
-  rec idle-stop.stops-idle FAIL "Session never idle-stopped (state=$(cl boat get "$S_ID" --field state))" "$E2E_RUN_DIR/idle-quiet.jsonl"
-  cl boat stop "$S_ID" >/dev/null; cl boat wait "$S_ID" archived --timeout 120 >/dev/null
-fi
-
-# ---- status / wake (CLI), then the HTTP API
-s=$(coord status "$S_HOST" 2>>"$E2E_RUN_DIR/coord-stderr.log"); printf '%s\n' "$s" | ev status-asleep.json >/dev/null
-[ "$(jget 'd.get("status")' <<<"$s")" = asleep ] && [ "$(cl boat get "$S_ID" --field state)" = archived ] \
-  && rec status-asleep PASS "status -> asleep, and it did not wake the sandbox" "$E2E_RUN_DIR/status-asleep.json" \
-  || rec status-asleep FAIL "status=$(jget 'd.get("status")' <<<"$s") boat=$(cl boat get "$S_ID" --field state)" "$E2E_RUN_DIR/status-asleep.json"
-t0=$(ms_now); w=$(coord wake "$S_HOST" --timeout-ms 120000 2>>"$E2E_RUN_DIR/coord-stderr.log"); ws=$(secs_since "$t0"); printf '%s\n' "$w" | ev wake-cli.json >/dev/null
-h=$(cl remote health "$S_PAIR" --timeout 5)
-[ "$(jget 'd.get("status")' <<<"$w")" = awake ] && [ "$(jget 'd["http"]' <<<"$h")" = 200 ] \
-  && rec wake.cli PASS "wake -> awake in ${ws}s; /health 200 right after (readiness=$(jget 'd["body"].get("readiness",{}).get("state")' <<<"$h"))" "$E2E_RUN_DIR/wake-cli.json" "seconds=$ws" \
-  || rec wake.cli FAIL "wake said $(jget 'd.get("status")' <<<"$w") after ${ws}s; health=$(jget 'd["http"]' <<<"$h")" "$E2E_RUN_DIR/wake-cli.json"
-
+sleep 2
 coord serve > "$E2E_RUN_DIR/coordinator-serve.log" 2>&1 &
 SERVE=$!; register_resource pid "$SERVE" coordinator-serve; sleep 3
-grep -q EADDRINUSE "$E2E_RUN_DIR/coordinator-serve.log" && { rec http.auth BLOCKED "coordinator serve could not bind 127.0.0.1:$PORT"; }
+grep -q EADDRINUSE "$E2E_RUN_DIR/coordinator-serve.log" && { rec coordinator-serve BLOCKED "coordinator serve could not bind 127.0.0.1:$PORT"; exit 1; }
+sleep 60
+st=$(cl boat get "$S_ID" --field state)
+[[ "$st" =~ ^(idle|ready|running)$ ]] && rec idle-stop.refuses-busy PASS "serve loop (20 s interval) left the Session running for 60 s while its shell printed ($st)" "$E2E_RUN_DIR/coordinator-serve.log" \
+  || rec idle-stop.refuses-busy FAIL "Session state while busy: $st" "$E2E_RUN_DIR/coordinator-serve.log"
+log "waiting for the Session to go quiet (output window 120 s) and the serve loop to stop it"
+stopped=""; end=$(( $(date +%s) + 420 )); t0=$(ms_now)
+while [ "$(date +%s)" -lt "$end" ]; do
+  st=$(cl boat get "$S_ID" --field state); [[ "$st" =~ ^(archiving|archived)$ ]] && { stopped=1; break; }; sleep 10
+done
+cl boat wait "$S_ID" archived --timeout 120 >/dev/null
+if [ -n "$stopped" ]; then rec idle-stop.stops-idle PASS "serve loop stopped the idle Session after consecutive safe answers ($(secs_since "$t0")s after the busy phase)" "$E2E_RUN_DIR/coordinator-serve.log" "seconds=$(secs_since "$t0")"
+else rec idle-stop.stops-idle FAIL "serve loop never stopped the idle Session (state=$(cl boat get "$S_ID" --field state))" "$E2E_RUN_DIR/coordinator-serve.log"
+  cl boat stop "$S_ID" >/dev/null; cl boat wait "$S_ID" archived --timeout 120 >/dev/null; fi
+
+# ---- HTTP API: auth, status (never wakes), wake
 coord mint-token user:e2e --out "$E2E_SECRETS/caller.tok" >/dev/null
+AUTH=(-H @<(printf 'Authorization: Bearer %s\n' "$(cat "$E2E_SECRETS/caller.tok")"))
 CURL() { curl -sS -o "$E2E_RUN_DIR/http-$1.json" -w '%{http_code}' "${@:2}"; }
 a=$(CURL noauth "http://127.0.0.1:$PORT/cloud/status?host=$S_HOST")
 b=$(CURL badauth -H "Authorization: Bearer rpc1.user:e2e.AAAA" "http://127.0.0.1:$PORT/cloud/status?host=$S_HOST")
 c=$(CURL status -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$E2E_SECRETS/caller.tok")") "http://127.0.0.1:$PORT/cloud/status?host=$S_HOST")
-[ "$a" = 401 ] && [ "$b" = 403 ] && [ "$c" = 200 ] && rec http.auth PASS "/cloud/status: no token 401, bad token 403, minted caller token 200 ($(jget 'd.get("status")' < "$E2E_RUN_DIR/http-status.json"))" \
-  || rec http.auth FAIL "no token $a, bad $b, good $c"
-cl boat stop "$S_ID" >/dev/null; cl boat wait "$S_ID" archived --timeout 120 >/dev/null
+hs=$(jget 'd.get("status")' < "$E2E_RUN_DIR/http-status.json" 2>/dev/null)
+[ "$a" = 401 ] && [ "$b" = 403 ] && [ "$c" = 200 ] && rec http.auth PASS "/cloud/status: no token 401, bad token 403, minted caller token 200" || rec http.auth FAIL "no token $a, bad $b, good $c"
+[ "$hs" = asleep ] && [ "$(cl boat get "$S_ID" --field state)" = archived ] && rec status-asleep PASS "GET /cloud/status -> asleep, and it did not wake the sandbox" "$E2E_RUN_DIR/http-status.json" \
+  || rec status-asleep FAIL "status=$hs boat=$(cl boat get "$S_ID" --field state)" "$E2E_RUN_DIR/http-status.json"
 t0=$(ms_now)
 c=$(CURL wake -X POST -H 'Content-Type: application/json' -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$E2E_SECRETS/caller.tok")") \
   --data "{\"host\":\"$S_HOST\",\"wait\":true,\"timeoutMs\":120000}" "http://127.0.0.1:$PORT/cloud/wake"); ws=$(secs_since "$t0")
-[ "$c" = 200 ] && [ "$(jget 'd.get("status")' < "$E2E_RUN_DIR/http-wake.json")" = awake ] && [ "$(cl remote health "$S_PAIR" --timeout 5 | jget 'd["http"]')" = 200 ] \
-  && rec wake.http PASS "POST /cloud/wake -> awake in ${ws}s, /health 200" "$E2E_RUN_DIR/http-wake.json" "seconds=$ws" \
+h=$(cl remote health "$S_PAIR" --timeout 5)
+[ "$c" = 200 ] && [ "$(jget 'd.get("status")' < "$E2E_RUN_DIR/http-wake.json")" = awake ] && [ "$(jget 'd["http"]' <<<"$h")" = 200 ] \
+  && rec wake.http PASS "POST /cloud/wake -> awake in ${ws}s, /health 200 (readiness=$(jget 'd["body"].get("readiness",{}).get("state")' <<<"$h"))" "$E2E_RUN_DIR/http-wake.json" "seconds=$ws" \
   || rec wake.http FAIL "HTTP $c status=$(jget 'd.get("status")' < "$E2E_RUN_DIR/http-wake.json" 2>/dev/null)" "$E2E_RUN_DIR/http-wake.json"
-kill "$SERVE" 2>/dev/null; wait "$SERVE" 2>/dev/null
 
-# ---- runaway guard: at most N resumes per sandbox per hour
-python3 - "$CFG" <<'PY'
-import json,sys
-p=sys.argv[1]; c=json.load(open(p)); c["guards"]={"maxResumesPerSandboxPerHour":1}; json.dump(c,open(p,"w"),indent=1)
-PY
+# ---- runaway guard (same serve process: 1 resume/hour already used by the wake above)
 cl boat stop "$S_ID" >/dev/null; cl boat wait "$S_ID" archived --timeout 120 >/dev/null
-g=$(coord wake "$S_HOST" --timeout-ms 30000 2>&1); printf '%s\n' "$g" | ev runaway.json >/dev/null
-gs=$(cl boat get "$S_ID" --field state)
-grep -q 'runaway' <<<"$g" && [ "$gs" = archived ] && rec runaway-guard PASS "wake refused by the runaway guard (resumes/hour); sandbox stayed asleep" "$E2E_RUN_DIR/runaway.json" \
-  || rec runaway-guard FAIL "guard did not refuse (sandbox $gs)" "$E2E_RUN_DIR/runaway.json"
+c=$(CURL runaway -X POST -H 'Content-Type: application/json' -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$E2E_SECRETS/caller.tok")") \
+  --data "{\"host\":\"$S_HOST\",\"wait\":false,\"timeoutMs\":30000}" "http://127.0.0.1:$PORT/cloud/wake")
+sleep 5; gs=$(cl boat get "$S_ID" --field state)
+grep -q 'runaway' "$E2E_RUN_DIR/http-runaway.json" && [ "$gs" = archived ] \
+  && rec runaway-guard PASS "2nd wake within the hour refused (HTTP $c, $(jget 'd.get("code")' < "$E2E_RUN_DIR/http-runaway.json")); sandbox stayed asleep" "$E2E_RUN_DIR/http-runaway.json" \
+  || rec runaway-guard FAIL "guard did not refuse (HTTP $c, sandbox $gs)" "$E2E_RUN_DIR/http-runaway.json"
+kill "$SERVE" 2>/dev/null; wait "$SERVE" 2>/dev/null

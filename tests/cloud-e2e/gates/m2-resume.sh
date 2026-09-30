@@ -54,13 +54,19 @@ after_kill() {
   elif grep -q 'not initialized' <<<"$out"; then rec "$phase.shell-submit" FAIL "'not initialized' (the M2 bug)" "$E2E_RUN_DIR/$phase-shell-submit.json"
   else rec "$phase.shell-submit" FAIL "submit http=$(jget 'd["http"]' <<<"$out") or output never appeared" "$E2E_RUN_DIR/$phase-shell-submit.json"; fi
   [ -n "$CLAUDE_PANEL" ] || { rec "$phase.claude-continues" SKIP "no Claude panel"; return; }
-  out=$(submit_invoke "$SB_PAIRING" "$CLAUDE_PANEL" "What was the codeword I gave you earlier? Reply with only the codeword written in lowercase letters, nothing else.")
+  # each phase asks for a different form, so a stale reply from an earlier phase can never match
+  local want ask
+  case "$phase" in
+    restart) want="$DROW"; ask="Reply with only the codeword written in lowercase letters, nothing else." ;;
+    *) want=$(sed 's/./&-/g; s/-$//' <<<"$DROW"); ask="Reply with only the codeword in lowercase letters with a dash between each letter (like a-b-c), nothing else." ;;
+  esac
+  out=$(submit_invoke "$SB_PAIRING" "$CLAUDE_PANEL" "What was the codeword I gave you before? $ask")
   printf '%s\n' "$out" | ev "$phase-claude-submit.json" >/dev/null
   if [ "$(jget 'd["http"]' <<<"$out")" != 200 ]; then rec "$phase.claude-continues" FAIL "submit http=$(jget 'd["http"]' <<<"$out"): $(head -c 200 <<<"$out")" "$E2E_RUN_DIR/$phase-claude-submit.json"; return; fi
   local sid_now; sid_now=$(agent_session_of "$CLAUDE_PANE")
-  if wait_last_message "$SB_PAIRING" "$CLAUDE_PANEL" "$DROW" 180 | ev "$phase-claude-reply.json" >/dev/null; then
-    rec "$phase.claude-continues" PASS "same Claude panel answered '$DROW' (the codeword, lowercased) from pre-kill context (agent session ${SID_BEFORE:-?} -> ${sid_now:-?})" "$E2E_RUN_DIR/$phase-claude-reply.json"
-  else rec "$phase.claude-continues" FAIL "no reply containing the lowercased codeword (session ${SID_BEFORE:-?} -> ${sid_now:-?})" "$E2E_RUN_DIR/$phase-claude-reply.json"; fi
+  if wait_last_message "$SB_PAIRING" "$CLAUDE_PANEL" "$want" 180 | ev "$phase-claude-reply.json" >/dev/null; then
+    rec "$phase.claude-continues" PASS "same Claude panel answered '$want' (a new form of the codeword) from pre-kill context (agent session ${SID_BEFORE:-?} -> ${sid_now:-?})" "$E2E_RUN_DIR/$phase-claude-reply.json"
+  else rec "$phase.claude-continues" FAIL "no reply containing '$want' (session ${SID_BEFORE:-?} -> ${sid_now:-?})" "$E2E_RUN_DIR/$phase-claude-reply.json"; fi
 }
 
 # sample_readiness <seconds> : background sampler of /health readiness states during a wake

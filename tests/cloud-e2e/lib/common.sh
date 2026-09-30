@@ -21,7 +21,7 @@ log() { printf '%s %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 
 e2e_init() {
   E2E_GATE="$1"
-  E2E_RUN_ID="${E2E_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$E2E_GATE}"
+  E2E_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$E2E_GATE"   # never inherit: a stale export would mix runs
   E2E_RUN_DIR="$E2E_EVIDENCE_ROOT/$E2E_RUN_ID"
   E2E_SECRETS="$E2E_RUN_DIR/.secrets"
   mkdir -p "$E2E_RUN_DIR"

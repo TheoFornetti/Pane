@@ -13,13 +13,16 @@ export const PORT_USAGE = `Usage:
   runpane port list [--verify] [--json]
   runpane port close <port|name> [--json]
   runpane port auto-open <on|off> [--json]
-Publishes a service in this Runpane Cloud Session as a tailnet-only URL: https://<host>.<tailnet>.ts.net:<port>/.`;
+Inside a Runpane Cloud Session: publish a local service as a tailnet-only URL, https://<host>.<tailnet>.ts.net:<port>/
+(Tailscale Serve, never Funnel). From your laptop: runpane cloud port open|list|close <host> ...`;
 
 export const CLOUD_PORT_USAGE = `Usage:
   runpane cloud port open <host> <port> [--name <name>] [--https-port <port>] [--path </path>] [--scheme <auto|https|http>] [--yes] [--json]
-  runpane cloud port list <host> [--json]        URLs, checked from this machine, and suggested ports
+  runpane cloud port list <host> [--json]
   runpane cloud port close <host> <port|name> [--json]
-A port is a service in the Session published on the Session's own tailnet name (Tailscale Serve, never Funnel).`;
+Publishes a service running in the Session as a tailnet-only URL on the Session's own name,
+https://<host>.<tailnet>.ts.net:<port>/ (Tailscale Serve, never Funnel). list checks each URL from this machine.
+Inside the Session: runpane port open|list|close|auto-open ...`;
 
 type PortsCommand =
   | { sub: 'open'; request: JsonObject; json: boolean }
@@ -208,6 +211,7 @@ export async function runPortsCommand(command: PortsCommand, io: PortsIo): Promi
 function printList(result: ReturnType<typeof listSchema.decode>, out: (line: string) => void, checked: boolean): void {
   if (!result.available) {
     out(`Session ports are not available here: ${result.unavailableReason ?? 'unknown reason'}.`);
+    out('From your laptop, use: runpane cloud port list <host>');
     return;
   }
   out(`Ports on ${result.host ?? 'this Session'} (tailnet only):`);

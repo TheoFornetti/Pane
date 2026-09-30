@@ -1,9 +1,10 @@
 import { createHash } from 'crypto';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import type { CloudUpgradeRequest, CloudUpgradeResult } from '../../../../shared/types/cloudDaemon';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { SYSTEMD_UNIT_NAME } from '../remoteDaemonService';
 import type { PaneCommandValue } from '../commandRegistry';
 
 const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
@@ -119,12 +120,32 @@ export function resolveSystemdUnitFromCgroup(cgroupText: string): string | null 
   return null;
 }
 
-export function resolveOwnSystemdUnit(): string | null {
+/**
+ * The systemd user unit whose main process is this daemon. Electron moves itself into an
+ * `app-*.scope` cgroup on start, so the cgroup often names a scope, not the service; then the
+ * managed daemon unit counts when systemd reports this process as its MainPID.
+ */
+export function resolveOwnSystemdUnit(
+  readCgroup: () => string = () => fs.readFileSync('/proc/self/cgroup', 'utf8'),
+  mainPidOf: (unit: string) => number | undefined = readUnitMainPid,
+  pid: number = process.pid,
+): string | null {
   try {
-    return resolveSystemdUnitFromCgroup(fs.readFileSync('/proc/self/cgroup', 'utf8'));
+    const fromCgroup = resolveSystemdUnitFromCgroup(readCgroup());
+    if (fromCgroup) return fromCgroup;
   } catch {
-    return null;
+    // No /proc: fall through to asking systemd.
   }
+  return mainPidOf(SYSTEMD_UNIT_NAME) === pid ? SYSTEMD_UNIT_NAME : null;
+}
+
+function readUnitMainPid(unit: string): number | undefined {
+  const result = spawnSync('systemctl', ['--user', 'show', '--property=MainPID', '--value', unit], {
+    encoding: 'utf8',
+    timeout: 5_000,
+  });
+  const pid = Number(result.stdout?.trim());
+  return result.status === 0 && Number.isInteger(pid) && pid > 0 ? pid : undefined;
 }
 
 export async function downloadToFile(url: string, destination: string): Promise<void> {

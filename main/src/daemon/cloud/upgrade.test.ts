@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildUpgradeScript,
   parseCloudUpgradeRequest,
+  resolveOwnSystemdUnit,
   resolveSystemdUnitFromCgroup,
   runCloudUpgrade,
   type CloudUpgradeDependencies,
@@ -87,6 +88,23 @@ describe('resolveSystemdUnitFromCgroup', () => {
   it('is null outside a service', () => {
     expect(resolveSystemdUnitFromCgroup('0::/user.slice/user-1000.slice/session-3.scope\n')).toBeNull();
     expect(resolveSystemdUnitFromCgroup('0::/user.slice/user-1000.slice/user@1000.service/init.scope\n')).toBeNull();
+  });
+});
+
+describe('resolveOwnSystemdUnit', () => {
+  const scopeCgroup = () => '0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-pane-79028.scope\n';
+
+  it('finds the Pane daemon unit when Electron moved itself into an app scope', () => {
+    expect(resolveOwnSystemdUnit(scopeCgroup, () => 79028, 79028)).toBe('pane-remote-daemon.service');
+  });
+
+  it('is null when that unit runs some other process', () => {
+    expect(resolveOwnSystemdUnit(scopeCgroup, () => 5, 79028)).toBeNull();
+    expect(resolveOwnSystemdUnit(scopeCgroup, () => undefined, 79028)).toBeNull();
+  });
+
+  it('prefers a service named by the cgroup', () => {
+    expect(resolveOwnSystemdUnit(() => '0::/user.slice/user@1000.service/app.slice/rc-loop-test.service\n', () => undefined)).toBe('rc-loop-test.service');
   });
 });
 

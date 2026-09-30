@@ -61,7 +61,7 @@ interface ProvisionOptions {
   onStep?: (step: ProvisionStep) => void;
 }
 
-export type CloudTransportMode = 'auto' | 'https' | 'http';
+type CloudTransportMode = 'auto' | 'https' | 'http';
 
 interface ProvisionResult extends TailnetIdentity {
   baseUrl: string;

@@ -1,7 +1,7 @@
 import { CLOUD_SIZES, type CloudSize } from './provider';
 
 /** How clients reach a cloud Session's daemon: see ProvisionOptions.transport. */
-export const CLOUD_TRANSPORTS = ['auto', 'https', 'http'] as const;
+const CLOUD_TRANSPORTS = ['auto', 'https', 'http'] as const;
 export type CloudTransport = (typeof CLOUD_TRANSPORTS)[number];
 
 const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'destroy', 'pair', 'sync', 'coordinator', 'peers'] as const;

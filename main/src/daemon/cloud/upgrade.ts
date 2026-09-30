@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import type { CloudUpgradeRequest, CloudUpgradeResult } from '../../../../shared/types/cloudDaemon';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import type { PaneCommandValue } from '../commandRegistry';
 
 const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
@@ -36,7 +37,7 @@ const upgradeRequestSchema = boundary.object({
   sha256: boundary.nonEmptyString,
 });
 
-export function parseCloudUpgradeRequest(value: unknown): CloudUpgradeRequest {
+export function parseCloudUpgradeRequest(value: PaneCommandValue): CloudUpgradeRequest {
   let decoded: ReturnType<typeof upgradeRequestSchema.decode>;
   try {
     decoded = decodeBoundary(value, upgradeRequestSchema);
@@ -66,7 +67,7 @@ export function parseCloudUpgradeRequest(value: unknown): CloudUpgradeRequest {
  */
 export async function runCloudUpgrade(
   dependencies: CloudUpgradeDependencies,
-  rawRequest: unknown,
+  rawRequest: PaneCommandValue,
 ): Promise<CloudUpgradeResult> {
   const request = parseCloudUpgradeRequest(rawRequest);
   const from = dependencies.currentVersion;

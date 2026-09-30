@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CloudDurableFlushResult } from '../../../../shared/types/cloudDaemon';
+import type { CloudDurableFlushResult, CloudSafeToStopRequest } from '../../../../shared/types/cloudDaemon';
 import {
   DEFAULT_CLIENT_WINDOW_MS,
   DEFAULT_RECENT_OUTPUT_MS,
@@ -28,7 +28,7 @@ function idleSources(overrides: Partial<SafeToStopSources> = {}): SafeToStopSour
   };
 }
 
-async function check(sources: SafeToStopSources, request: unknown = {}) {
+async function check(sources: SafeToStopSources, request: CloudSafeToStopRequest = {}) {
   const flush = vi.fn(async () => FLUSHED);
   const result = await runSafeToStop({ sources, flush, version: '2.4.141', now: () => NOW }, request);
   return { result, flush };

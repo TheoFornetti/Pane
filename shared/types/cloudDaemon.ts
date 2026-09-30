@@ -13,15 +13,6 @@ export type CloudSafeToStopCondition =
   | 'pr-checks-pending'
   | 'user-client-attached';
 
-export const CLOUD_SAFE_TO_STOP_CONDITIONS: readonly CloudSafeToStopCondition[] = [
-  'agent-working',
-  'recent-terminal-output',
-  'lock-held',
-  'watcher-active',
-  'pr-checks-pending',
-  'user-client-attached',
-];
-
 export interface CloudSafeToStopBlocker {
   condition: CloudSafeToStopCondition;
   message: string;

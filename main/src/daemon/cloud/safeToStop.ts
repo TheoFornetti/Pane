@@ -7,6 +7,7 @@ import type {
   CloudSafeToStopResult,
 } from '../../../../shared/types/cloudDaemon';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import type { PaneCommandValue } from '../commandRegistry';
 
 /** A terminal that printed within this window is not idle. */
 export const DEFAULT_RECENT_OUTPUT_MS = 2 * 60_000;
@@ -70,7 +71,7 @@ const safeToStopRequestSchema = boundary.object({
   clientWindowMs: boundary.optional(boundary.number),
 });
 
-export function parseSafeToStopRequest(value: unknown): Required<CloudSafeToStopRequest> {
+export function parseSafeToStopRequest(value: PaneCommandValue): Required<CloudSafeToStopRequest> {
   const decoded = decodeBoundary(value ?? {}, safeToStopRequestSchema);
   return {
     flush: decoded.flush ?? 'if-safe',
@@ -80,7 +81,7 @@ export function parseSafeToStopRequest(value: unknown): Required<CloudSafeToStop
 }
 
 /** Every reason the daemon should not be stopped right now; empty means safe. */
-export async function collectSafeToStopBlockers(
+async function collectSafeToStopBlockers(
   sources: SafeToStopSources,
   request: Required<CloudSafeToStopRequest>,
   now: number,
@@ -143,7 +144,7 @@ export async function collectSafeToStopBlockers(
  */
 export async function runSafeToStop(
   dependencies: SafeToStopDependencies,
-  rawRequest: unknown,
+  rawRequest: PaneCommandValue,
 ): Promise<CloudSafeToStopResult> {
   const now = dependencies.now ?? Date.now;
   const request = parseSafeToStopRequest(rawRequest);

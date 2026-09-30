@@ -21,7 +21,7 @@ import {
 } from './upgrade';
 
 /** Channels whose in-flight calls mean someone is watching for work to finish. */
-export const WATCHER_CHANNELS = ['runpane:workspace:wait', 'runpane:panels:wait'] as const;
+const WATCHER_CHANNELS = ['runpane:workspace:wait', 'runpane:panels:wait'] as const;
 /** safe-to-stop re-polls GitHub when the PR monitor's last round is older than this. */
 const PR_CHECKS_MAX_AGE_MS = 60_000;
 
@@ -93,7 +93,7 @@ export function registerCloudDaemonHandlers(dependencies: CloudDaemonDependencie
   });
 }
 
-export function createSafeToStopSources(dependencies: CloudDaemonDependencies, now: () => number): SafeToStopSources {
+function createSafeToStopSources(dependencies: CloudDaemonDependencies, now: () => number): SafeToStopSources {
   return {
     terminals: () => dependencies.terminals.getAllPanelIds().map((panelId): SafeToStopTerminal => {
       const lastOutputAt = dependencies.terminals.getLastOutputAt(panelId);

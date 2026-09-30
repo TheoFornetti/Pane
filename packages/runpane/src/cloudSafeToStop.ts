@@ -3,7 +3,7 @@ import type { ParsedArgs } from './commands';
 import { invokeDaemon } from './daemonClient';
 
 /** Exit code when something blocks the stop, so scripts can tell "blocked" from "failed" (1). */
-export const SAFE_TO_STOP_BLOCKED_EXIT_CODE = 3;
+const SAFE_TO_STOP_BLOCKED_EXIT_CODE = 3;
 
 const safeToStopResultSchema = boundary.object({
   ok: boundary.literal(true),
@@ -28,7 +28,7 @@ const safeToStopResultSchema = boundary.object({
   })),
 });
 
-export function safeToStopFlushMode(parsed: Pick<ParsedArgs, 'force' | 'dryRun'>): 'if-safe' | 'always' | 'never' {
+function safeToStopFlushMode(parsed: Pick<ParsedArgs, 'force' | 'dryRun'>): 'if-safe' | 'always' | 'never' {
   if (parsed.force && parsed.dryRun) throw new Error('runpane cloud safe-to-stop takes --force or --dry-run, not both.');
   if (parsed.force) return 'always';
   return parsed.dryRun ? 'never' : 'if-safe';

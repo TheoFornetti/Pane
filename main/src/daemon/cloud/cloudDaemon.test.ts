@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RemoteDaemonClientRecord, RemoteDaemonConnectedClient } from '../../../../shared/types/remoteDaemon';
 import { createDefaultRemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
-import type { ToolPanel } from '../../../../shared/types/panels';
+import type { TerminalPanelState, ToolPanel } from '../../../../shared/types/panels';
+import type { CloudSafeToStopRequest } from '../../../../shared/types/cloudDaemon';
 import type { AgentState } from '../../../../shared/types/agentStatus';
 import { PaneCommandRegistry } from '../commandRegistry';
 import { UserClientActivityTracker } from './clientActivity';
@@ -10,7 +11,7 @@ import { CloudDaemonHealthState } from './readiness';
 
 const NOW = 50_000_000;
 
-function panel(id: string, paneId: string, customState: Record<string, unknown>): ToolPanel {
+function panel(id: string, paneId: string, customState: TerminalPanelState): ToolPanel {
   return {
     id,
     sessionId: paneId,
@@ -66,7 +67,7 @@ function setup(overrides: Partial<CloudDaemonDependencies> = {}) {
     ...overrides,
   };
   registerCloudDaemonHandlers(dependencies);
-  const safeToStop = (request: Record<string, unknown> = { flush: 'never' }) =>
+  const safeToStop = (request: CloudSafeToStopRequest = { flush: 'never' }) =>
     commandRegistry.invoke('runpane:cloud:safe-to-stop', [request]);
   return { commandRegistry, health, clientActivity, agentStates, running, connected, config, checkpointWal, safeToStop };
 }

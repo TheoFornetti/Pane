@@ -112,9 +112,5 @@ function safePanels(source: () => ReadinessAgentPanel[]): ReadinessAgentPanel[] 
   }
 }
 
+/** The daemon's one health state; agent restore reports through `cloudDaemonHealth.setAgentRestorePhase`. */
 export const cloudDaemonHealth = new CloudDaemonHealthState();
-
-/** For m2-resume: report agent-restore progress on headless start. */
-export function setAgentRestorePhase(phase: CloudAgentRestorePhase, options: { lazy?: boolean } = {}): void {
-  cloudDaemonHealth.setAgentRestorePhase(phase, options);
-}

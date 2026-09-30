@@ -4,7 +4,7 @@
 #   runpane-<version>.tgz         npm pack of packages/runpane (install with `npm i -g <url>`)
 #   SHA256SUMS.txt, build-info.json
 # Run from the repository root on a Linux x64 build host (a boat devbox) after `pnpm install`.
-# The artifacts carry a fork prerelease version, <package version>-rc.g<sha8>, so `pane --version`
+# The artifacts carry a fork prerelease version, <package version>-rc.<commit time>.g<sha8>, so `pane --version`
 # and `runpane --version` identify the exact commit. Nothing is committed or published here.
 # Usage: scripts/cloud-dist/build-artifacts.sh [out-dir]   (default: dist-cloud)
 set -euo pipefail
@@ -14,8 +14,11 @@ cd "$ROOT"
 OUT=$(realpath -m "${1:-dist-cloud}")
 SHA=$(git rev-parse --short=8 HEAD)
 BASE_VERSION=$(node -p "require('./package.json').version")
-# "g" prefix keeps the prerelease identifier alphanumeric (an all-digit sha with a leading 0 is invalid semver).
-VERSION="${BASE_VERSION}-rc.g${SHA}"
+# rc.<commit UTC time>.g<sha8>: the timestamp makes versions sort by commit time under both semver and dpkg
+# (upgrade-on-wake installs a newer .deb with apt; a bare sha would sort randomly and look like a downgrade).
+# The "g" prefix keeps the sha identifier alphanumeric (an all-digit sha with a leading 0 is invalid semver).
+STAMP=$(TZ=UTC0 git show -s --format=%cd --date=format-local:%Y%m%d%H%M%S HEAD)
+VERSION="${BASE_VERSION}-rc.${STAMP}.g${SHA}"
 if ! git diff-index --quiet HEAD --; then
   echo "cloud-dist: working tree is dirty; refusing to label a build with ${SHA}" >&2
   exit 1

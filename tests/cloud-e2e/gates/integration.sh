@@ -182,7 +182,7 @@ for line in sys.stdin:
     if d.get('type') != 'user' or d.get('isMeta'): continue
     c = (d.get('message') or {}).get('content')
     t = c if isinstance(c, str) else ' '.join(x.get('text', '') for x in (c or []) if isinstance(x, dict))
-    if 'peer message from' in t and '\$1' in t: n += 1
+    if 'peer message from' in t and '$1' in t: n += 1
 print(n)"
 SH
 }

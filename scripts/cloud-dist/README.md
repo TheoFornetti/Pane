@@ -10,6 +10,7 @@ the scripts refuse a `greenfield-inc/*` repo.
 | `publish-release.sh --devbox <id> --ref <branch>` | operator (agentbox) | runs the build on the devbox, downloads the files (in 45 MiB parts: boat `GET /artifacts` caps at 50 MiB), verifies sha256, `gh release create rc-<sha8> --prerelease`, checks anonymous download, updates `dist-current.md` |
 | `make-golden.sh --tag rc-<sha8>` | operator | sandbox → `golden/provision.sh` → bootstrap's `golden-scrub.sh` → `rp-golden-check golden` + `rp-golden-payload-check` → named snapshot `rp-loop-golden-<sha8>` → destroys the source → forks a gate sandbox from the snapshot → `golden/gate-fork.sh` → destroys the gate |
 | `release.sh --devbox <id> --ref <branch>` | operator | both of the above, then, for `rc/integration` only, prunes older `rp-loop-golden-<sha8>` snapshots (keeps `KEEP_GOLDENS`, default 2) |
+| `desktop-switcher-proof.mjs` | a Linux box on the tailnet, repo root, under `xvfb-run` | drives a packaged desktop (no mocks) against a live cloud Session: live `cloud sync` import, the host switcher, connect, a remote terminal, the asleep state; writes screenshots, a Playwright trace and `results.json` (settings in the file header) |
 
 ## Integration vs branch builds
 

@@ -936,6 +936,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('app:unclean-shutdown-detected', wrappedCallback);
     },
 
+    // config.json changed outside the app (e.g. `runpane cloud` saved a remote host)
+    onConfigChanged: (callback: () => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent) => callback();
+      ipcRenderer.on('config:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('config:changed', wrappedCallback);
+    },
+
     // Main process logging
     onMainLog: (callback: (level: string, message: string) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, level: string, message: string) => callback(level, message);

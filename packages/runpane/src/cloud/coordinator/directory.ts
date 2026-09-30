@@ -1,0 +1,74 @@
+import fs from 'node:fs/promises';
+import { boundary, decodeBoundary } from '../../boundaryDecoder';
+import type { DirectoryEntry, DirectoryReadResult, SessionDirectory } from './types';
+
+// The directory is written by `runpane cloud` on the user's machine (the single writer) and pushed here.
+// A missing or unparsable file is a failed read, never "no Sessions": the reconciler must abort on it.
+const directoryFileSchema = boundary.object({
+  version: boundary.literal(1),
+  generatedAt: boundary.optional(boundary.nullable(boundary.string)),
+  sessions: boundary.array(boundary.object({
+    sessionId: boundary.nonEmptyString,
+    label: boundary.optional(boundary.string),
+    provider: boundary.nonEmptyString,
+    sandboxId: boundary.nonEmptyString,
+    baseUrl: boundary.nonEmptyString,
+    nodeId: boundary.optional(boundary.nullable(boundary.string)),
+    pinnedVersion: boundary.optional(boundary.nullable(boundary.string)),
+    coordinatorToken: boundary.optional(boundary.nullable(boundary.string)),
+  })),
+});
+
+export function parseDirectory(value: unknown): { generatedAt: string | null; entries: DirectoryEntry[] } {
+  const decoded = decodeBoundary(value, directoryFileSchema);
+  const seen = new Set<string>();
+  const entries = decoded.sessions.map((session): DirectoryEntry => {
+    if (seen.has(session.sessionId)) throw new Error(`duplicate sessionId ${session.sessionId}`);
+    seen.add(session.sessionId);
+    return {
+      sessionId: session.sessionId,
+      label: session.label ?? session.sessionId,
+      provider: session.provider,
+      sandboxId: session.sandboxId,
+      baseUrl: session.baseUrl.replace(/\/+$/, ''),
+      nodeId: session.nodeId ?? null,
+      pinnedVersion: session.pinnedVersion ?? null,
+      coordinatorToken: session.coordinatorToken ?? null,
+    };
+  });
+  return { generatedAt: decoded.generatedAt ?? null, entries };
+}
+
+export class FileSessionDirectory implements SessionDirectory {
+  constructor(private readonly file: string) {}
+
+  async read(): Promise<DirectoryReadResult> {
+    try {
+      const text = await fs.readFile(this.file, 'utf8');
+      return { ok: true, ...parseDirectory(JSON.parse(text)) };
+    } catch (error) {
+      return { ok: false, error: `directory ${this.file}: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+}
+
+/** Finds a directory entry by Session id, label, sandbox id or tailnet host name. */
+export function findDirectoryEntry(entries: readonly DirectoryEntry[], host: string): DirectoryEntry | null {
+  const wanted = host.trim().toLowerCase();
+  if (wanted.length === 0) return null;
+  return entries.find((entry) => (
+    entry.sessionId.toLowerCase() === wanted
+    || entry.label.toLowerCase() === wanted
+    || entry.sandboxId.toLowerCase() === wanted
+    || hostNameOf(entry.baseUrl) === wanted
+    || hostNameOf(entry.baseUrl).split('.')[0] === wanted
+  )) ?? null;
+}
+
+function hostNameOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}

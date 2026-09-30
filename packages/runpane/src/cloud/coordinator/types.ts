@@ -1,0 +1,102 @@
+// Ports and shared types for the always-on part of `runpane cloud` (the coordinator).
+// The coordinator never destroys anything: the provider port has no delete by construction.
+
+export type ProviderSandboxState =
+  | 'starting'
+  | 'running'
+  | 'stopping'
+  | 'stopped'
+  | 'failed'
+  | 'missing';
+
+export interface ProviderSandbox {
+  id: string;
+  name: string;
+  state: ProviderSandboxState;
+  /** The provider's own state string, kept for alerts and debugging. */
+  rawState: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface CoordinatorProvider {
+  readonly kind: string;
+  list(): Promise<ProviderSandbox[]>;
+  /** Returns state 'missing' when the provider no longer knows the sandbox. */
+  get(sandboxId: string): Promise<ProviderSandbox>;
+  stop(sandboxId: string): Promise<void>;
+  resume(sandboxId: string, idempotencyKey: string): Promise<void>;
+}
+
+export interface DirectoryEntry {
+  sessionId: string;
+  label: string;
+  provider: string;
+  sandboxId: string;
+  /** Tailnet base URL of the Session's Pane daemon, e.g. https://rp-abc.tailnet.ts.net */
+  baseUrl: string;
+  nodeId: string | null;
+  pinnedVersion: string | null;
+  /** Bearer token of the coordinator's own paired-client record on that daemon. */
+  coordinatorToken: string | null;
+}
+
+export type DirectoryReadResult =
+  | { ok: true; generatedAt: string | null; entries: DirectoryEntry[] }
+  | { ok: false; error: string };
+
+export interface SessionDirectory {
+  read(): Promise<DirectoryReadResult>;
+}
+
+export type DaemonHealth =
+  | { reachable: false; error: string }
+  | { reachable: true; ready: boolean; version: string | null };
+
+export type SafeToStopAnswer =
+  | { kind: 'safe'; checkpointed: boolean }
+  | { kind: 'unsafe'; reasons: string[] }
+  | { kind: 'unsupported'; error: string }
+  | { kind: 'error'; error: string };
+
+export type UpgradeAnswer =
+  | { kind: 'started' }
+  | { kind: 'unsupported'; error: string }
+  | { kind: 'error'; error: string };
+
+export interface DaemonProbe {
+  health(baseUrl: string): Promise<DaemonHealth>;
+  safeToStop(baseUrl: string, token: string): Promise<SafeToStopAnswer>;
+  upgrade(baseUrl: string, token: string, version: string, debUrl: string | null): Promise<UpgradeAnswer>;
+}
+
+export type AlertLevel = 'info' | 'warn' | 'error';
+
+export interface CoordinatorAlert {
+  at: string;
+  level: AlertLevel;
+  code: string;
+  message: string;
+  sandboxId?: string;
+  sessionId?: string;
+}
+
+export interface AlertSink {
+  emit(alert: Omit<CoordinatorAlert, 'at'>): void;
+  recent(limit: number): CoordinatorAlert[];
+}
+
+export interface Clock {
+  now(): number;
+  sleep(ms: number): Promise<void>;
+}
+
+export const systemClock: Clock = {
+  now: () => Date.now(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+};
+
+/** Sandboxes the coordinator counts as live (billing) for the runaway guard. */
+export function isLiveState(state: ProviderSandboxState): boolean {
+  return state === 'starting' || state === 'running' || state === 'stopping';
+}

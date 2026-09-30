@@ -30,7 +30,7 @@ wait_for() { # seconds command...
   "$@"
 }
 has_files() { [ -n "$(find "$1" -maxdepth 1 -type f 2>/dev/null | head -1)" ]; }
-ok() { if "$@"; then echo 1; else echo 0; fi; }
+ok() { if "$@" >/dev/null 2>&1; then echo 1; else echo 0; fi; }
 
 installed_dir="$HOME/.pane"
 test_dir="$HOME/.pane_$NAME"

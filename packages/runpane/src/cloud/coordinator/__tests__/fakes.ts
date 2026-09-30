@@ -49,6 +49,7 @@ export function entry(sessionId: string, sandboxId: string, overrides: Partial<D
     pinnedVersion: null,
     coordinatorToken: `token-${sessionId}`,
     org: null,
+    githubRepos: [],
     ...overrides,
   };
 }

@@ -92,6 +92,11 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
     pushCoordinatorDirectory: (directory) => pushToCoordinator(store.coordinatorClientPath, directory),
     wakeViaCoordinator: (sessionId, timeoutMs) => wakeViaCoordinator(store.coordinatorClientPath, sessionId, timeoutMs),
     packCoordinatorApp,
+    async callCoordinatorApi(method, pathAndQuery, body, timeoutMs) {
+      const client = readClientConfig(store.coordinatorClientPath);
+      if (!client) throw new Error('No coordinator client is configured: run runpane cloud coordinator deploy --yes.');
+      return callCoordinator(client, method, pathAndQuery, body, timeoutMs);
+    },
     probeCoordinatorHealth,
     async invokeDaemon(profile, channel, args, timeoutMs) {
       const client = new RemoteDaemonClient({ profile, runtimeId: 'runpane-cloud', clientLabel: 'runpane cloud' });

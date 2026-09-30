@@ -540,6 +540,10 @@
         "cloud coordinator stop",
         "cloud coordinator start",
         "cloud coordinator destroy",
+        "cloud coordinator github set",
+        "cloud coordinator github status",
+        "cloud coordinator github audit",
+        "cloud coordinator github unset",
         "cloud peers allow",
         "cloud peers revoke",
         "cloud peers list",
@@ -841,6 +845,18 @@
           "$ref": "#/$defs/helpLines"
         },
         "cloud coordinator destroy": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator github set": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator github status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator github audit": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator github unset": {
           "$ref": "#/$defs/helpLines"
         },
         "cloud peers allow": {

@@ -44,6 +44,8 @@ export interface DirectoryEntry {
   coordinatorToken: string | null;
   /** The boat wallet the Session's sandbox bills (org id or `personal`); null: the coordinator's own. */
   org: string | null;
+  /** owner/name repos this Session may use through the GitHub broker (`github.repos`); empty: none. */
+  githubRepos: string[];
 }
 
 export type DirectoryReadResult =

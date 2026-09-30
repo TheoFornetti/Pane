@@ -4,6 +4,7 @@ import type { CloudArgs } from './args';
 import type { JsonObject, JsonValue } from '../boundaryDecoder';
 import { placeAgentCredentials } from './agentCredentials';
 import { COORDINATOR_LIFECYCLE_USAGE, isCoordinatorLifecycleCommand, runCoordinatorLifecycle } from './coordinatorDeploy';
+import { COORDINATOR_GITHUB_USAGE, runCoordinatorGitHub } from './coordinatorGithub';
 import { NO_COORDINATOR, pushDirectory, type CoordinatorPushResult } from './coordinatorSync';
 import { syncDesktopProfiles, type DesktopImportResult } from './desktop';
 import { connectDeployKey, deployKeyCloneUrl, parseRepoSpec, revokeGitHubGrants, runGitCommand, runGitHubCommand } from './github';
@@ -56,6 +57,11 @@ export interface CloudDeps {
   wakeViaCoordinator(sessionId: string, timeoutMs: number): Promise<CoordinatorWakeResult | null>;
   /** Packs this CLI's own package (dist + package.json) as a base64 .tar.gz, for the coordinator sandbox. */
   packCoordinatorApp(): Promise<{ archiveBase64: string; version: string }>;
+  /**
+   * Calls the configured coordinator's API as this machine's `user:` caller. Rejects when no
+   * coordinator client is configured or it cannot be reached.
+   */
+  callCoordinatorApi?(method: 'GET' | 'POST' | 'PUT', pathAndQuery: string, body: JsonValue | undefined, timeoutMs: number): Promise<{ status: number; body: JsonValue }>;
   /** GET <coordinator>/health; never throws. */
   probeCoordinatorHealth(baseUrl: string): Promise<{ ok: boolean; status?: number; version?: string }>;
   /** Calls a cloud host's daemon over the tailnet with the saved (full) client token. */
@@ -117,7 +123,14 @@ export async function runCloudCommand(args: CloudArgs, deps: CloudDeps): Promise
     case 'sync': return runSync(args, deps);
     case 'coordinator':
       if (isCoordinatorLifecycleCommand(args.passthrough)) return runCoordinatorLifecycle(args.passthrough, deps);
-      if (['help', '--help', '-h', undefined].includes(args.passthrough[0])) deps.stdout(`${COORDINATOR_LIFECYCLE_USAGE}\n`);
+      if (args.passthrough[0] === 'github') {
+        if (['help', '--help', '-h', undefined].includes(args.passthrough[1])) {
+          deps.stdout(COORDINATOR_GITHUB_USAGE);
+          return 0;
+        }
+        return runCoordinatorGitHub(args.passthrough.slice(1), deps);
+      }
+      if (['help', '--help', '-h', undefined].includes(args.passthrough[0])) deps.stdout(`${COORDINATOR_LIFECYCLE_USAGE}\n${COORDINATOR_GITHUB_USAGE}\n`);
       if (!deps.runCoordinator) throw new Error('runpane cloud coordinator is not available in this build.');
       return deps.runCoordinator(args.passthrough);
     case 'peers': return runPeersCommand(args.passthrough, deps);

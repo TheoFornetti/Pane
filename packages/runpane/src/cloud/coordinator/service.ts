@@ -6,6 +6,15 @@ import type { CoordinatorConfig } from './config';
 import { readSecretFile } from './config';
 import { describeError, HttpDaemonProbe } from './daemonProbe';
 import { FileSessionDirectory } from './directory';
+import { JsonlGitHubAudit } from './github/audit';
+import { GitHubBroker } from './github/broker';
+import { GitHubAppCredential, GitHubPatCredential } from './github/credentials';
+import type { GitHubCredential } from './github/credentials';
+import { GitPusher } from './github/gitPush';
+import { createGitHubRest } from './github/rest';
+import type { FetchLike } from './github/rest';
+import { TailscaleWhois } from './github/whois';
+import type { WhoisResolver } from './github/whois';
 import type { DirectoryWriter } from './directory';
 import { RunawayGuard, SandboxActivity } from './guards';
 import { IdleStopper } from './idleStop';
@@ -25,11 +34,54 @@ export interface CoordinatorParts {
   probe: DaemonProbe;
   alerts: AlertSink;
   api: CoordinatorApi;
+  github: GitHubBroker;
+}
+
+interface CoordinatorOverrides extends Partial<Pick<CoordinatorParts, 'clock' | 'directory' | 'provider' | 'probe' | 'alerts'>> {
+  /** Test seams for the GitHub broker: who a tailnet address is, and GitHub's REST API. */
+  whois?: WhoisResolver;
+  githubFetch?: FetchLike;
+}
+
+/** The broker: off without a `github` config; a credential that fails to load is reported, not fatal. */
+export function buildGitHubBroker(
+  config: CoordinatorConfig,
+  clock: Clock,
+  directory: SessionDirectory,
+  overrides: Pick<CoordinatorOverrides, 'whois' | 'githubFetch'> = {},
+): GitHubBroker {
+  const github = config.github;
+  const rest = createGitHubRest(github?.apiBaseUrl ?? 'https://api.github.com', overrides.githubFetch);
+  let credential: GitHubCredential | null = null;
+  let credentialError: string | null = null;
+  if (github) {
+    try {
+      credential = github.mode === 'app'
+        ? new GitHubAppCredential({ appId: github.appId ?? '', privateKeyPem: readSecretFile(github.privateKeyFile ?? ''), installationId: github.installationId }, rest, clock)
+        : new GitHubPatCredential(readSecretFile(github.patFile ?? ''));
+    } catch (error) {
+      credentialError = describeError(error);
+      console.error(`[coordinator] github broker credential not loaded: ${credentialError}`);
+    }
+  }
+  return new GitHubBroker({
+    settings: github
+      ? { mode: github.mode, apiBaseUrl: github.apiBaseUrl, gitBaseUrl: github.gitBaseUrl, allowReadyPulls: github.allowReadyPulls, limits: github.limits }
+      : null,
+    credential,
+    credentialError,
+    rest,
+    git: new GitPusher(path.join(config.stateDir, 'github-git')),
+    directory,
+    whois: overrides.whois ?? new TailscaleWhois(clock),
+    audit: new JsonlGitHubAudit(path.join(config.stateDir, 'github-audit.jsonl'), clock),
+    clock,
+  });
 }
 
 export function buildCoordinator(
   config: CoordinatorConfig,
-  overrides: Partial<Pick<CoordinatorParts, 'clock' | 'directory' | 'provider' | 'probe' | 'alerts'>> = {},
+  overrides: CoordinatorOverrides = {},
 ): CoordinatorParts {
   const clock = overrides.clock ?? systemClock;
   const fileDirectory = new FileSessionDirectory(config.directoryFile);
@@ -81,7 +133,8 @@ export function buildCoordinator(
     reconcile: (options) => reconciler.runOnce(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
     idleCheck: (options) => idle.runOnce(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
   };
-  return { config, clock, directory, directoryWriter, provider, probe, alerts, api };
+  const github = buildGitHubBroker(config, clock, directory, overrides);
+  return { config, clock, directory, directoryWriter, provider, probe, alerts, api, github };
 }
 
 /** Runs `task` every `intervalMs`, never overlapping itself, until the returned stop function is called. */
@@ -124,9 +177,11 @@ export async function startCoordinator(
     revokedCallers: config.revokedCallers,
     version: options.version,
     log,
+    github: parts.github,
   });
   await listenWithRetry(server, config.listenHost, config.listenPort, options.listenRetryMs ?? 120_000, log);
   log(`[coordinator] listening on http://${config.listenHost}:${config.listenPort}`);
+  log(`[coordinator] github broker: ${config.github ? `${config.github.mode} mode, API ${config.github.apiBaseUrl}` : 'off'}`);
 
   const onError = (label: string) => (cause: unknown) => {
     alerts.emit({ level: 'error', code: `${label}-crashed`, message: describeError(cause) });

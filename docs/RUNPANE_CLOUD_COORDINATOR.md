@@ -124,6 +124,7 @@ Every `/cloud/*` call needs `Authorization: Bearer rpc1.<callerId>.<mac>`, where
 | `POST /cloud/idle-check {dryRun}` | user | run an idle-stop pass now |
 | `GET /cloud/alerts?limit=` | user | recent alerts |
 | `PUT /cloud/directory` | user | replace the directory. The laptop CLI is its single writer. |
+| `/cloud/github/*` | peer (bound to its node); user: `status`, `audit` | the GitHub broker, below |
 
 Failure responses have the form `{ok:false, code, message}`:
 
@@ -155,6 +156,122 @@ The directory is a JSON file on the coordinator (0600), written through `PUT /cl
   `runpane-cloud-coordinator`, and this is its token.
 - **User activity.** m2's safe-to-stop exempts every `runpane:cloud:*` invoke from the user-activity
   condition, so the coordinator's own calls never keep a Session awake.
+- **`github.repos`.** An optional `"github": {"repos": ["owner/name", …]}` per Session is its GitHub broker
+  allowlist. `runpane cloud` writes it from the host record's `meta.brokerRepos`; no repos means no broker access.
+
+## GitHub broker (`/cloud/github/*`)
+
+Cloud Sessions push branches and open pull requests, issues and comments **through the coordinator**, so no
+laptop is needed at runtime and no Session ever holds a credential that can write `master`. The code is in
+`packages/runpane/src/cloud/coordinator/github/` (Node standard library only; the App JWT is RS256 via
+`node:crypto`). It is off until you give the coordinator a credential.
+
+### Turning it on
+
+```sh
+runpane cloud coordinator github set --app-id <id> --private-key-file <app.pem>   # GitHub App (recommended)
+runpane cloud coordinator github set --pat-file <file>                            # or a fine-grained PAT
+runpane cloud coordinator github status          # mode, App, repositories, cached token expiry; never a token
+runpane cloud coordinator github audit           # recent broker calls
+runpane cloud coordinator github unset --yes     # off; the credential is shredded on the coordinator
+```
+
+`set` checks the credential with GitHub from your machine, then uploads it through the provider's files API
+to `~/.config/runpane-cloud-coordinator/github/app.pem` (or `pat`), 0600 in a 0700 directory. It is never on
+a command line, in the environment, in the provider's metadata or in this machine's settings. `set` then
+rewrites the config, restarts the unit and asks the broker whether it loaded. `coordinator deploy` rebuilds
+the config from the saved settings, so an in-place redeploy keeps the broker; the key file is left alone.
+
+- **App mode.** Validation finds the installation (pass `--installation-id` if there are several), lists
+  its repositories, and refuses an App that holds the Workflows, Administration or Secrets permission. The
+  coordinator mints a **1-hour installation token per call**, narrowed to that one repository and to the
+  permissions the call needs (for example `contents:write` for a push, `pull_requests:write` for a PR). It
+  keeps them in memory only, reuses each until 5 minutes before it expires, and never logs them.
+- **PAT mode.** Only fine-grained tokens (`github_pat_…`). Classic and OAuth tokens (`ghp_`, `gho_`, `ghu_`,
+  `ghs_`, `ghr_`) reach every repository you can and are refused, on the laptop and again on the coordinator.
+- **Fakes.** `--api-base-url` and `--git-base-url` point the broker at a fake GitHub (tests, and the live
+  proof on the coordinator's loopback). Use `--no-verify` when your machine can't reach that URL.
+- **Read paths.** `commits/:ref/status`, `commits/:ref/check-runs` and `actions/runs` need the App's
+  *Commit statuses*, *Checks* and *Actions* **read** permissions. Without them the broker refuses those
+  reads with `github-error` (403) before minting a token. Everything else needs only Contents, Issues and
+  Pull requests (read and write) plus Metadata.
+
+### Who may call
+
+Every `/cloud/github/*` call from a Session needs **both**:
+
+1. its own `rpc1` peer token (the `coordinator.token` already in the Session's `peers.json`), and
+2. a TCP source address that `tailscale whois` names as **that Session's node**: the StableID matches the
+   directory entry's `nodeId` (when set), the MagicDNS name matches the entry's `baseUrl` host, and the node
+   carries `tag:rp-session`.
+
+A token copied to another machine, including the coordinator itself or a tailnet member such as the
+laptop, gets 403 `caller-node-mismatch`. The binding runs before anything else, even for unknown endpoints.
+`tailscale whois` works for the coordinator's unprivileged user through tailscaled's read-only LocalAPI, so
+no `tailscale set --operator` is needed. User callers (`user:*`) may call only `status` and `audit`.
+
+### What a Session may do
+
+It is an allowlist: every other path answers 404 `not-found`. There is no merge, ref delete, release,
+settings, workflow dispatch, secret, collaborator or review endpoint.
+
+| Endpoint | Body | Policy |
+|---|---|---|
+| `GET status` | | mode, App, repositories, `caller` = `{sessionId, host, namespace, repos}` |
+| `POST token` | `{repo}` | App only: a `contents:read` token for that one repo (≤ 1 h), for fetch. PAT: 409 `read-token-unsupported` |
+| `POST push` | `{repo, branch, bundle?, sha?, force?}` | writes only `refs/heads/cloud/<host>/<branch>` (below) |
+| `POST pulls` | `{repo, branch, base?, title, body?, draft?}` | head is the caller's `cloud/<host>/<branch>`; **always a draft** unless `allowReadyPulls` |
+| `PATCH pulls/:n` | `{repo, title?, body?, state?}` | only PRs whose head is in the caller's namespace (same repo). Any other field, such as `draft` or `base`, is 403 |
+| `POST issues` | `{repo, title, body?, labels?}` | labels must already exist; unknown ones are dropped and reported |
+| `PATCH issues/:n` | `{repo, title?, body?, state?}` | only issues carrying the caller's marker |
+| `POST comments` | `{repo, number, body}` | any issue or PR in an allowed repo |
+| `GET read/<owner>/<name>/<path>` | | `issues`, `issues/:n`, `issues/:n/comments`, `pulls`, `pulls/:n`, `pulls/:n/files`, `pulls/:n/reviews`, `commits/:ref/status`, `commits/:ref/check-runs`, `actions/runs`; query keys `state, per_page, page, branch, head, base, sort, direction, labels, event, status, since` |
+
+- **Repositories.** Only those in the Session's directory entry (`github.repos`), else 403 `repo-not-allowed`.
+- **Namespace.** `<host>` is the Session's tailnet host name (the first label of its `baseUrl`). `feature` and
+  `cloud/<host>/feature` both mean `cloud/<host>/feature`. Any other `cloud/…` or `refs/…` name, and the
+  default branch, `main` and `master` as branch names, are 403 `ref-outside-namespace`. Tags and deletes can't
+  be expressed. `force` is allowed because the target is always the caller's own branch.
+- **Workflow files.** The coordinator keeps a blobless mirror of each repository's default branch under
+  `<stateDir>/github-git/`. It imports the Session's bundle there and computes the merge base of the bundle's
+  head with the default branch. Any path under `.github/workflows/` that differs between the two is 403
+  `workflow-change-refused`, and nothing is pushed. GitHub itself also refuses workflow changes from a
+  credential without the Workflows permission, commit by commit. That refusal gets the same code.
+- **Bundles.** `git bundle create - refs/heads/<b> --not origin/<default>` (exactly one ref, at most 50 MiB).
+  Prerequisites the coordinator lacks are fetched from GitHub by id; a bundle built on commits GitHub doesn't
+  have is 400. Without a bundle, `sha` must name a commit GitHub already has.
+- **Marker.** PR, issue and comment bodies get the footer
+  `Opened by runpane cloud Session <label> (<host>). <!-- runpane-cloud:<sessionId> -->`. Markers already in
+  the caller's text are removed first, so a Session can't claim or hand out ownership.
+- **Rate limits** (config `github.limits`): per Session 20 pushes, 60 other writes and 600 reads an hour;
+  300 writes an hour across all Sessions. Over a limit: 429 `broker-rate-limited`. GitHub's own limit:
+  429 `github-rate-limited`.
+
+Errors are `{ok:false, code, message}`, plus `githubStatus` and `githubMessage` when GitHub answered:
+`github-disabled` 503, `repo-not-allowed`, `ref-outside-namespace`, `workflow-change-refused`, `not-owner`,
+`caller-node-mismatch` and `forbidden` 403, `not-found` 404, `read-token-unsupported` and
+`non-fast-forward` 409, `bad-request` 400, `too-large` 413, `github-rate-limited` and
+`broker-rate-limited` 429, `github-error` 502.
+
+### Audit
+
+`<stateDir>/github-audit.jsonl` (0600) gets one line per call: time, caller, label, node (name and
+StableID, or the source address), endpoint, repository, target (branch or number), outcome or error code,
+HTTP status, GitHub id and URL, bundle head and size, and title and body **lengths**. It never holds tokens
+or text. Refused calls record what was asked for. Read it with `runpane cloud coordinator github audit`.
+
+### Config
+
+```json
+"github": { "mode": "app", "appId": "123456", "privateKeyFile": "…/github/app.pem", "installationId": null,
+            "allowReadyPulls": false, "apiBaseUrl": "https://api.github.com", "gitBaseUrl": "https://github.com",
+            "limits": { "pushesPerSessionPerHour": 20, "writesPerSessionPerHour": 60,
+                        "readsPerSessionPerHour": 600, "writesPerHour": 300 } }
+```
+
+`runpane cloud coordinator github set` writes it; `null` or no `github` key means the broker is off. A
+credential that fails to load, such as a classic token in `patFile`, leaves the broker off; `status` shows
+the reason, and the rest of the coordinator keeps running.
 
 ## Setting it up
 

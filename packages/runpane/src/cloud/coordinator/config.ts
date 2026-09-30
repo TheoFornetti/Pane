@@ -52,6 +52,27 @@ export interface CoordinatorConfig {
   };
   alerts: { webhookUrl: string | null };
   revokedCallers: string[];
+  /** The GitHub broker (phase3-design.md); null: off. The credential files are 0600 on this machine. */
+  github: GitHubConfig | null;
+}
+
+interface GitHubConfig {
+  mode: 'app' | 'pat';
+  appId: string | null;
+  privateKeyFile: string | null;
+  installationId: number | null;
+  patFile: string | null;
+  /** https://api.github.com, or a fake's URL for tests and the live proof without GitHub. */
+  apiBaseUrl: string;
+  /** https://github.com (git smart HTTP), or a fake's. */
+  gitBaseUrl: string;
+  allowReadyPulls: boolean;
+  limits: {
+    pushesPerSessionPerHour: number;
+    writesPerSessionPerHour: number;
+    readsPerSessionPerHour: number;
+    writesPerHour: number;
+  };
 }
 
 const optionalNumber = boundary.optional(boundary.number);
@@ -106,7 +127,55 @@ const rawConfigSchema = boundary.object({
   })),
   alerts: boundary.optional(boundary.object({ webhookUrl: optionalNullableString })),
   revokedCallers: boundary.optional(boundary.array(boundary.string)),
+  github: boundary.optional(boundary.nullable(boundary.object({
+    mode: boundary.enumeration('app', 'pat'),
+    appId: optionalNullableString,
+    privateKeyFile: optionalNullableString,
+    installationId: boundary.optional(boundary.nullable(boundary.number)),
+    patFile: optionalNullableString,
+    apiBaseUrl: optionalString,
+    gitBaseUrl: optionalString,
+    allowReadyPulls: optionalBoolean,
+    limits: boundary.optional(boundary.object({
+      pushesPerSessionPerHour: optionalNumber,
+      writesPerSessionPerHour: optionalNumber,
+      readsPerSessionPerHour: optionalNumber,
+      writesPerHour: optionalNumber,
+    })),
+  }))),
 });
+
+type RawGitHubConfig = NonNullable<ReturnType<typeof rawConfigSchema.decode>['github']>;
+
+function httpUrl(value: string | undefined, fallback: string, name: string): string {
+  const url = (value ?? fallback).replace(/\/+$/, '');
+  if (!/^https?:\/\/[^\s/]+/u.test(url)) throw new Error(`coordinator config: github.${name} must be an http(s) URL`);
+  return url;
+}
+
+function parseGitHubConfig(raw: RawGitHubConfig | null | undefined): GitHubConfig | null {
+  if (!raw) return null;
+  if (raw.mode === 'app' && (!raw.appId || !raw.privateKeyFile)) {
+    throw new Error('coordinator config: github mode "app" needs appId and privateKeyFile');
+  }
+  if (raw.mode === 'pat' && !raw.patFile) throw new Error('coordinator config: github mode "pat" needs patFile');
+  return {
+    mode: raw.mode,
+    appId: raw.mode === 'app' ? raw.appId ?? null : null,
+    privateKeyFile: raw.mode === 'app' ? raw.privateKeyFile ?? null : null,
+    installationId: raw.mode === 'app' ? raw.installationId ?? null : null,
+    patFile: raw.mode === 'pat' ? raw.patFile ?? null : null,
+    apiBaseUrl: httpUrl(raw.apiBaseUrl, 'https://api.github.com', 'apiBaseUrl'),
+    gitBaseUrl: httpUrl(raw.gitBaseUrl, 'https://github.com', 'gitBaseUrl'),
+    allowReadyPulls: raw.allowReadyPulls ?? false,
+    limits: {
+      pushesPerSessionPerHour: positive(raw.limits?.pushesPerSessionPerHour, 20, 'github.limits.pushesPerSessionPerHour'),
+      writesPerSessionPerHour: positive(raw.limits?.writesPerSessionPerHour, 60, 'github.limits.writesPerSessionPerHour'),
+      readsPerSessionPerHour: positive(raw.limits?.readsPerSessionPerHour, 600, 'github.limits.readsPerSessionPerHour'),
+      writesPerHour: positive(raw.limits?.writesPerHour, 300, 'github.limits.writesPerHour'),
+    },
+  };
+}
 
 export function defaultCoordinatorHome(): string {
   return path.join(os.homedir(), '.config', 'runpane-cloud-coordinator');
@@ -173,6 +242,7 @@ export function parseCoordinatorConfig(value: JsonValue, home = defaultCoordinat
     },
     alerts: { webhookUrl: raw.alerts?.webhookUrl ?? null },
     revokedCallers: raw.revokedCallers ?? [],
+    github: parseGitHubConfig(raw.github),
   };
 }
 

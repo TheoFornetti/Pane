@@ -31,6 +31,7 @@ async function buildCoordinatorDirectory(records: readonly CloudHostRecord[], ge
       pinnedVersion: record.meta.pinnedVersion ?? null,
       coordinatorToken: await readCoordinatorToken(record.meta.coordinatorPairingPath),
       org: record.meta.boatOrg?.id ?? null,
+      github: { repos: record.meta.brokerRepos ?? [] },
     });
   }
   return { version: 1, generatedAt: generatedAt.toISOString(), sessions };

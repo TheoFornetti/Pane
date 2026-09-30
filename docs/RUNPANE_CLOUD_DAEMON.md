@@ -118,3 +118,13 @@ with `ERR_PORTS_UNAVAILABLE`, so a laptop's tailnet name is never touched.
   set of repositories changes. It reads each repository's `.runpane/ports.json`, re-applies lost entries, never
   removes a Serve entry it did not make, and at boot requests every URL and logs the answer. Detection reads
   `/proc/net/tcp{,6}` every 5 s and keeps listeners whose process descends from a panel's PTY.
+
+## Agent notes for Session ports
+
+At start, a daemon on a Runpane Cloud Session (`/etc/rp-cloud/serve.json` exists) keeps a marked block
+(`<!-- runpane-cloud-ports:start -->` … `<!-- runpane-cloud-ports:end -->`) in `~/.claude/CLAUDE.md` and
+`~/.codex/AGENTS.md`. The block tells agents to publish what they serve with `runpane port open <port> --name
+<name>` and to paste the printed `https://` URL instead of a `localhost` one. The daemon writes it only when the
+text differs, keeps everything else in those files (including the CLI's `runpane-cloud-github` and
+`runpane-cloud-secrets` blocks), and never writes it off a Session. Because the daemon writes it, an upgraded
+Session gets the current text without `runpane cloud repair`. Code: `main/src/daemon/cloud/sessionAgentNotes.ts`.

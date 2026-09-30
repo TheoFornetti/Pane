@@ -1658,7 +1658,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "port open",
-      "summary": "Inside a Runpane Cloud Session: publish a local service (127.0.0.1:<port>) as a tailnet-only HTTPS URL on the Session's own name (Tailscale Serve, never Funnel). Kept across daemon restarts, sleep and wake.",
+      "summary": "Inside a Runpane Cloud Session: publish a local service (127.0.0.1:<port>) as a tailnet-only HTTPS URL on the Session's own name (Tailscale Serve, never Funnel) and print the URL to share. Kept across daemon restarts, sleep and wake. From your laptop: runpane cloud port open <host> <port>.",
       "usage": [
         "runpane port open <port> [--name <name>] [--https-port <port>] [--path </path>] [--scheme <auto|https|http>] [--yes] [--json] [--pane-dir <path>]"
       ],
@@ -1701,7 +1701,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "cloud port open",
-      "summary": "Publish a service running in a cloud Session as a tailnet-only HTTPS URL on the Session's name (https://<host>.<tailnet>.ts.net:<port>/).",
+      "summary": "Publish a service running in a cloud Session as a tailnet-only HTTPS URL on the Session's name (https://<host>.<tailnet>.ts.net:<port>/; Tailscale Serve, never Funnel). Kept across restarts, sleep and wake.",
       "usage": [
         "runpane cloud port open <host> <port> [--name <name>] [--https-port <port>] [--path </path>] [--scheme <auto|https|http>] [--yes] [--json]"
       ],
@@ -1712,7 +1712,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "cloud port list",
-      "summary": "List a cloud Session's published ports with their URLs, checks each URL from this machine, and shows suggested ports.",
+      "summary": "List a cloud Session's published ports with their URLs (each one checked from this machine), its suggested ports and its repositories' .runpane/ports.json manifests.",
       "usage": [
         "runpane cloud port list <host> [--json]"
       ],
@@ -1722,7 +1722,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "cloud port close",
-      "summary": "Stop publishing a cloud Session's port.",
+      "summary": "Stop publishing a cloud Session's port (by local port or name). A manifest port stays closed until opened again.",
       "usage": [
         "runpane cloud port close <host> <port|name> [--json]"
       ],
@@ -2418,6 +2418,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]",
         "  runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]",
         "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|agent> [options]",
+        "  runpane port <open|list|close|auto-open> [options]",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -3936,14 +3937,14 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane port open <port> [--name <name>] [--https-port <port>] [--path </path>] [--scheme <auto|https|http>] [--yes] [--json] [--pane-dir <path>]",
         "",
-        "Inside a Runpane Cloud Session: publish a local service (127.0.0.1:<port>) as a tailnet-only HTTPS URL on the Session's own name (Tailscale Serve, never Funnel). Kept across daemon restarts, sleep and wake.",
+        "Inside a Runpane Cloud Session: publish a local service (127.0.0.1:<port>) as a tailnet-only HTTPS URL on the Session's own name (Tailscale Serve, never Funnel) and print the URL to share. Kept across daemon restarts, sleep and wake. From your laptop: runpane cloud port open <host> <port>.",
         "",
         "Options:",
         "  <port>                       The local port the service listens on (127.0.0.1 or 0.0.0.0).",
         "  --name <name>                A short name (default port-<port>).",
-        "  --https-port <port>          The tailnet port of the URL (default: the same port; 443 stays Pane's).",
-        "  --path </path>               Path shown in the URL (the service is mounted at /).",
-        "  --scheme <auto|https|http>   auto (default): HTTPS, or plain HTTP inside the tailnet when the name has no TLS certificate.",
+        "  --https-port <port>          The tailnet port of the URL (default: the same port; 443 and the daemon's port stay Pane's).",
+        "  --path </path>               Path shown in the link (the service is still served from /).",
+        "  --scheme <auto|https|http>   auto (default): HTTPS, or plain HTTP inside the tailnet when the Session's name has no TLS certificate.",
         "  --yes                        Replace another Tailscale Serve entry on that tailnet port (e.g. a plain tcp forward).",
         "  --json                       Print JSON output."
       ],
@@ -3981,23 +3982,23 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane cloud port open <host> <port> [--name <name>] [--https-port <port>] [--path </path>] [--scheme <auto|https|http>] [--yes] [--json]",
         "",
-        "Publish a service running in a cloud Session as a tailnet-only HTTPS URL on the Session's name (https://<host>.<tailnet>.ts.net:<port>/).",
+        "Publish a service running in a cloud Session as a tailnet-only HTTPS URL on the Session's name (https://<host>.<tailnet>.ts.net:<port>/; Tailscale Serve, never Funnel). Kept across restarts, sleep and wake.",
         "",
         "Options:",
         "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
         "  <port>                         The local port in the Session.",
         "  --name <name>                  A short name (default port-<port>).",
-        "  --https-port <port>            The tailnet port of the URL (default: the same port).",
-        "  --path </path>                 Path shown in the URL.",
-        "  --scheme <auto|https|http>     auto (default) falls back to plain HTTP inside the tailnet when the name has no certificate.",
-        "  --yes                          Replace another Tailscale Serve entry on that tailnet port.",
+        "  --https-port <port>            The tailnet port of the URL (default: the same port; 443 and the daemon's port stay Pane's).",
+        "  --path </path>                 Path shown in the link (the service is still served from /).",
+        "  --scheme <auto|https|http>     auto (default): HTTPS, or plain HTTP inside the tailnet when the Session's name has no TLS certificate.",
+        "  --yes                          Replace another Tailscale Serve entry on that tailnet port (e.g. a plain tcp forward).",
         "  --json                         Print machine-readable output."
       ],
       "cloud port list": [
         "Usage:",
         "  runpane cloud port list <host> [--json]",
         "",
-        "List a cloud Session's published ports with their URLs, checks each URL from this machine, and shows suggested ports.",
+        "List a cloud Session's published ports with their URLs (each one checked from this machine), its suggested ports and its repositories' .runpane/ports.json manifests.",
         "",
         "Options:",
         "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
@@ -4007,7 +4008,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane cloud port close <host> <port|name> [--json]",
         "",
-        "Stop publishing a cloud Session's port.",
+        "Stop publishing a cloud Session's port (by local port or name). A manifest port stays closed until opened again.",
         "",
         "Options:",
         "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
@@ -16428,13 +16429,13 @@ export const RUNPANE_CONTRACT = {
             "name": "--https-port",
             "value": "<port>",
             "required": false,
-            "description": "The tailnet port of the URL (default: the same port; 443 stays Pane's)."
+            "description": "The tailnet port of the URL (default: the same port; 443 and the daemon's port stay Pane's)."
           },
           {
             "name": "--path",
             "value": "</path>",
             "required": false,
-            "description": "Path shown in the URL; the service is mounted at /."
+            "description": "Path shown in the link (the service is still served from /)."
           },
           {
             "name": "--scheme",
@@ -16582,13 +16583,13 @@ export const RUNPANE_CONTRACT = {
             "name": "--https-port",
             "value": "<port>",
             "required": false,
-            "description": "The tailnet port of the URL (default: the same port; 443 stays Pane's)."
+            "description": "The tailnet port of the URL (default: the same port; 443 and the daemon's port stay Pane's)."
           },
           {
             "name": "--path",
             "value": "</path>",
             "required": false,
-            "description": "Path shown in the URL; the service is mounted at /."
+            "description": "Path shown in the link (the service is still served from /)."
           },
           {
             "name": "--scheme",
@@ -16639,7 +16640,7 @@ export const RUNPANE_CONTRACT = {
       },
       "cloud port close": {
         "name": "cloud port close",
-        "summary": "Stop publishing a cloud Session's port.",
+        "summary": "Stop publishing a cloud Session's port (by local port or name). A manifest port stays closed until opened again.",
         "details": "Calls the Session daemon's runpane:ports:close. The Session must be awake.",
         "requiresPaneDaemon": false,
         "mutates": true,

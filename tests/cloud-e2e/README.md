@@ -26,14 +26,16 @@ Gates never read daemon internals (SQLite, config files) except where a check is
 | `lib/provision.sh` | Manual cloud-Session fixture (provider + Tailscale + published daemon installer), for M0 and for build-pinned M2/M3 runs |
 | `lib/cli.sh` | Resolves the `runpane` CLI under test and isolates its cloud config per run |
 | `lib/fixtures.sh` | In-sandbox Pane fixtures through the `runpane` CLI |
+| `gates/integration.sh` | **Combined M1 + M2-resume + M3 on shared sandboxes (~5 boat starts)**: the batched gate for integration heads |
 | `gates/m0-harness.sh` | M0 facts + harness proof |
 | `gates/m1-cli.sh` | M1: `runpane cloud setup/new/status/stop/wake/destroy` |
 | `gates/m1-golden.sh` | M1: a fork of the golden image has none of the strip-list files |
 | `gates/m2-resume.sh` | M2: `panels submit` to the same panel after a daemon restart and after a boat power-off |
 | `gates/m2-safestop.sh` | M2: safe-to-stop refuses in each of the 6 conditions; flush survives a power-off; `/health` version + readiness |
 | `gates/m3-peers.sh` | M3: peer submit lands framed in the orchestrator panel; shell/events/WS/non-allowlisted → 403; idempotency |
-| `gates/m4-coordinator.sh` | M4: reconciler never destroys; idle-stop respects safe-to-stop; `/cloud/wake` brings a Session back |
-| `run-gates.sh` | Runs a list of gates and refreshes the matrix |
+| `gates/m4-coordinator.sh` | M4: reconciler never destroys; idle-stop through the `serve` loop respects safe-to-stop; `/cloud/status` never wakes; `/cloud/wake`; runaway guard |
+| `run-gates.sh` | Runs a list of gates from a snapshot copy (edits never corrupt a running run) and refreshes the matrix |
+| `sweep.sh` | Deletes stray `rp-loop-e2e-*` sandboxes and tailnet devices after an aborted run |
 | `morning-smoke.sh` | One command for a user to prove their own setup end to end |
 
 ## Running
@@ -41,7 +43,7 @@ Gates never read daemon internals (SQLite, config files) except where a check is
 ```bash
 tests/cloud-e2e/gates/m0-harness.sh                       # harness proof on runpane@latest
 E2E_DAEMON_DEB_URL=<fork .deb> tests/cloud-e2e/gates/m2-resume.sh
-tests/cloud-e2e/run-gates.sh m1-cli m2-resume m2-safestop # a set, then refresh the matrix
+tests/cloud-e2e/run-gates.sh integration m2-safestop m4-coordinator morning-smoke   # the full batched matrix
 KEEP=1 tests/cloud-e2e/gates/m1-cli.sh                    # leave the sandbox up for inspection
 ```
 
@@ -70,3 +72,10 @@ the end of the run; evidence files are scanned and redacted before the run exits
 Every sandbox a run creates is named `rp-loop-e2e-*` and listed in the run's `resources.txt`.
 On exit the run deletes the tailnet devices first (M0: `tailscale logout` does not remove tagged
 devices), then the sandboxes. `KEEP=1` skips teardown and prints what was left.
+
+## Boat start budget
+
+boat limits sandbox starts (create, fork, resume) per account: 12/min, 60/hour, 200/day. Every gate reads
+`GET /limits` before it starts anything: it waits when the hour is used up and records BLOCKED (starting nothing)
+when the day's remaining starts would drop below the reserve (`E2E_DAY_RESERVE`, default 25). The full matrix
+(`integration`, `m2-safestop`, `m4-coordinator` with `E2E_M4_SKIP_RECONCILE=1`, `morning-smoke`, `m1-golden`) costs 12 starts.

@@ -225,7 +225,7 @@ runpane cloud coordinator status                # the coordinator itself: sandbo
 runpane cloud coordinator stop --yes            # pause idle-stop and wake-on-submit (billing stops)
 runpane cloud coordinator start                 # bring it back (one boat start)
 runpane cloud coordinator deploy --yes          # run again to update it in place; no new sandbox
-runpane cloud coordinator destroy --yes         # device, sandbox and scoped key; Sessions untouched
+runpane cloud coordinator destroy --yes         # device and sandbox; Sessions untouched (see below for the key)
 
 runpane cloud coordinator status "api work"     # its view of one Session, without waking it
 runpane cloud coordinator wake "api work"
@@ -240,6 +240,9 @@ reconciler off; `--pin-version <v> --pin-deb-url <url> --pin-deb-sha256 <hex>` p
 every Session the coordinator wakes is upgraded to it before it counts as awake (`--no-pin` removes the
 pin). While the coordinator is stopped, idle Sessions just stay awake and only `runpane cloud wake` wakes
 a sleeping one.
+
+boat only lets its dashboard revoke API keys, so `destroy` can't revoke the coordinator's scoped key: it
+prints the key id, and you revoke it under API Keys in boat's dashboard (it also expires on its own).
 <!-- coordinator-deploy:end -->
 
 ## 7. Let one Session message another (peers)

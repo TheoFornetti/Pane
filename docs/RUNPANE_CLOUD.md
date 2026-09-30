@@ -185,11 +185,14 @@ The coordinator is a small always-on service on its own boat `small` sandbox in 
 
 - stops cloud Sessions that are idle: it asks each daemon's safe-to-stop, which refuses while an agent is
   working, a terminal printed output recently, a lock is held, a watcher is active, a PR has pending
-  checks, or a desktop or phone client is attached;
+  checks, or a desktop or phone client is attached (pending PR checks need a signed-in `gh` in the
+  Session; without one that check can't see anything and doesn't block);
 - stops (never destroys) managed sandboxes that are not in your directory, and alerts;
 - answers `/cloud/wake`, so `runpane --host <asleep Session> panels submit` and peer Sessions can wake a
   sleeping Session;
-- holds only a scoped boat key (read, stop, resume). Creating and deleting stay on your laptop.
+- holds a scoped boat key (read, stop, resume; creating and deleting stay on your laptop) and, for each
+  Session, a coordinator-scoped Pane token that can only ask safe-to-stop and run the pinned upgrade. It
+  can't reach panels, shells or the event stream.
 
 <!-- coordinator-deploy:start -->
 The one-command `runpane cloud coordinator deploy` is not in this build yet. The manual steps are in

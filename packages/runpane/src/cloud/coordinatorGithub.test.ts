@@ -191,22 +191,31 @@ test('github set warns about an over-privileged App (but proceeds: every token i
     const warning = harness.err.find((line) => line.startsWith('WARNING: the App is granted more than the broker uses'));
     assert.ok(warning, harness.err.join('\n'));
     for (const extra of ['actions:write', 'statuses:write', 'gists:write', 'merge_queues:write', 'issue_fields:write', 'issue_types:write', 'organization_events:read']) assert.ok(warning.includes(extra), extra);
-    assert.equal(JSON.parse(harness.out[harness.out.length - 1]).warnings.length, 1);
+    // The excess grant, and acme/app not granted to any Session yet.
+    assert.equal(JSON.parse(harness.out[harness.out.length - 1]).warnings.length, 2);
   });
 });
 
-test('github set refuses an App installed on all repositories, or reaching repos beyond --expect-repos', async () => {
+test('github set refuses an App installed on all repositories; a wider selected list is only warned about', async () => {
   await withFakeApp({ repositorySelection: 'all' }, async (setUp) => {
     const { code } = await setUp([]);
     assert.ok(code instanceof Error && /installed on ALL repositories/u.test(code.message), String(code));
   });
-  await withFakeApp({ repos: ['acme/app', 'acme/secret-sauce'] }, async (setUp) => {
-    const refused = await setUp(['--expect-repos', 'acme/app']);
-    assert.ok(refused.code instanceof Error && /reaches acme\/secret-sauce, beyond --expect-repos acme\/app/u.test(refused.code.message), String(refused.code));
-    assert.equal(refused.harness.world.files.size > 0 && [...refused.harness.world.files.keys()].some((key) => key.endsWith('/github-credential')), false, 'nothing uploaded');
-    const accepted = await setUp(['--expect-repos', 'ACME/app,acme/secret-sauce,acme/missing']);
-    assert.equal(accepted.code, 0);
-    assert.ok(accepted.harness.err.some((line) => line.startsWith('WARNING: the installation does not include acme/missing')));
+  // Red's real shape: selected [montlakev2, Pane] with extra write permissions -> accepted with warnings.
+  await withFakeApp({ permissions: OVER_PRIVILEGED, repos: ['jamari-morrison/montlakev2', 'jamari-morrison/Pane'] }, async (setUp) => {
+    const { code, harness } = await setUp(['--expect-repos', 'jamari-morrison/montlakev2', '--json']);
+    assert.equal(code, 0);
+    const warnings: string[] = JSON.parse(harness.out[harness.out.length - 1]).warnings;
+    assert.ok(warnings.some((line) => line.includes('also reaches jamari-morrison/Pane, beyond --expect-repos jamari-morrison/montlakev2')), warnings.join('\n'));
+    assert.ok(warnings.some((line) => line.includes('which no cloud Session is granted')), warnings.join('\n'));
+    assert.ok(warnings.some((line) => line.includes('actions:write')), warnings.join('\n'));
+    assert.ok(harness.err.filter((line) => line.startsWith('WARNING: ')).length >= 3);
+    assert.ok([...harness.world.files.keys()].some((key) => key.endsWith('/github-credential')), 'credential uploaded');
+  });
+  await withFakeApp({ repos: ['acme/app'] }, async (setUp) => {
+    const { code, harness } = await setUp(['--expect-repos', 'ACME/app,acme/missing']);
+    assert.equal(code, 0);
+    assert.ok(harness.err.some((line) => line.startsWith('WARNING: the installation does not include acme/missing')));
   });
   await withFakeApp({ permissions: { contents: 'read', metadata: 'read', administration: 'read' } }, async (setUp) => {
     const { code } = await setUp([]);

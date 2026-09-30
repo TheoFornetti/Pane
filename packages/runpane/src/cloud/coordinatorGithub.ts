@@ -29,7 +29,7 @@ interface GitHubArgs {
   installationId?: number;
   patFile?: string;
   repos: string[];
-  /** App mode: refuse an installation that reaches any other repository. */
+  /** App mode: warn when the installation reaches any other repository. */
   expectRepos?: string[];
   allowReadyPulls?: boolean;
   apiBaseUrl?: string;
@@ -179,7 +179,7 @@ const errorSchema = boundary.object({ message: boundary.optional(boundary.string
 
 type BrokerStatus = ReturnType<typeof brokerStatusSchema.decode>;
 
-async function verifyApp(args: GitHubArgs, pem: string): Promise<Verified> {
+async function verifyApp(args: GitHubArgs, pem: string, deps: CloudDeps): Promise<Verified> {
   const rest = createGitHubRest(args.apiBaseUrl ?? 'https://api.github.com');
   const key = loadAppPrivateKey(pem);
   // Wall-clock time: GitHub checks the JWT's iat/exp against its own clock.
@@ -206,13 +206,23 @@ async function verifyApp(args: GitHubArgs, pem: string): Promise<Verified> {
   const token = decodeBoundary((await rest.request('POST', `/app/installations/${chosen.id}/access_tokens`, jwt(), { permissions: { metadata: 'read' } })).body, tokenSchema);
   const listed = decodeBoundary((await rest.request('GET', '/installation/repositories?per_page=100', token.token)).body, repositoriesSchema);
   const repos = listed.repositories.map((repo) => repo.full_name);
+  // A selected list wider than needed is only warned about: tokens are minted solely for repositories in
+  // the calling Session's allowlist (directory github.repos), one repository per token.
   const warnings: string[] = [];
+  const beyondList = (allowed: readonly string[]) => {
+    const set = new Set(allowed.map((repo) => repo.toLowerCase()));
+    return repos.filter((repo) => !set.has(repo.toLowerCase()));
+  };
   if (args.expectRepos) {
-    const expected = new Set(args.expectRepos.map((repo) => repo.toLowerCase()));
-    const beyond = repos.filter((repo) => !expected.has(repo.toLowerCase()));
-    if (beyond.length > 0) refusals.push(`it reaches ${beyond.join(', ')}, beyond --expect-repos ${args.expectRepos.join(',')}`);
+    const beyond = beyondList(args.expectRepos);
+    if (beyond.length > 0) warnings.push(`the installation also reaches ${beyond.join(', ')}, beyond --expect-repos ${args.expectRepos.join(',')}.`);
     const absent = args.expectRepos.filter((repo) => !repos.some((installed) => installed.toLowerCase() === repo.toLowerCase()));
     if (absent.length > 0) warnings.push(`the installation does not include ${absent.join(', ')} (--expect-repos); Sessions can't reach it until you add it.`);
+  }
+  const granted = (await deps.store.listHosts()).flatMap((record) => record.meta.brokerRepos ?? []);
+  const ungranted = beyondList(granted);
+  if (ungranted.length > 0) {
+    warnings.push(`the installation reaches ${ungranted.join(', ')}, which no cloud Session is granted (github.repos); the broker mints no token for them unless you grant one.`);
   }
   if (refusals.length > 0) {
     throw new Error(`Refusing GitHub App ${args.appId ?? ''} installation ${chosen.id}: ${refusals.join('; ')}. Fix it under the App's settings (Permissions & events, Install App) and rerun.`);
@@ -248,7 +258,7 @@ async function set(args: GitHubArgs, deps: CloudDeps): Promise<number> {
   let verified: Verified | null = null;
   if (args.verify) {
     progress(`runpane cloud: checking the ${mode === 'app' ? 'GitHub App' : 'PAT'} with GitHub${args.apiBaseUrl ? ` at ${args.apiBaseUrl}` : ''}...`);
-    verified = mode === 'app' ? await verifyApp(args, secret) : await verifyPat(args, secret, deps);
+    verified = mode === 'app' ? await verifyApp(args, secret, deps) : await verifyPat(args, secret, deps);
     for (const warning of verified.warnings) deps.stderr(`WARNING: ${warning}`);
   }
 

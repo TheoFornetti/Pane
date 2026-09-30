@@ -186,9 +186,11 @@ the config from the saved settings, so an in-place redeploy keeps the broker; th
   its repositories.
   - **Refused (exit 1, nothing uploaded):**
     - the App holds Workflows, Administration or Secrets (any level);
-    - the installation is on **all** repositories;
-    - with `--expect-repos owner/name[,…]`, the installation reaches any repository outside that list.
+    - the installation is on **all** repositories. An explicit *selected* list is fine, even a wide one.
   - **Warned:**
+    - selected repositories beyond `--expect-repos owner/name[,…]`, or not granted to any cloud Session
+      (`github.repos`). Tokens are only minted for repositories in the calling Session's allowlist, so
+      these are never used;
     - every other permission beyond what the broker uses (for example `actions:write`, `statuses:write`,
       `gists`, `merge_queues`, `organization_*`), printed as `WARNING:` lines;
     - an `--expect-repos` entry that isn't installed;

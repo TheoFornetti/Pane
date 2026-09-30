@@ -760,6 +760,9 @@ describe('GitHub broker with an over-privileged App installation', () => {
         // The only installation-wide token is describe()'s metadata-only one (it lists repositories).
         if (minted.repositories === null) assert.deepEqual(minted.requestedPermissions, { metadata: 'read' }, label);
       }
+      // acme/other is installed too, but no Session is granted it: no token ever names it.
+      await call('s1', 'GET', 'read/acme/other/pulls');
+      assert.ok(!h.fake.minted.some((minted) => minted.repositories?.includes('other')));
       // Reads of statuses/actions got read-only tokens despite the write grant.
       assert.ok(h.fake.minted.some((minted) => minted.requestedPermissions?.statuses === 'read'));
       assert.ok(h.fake.minted.some((minted) => minted.requestedPermissions?.actions === 'read'));

@@ -1,5 +1,5 @@
-export const DEFAULT_IDEMPOTENCY_WINDOW_MS = 10 * 60_000;
-export const DEFAULT_IDEMPOTENCY_MAX_KEYS = 2_000;
+const DEFAULT_IDEMPOTENCY_WINDOW_MS = 10 * 60_000;
+const DEFAULT_IDEMPOTENCY_MAX_KEYS = 2_000;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
 
 interface IdempotencyEntry<T> {

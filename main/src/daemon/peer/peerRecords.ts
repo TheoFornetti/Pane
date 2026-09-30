@@ -73,7 +73,7 @@ export function listPeers(config: RemoteDaemonConfig, sessionId?: string): PeerS
     .map(toPeerSummary);
 }
 
-export function findPeer(config: RemoteDaemonConfig, selector: string): RemoteDaemonClientRecord {
+function findPeer(config: RemoteDaemonConfig, selector: string): RemoteDaemonClientRecord {
   const trimmed = selector.trim();
   const peers = config.host.clients.filter(isPeerRecord);
   const byId = peers.find(record => record.id === trimmed);

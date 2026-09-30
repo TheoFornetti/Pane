@@ -9,7 +9,7 @@ const DEFAULT_API_BASE = 'https://api.tailscale.com/api/v2';
 
 export const CLOUD_SESSION_TAG = 'tag:rp-session';
 
-export interface TailscaleOAuthCredentials {
+interface TailscaleOAuthCredentials {
   clientId: string;
   clientSecret: string;
   /** Tailnet name; "-" (the default) means the OAuth client's own tailnet. */
@@ -23,13 +23,6 @@ export interface MintAuthKeyOptions {
   preauthorized?: boolean;
   expirySeconds?: number;
   description?: string;
-}
-
-export interface TailscaleAuthKey {
-  id: string;
-  /** The secret key. Callers hand it to the sandbox through a 0600 file and never print it. */
-  key: string;
-  expires?: string;
 }
 
 export interface TailscaleDevice {
@@ -46,7 +39,8 @@ export interface TailscaleDevice {
 }
 
 export interface TailscaleApi {
-  mintAuthKey(options?: MintAuthKeyOptions): Promise<TailscaleAuthKey>;
+  /** The returned `key` is secret: hand it to the sandbox through a 0600 file and never print it. */
+  mintAuthKey(options?: MintAuthKeyOptions): Promise<{ id: string; key: string; expires?: string }>;
   listDevices(): Promise<TailscaleDevice[]>;
   /** Devices whose OS hostname or MagicDNS short name equals `hostname`. */
   findDevicesByHostname(hostname: string): Promise<TailscaleDevice[]>;
@@ -139,7 +133,7 @@ export function createTailscaleApi(
   }
 
   return {
-    async mintAuthKey(options: MintAuthKeyOptions = {}): Promise<TailscaleAuthKey> {
+    async mintAuthKey(options: MintAuthKeyOptions = {}) {
       const tags = options.tags ?? [CLOUD_SESSION_TAG];
       if (tags.length === 0) {
         throw new TailscaleApiError('Cloud auth keys must carry at least one tag');

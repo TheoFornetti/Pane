@@ -191,7 +191,7 @@ EOF
     while [ "$(date +%s)" -lt "$end" ]; do
       a=$(ss -Htn "dst $S_TS_IP" 2>/dev/null | wc -l)
       s=$(sbx "$S_ID" 60 <<SH
-echo "t=\$(date -u +%T) sockets:"; ss -Htn state established | awk '{print \$4" -> "\$5}' | sort | uniq -c | sort -rn | head -12
+echo "t=\$(date -u +%T) sockets:"; ss -Htn state established | awk '{print \$3" -> "\$4}' | sort | uniq -c | sort -rn | head -12
 SH
 )
       { echo "agentbox->session established: $a"; printf '%s\n' "$s"; } >> "$E2E_RUN_DIR/agent-window-sockets.txt"

@@ -169,6 +169,30 @@ To start, stop, or delete the VM, use your provider's console or CLI. If
 something fails, run `npx --yes runpane@latest doctor --json` on the VM and
 check [Troubleshooting](#troubleshooting).
 
+### Restarts, reboots and stopped VMs
+
+The headless daemon treats every start as recovery from a power loss, because
+some providers stop a VM with a hard power-off and no `SIGTERM`:
+
+- **Agent panels come back on their own.** A Claude Code, Codex or Cursor panel
+  that was running when the daemon or VM stopped is marked `interrupted` and
+  started again as soon as the daemon starts, resuming the same conversation
+  (`claude --resume <id>`, `codex resume <id>`). Panes that are archived are
+  skipped. A Claude panel that never wrote a transcript (for example, it
+  stopped at a trust prompt) starts a new conversation instead.
+- **Other terminal panels start on first use.** A plain shell cannot be
+  resumed: its processes died with the daemon. `panels submit`, `panels input`,
+  `panels submit-composer` and `panels wait` start a fresh shell in the Pane's
+  worktree, then deliver the input. Commands that were running in it (a dev
+  server, a watch) do not restart by themselves.
+- **Recent output is kept.** The daemon saves the scrollback of panels with new
+  output every 10 seconds, so `panels screen` and `panels output` show what a
+  panel printed before the stop. Output from the last few seconds before a
+  power-off can be missing.
+- `runpane panels list --json` reports each terminal panel's `runState`
+  (`running`, `resuming`, `interrupted` or `stopped`) and whether a restart
+  resumes its conversation (`resumable`).
+
 ## Import Locally
 
 On your local desktop machine:

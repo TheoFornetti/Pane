@@ -36,13 +36,15 @@ if ($LASTEXITCODE -ne 0) { throw 'could not rewrite the pairing code' }
 Remove-Item $setupOut
 Write-Host "Wrote the fake host's pairing code to $PairingFile (not shown)"
 
-Start-Process -FilePath $Exe -ArgumentList "--daemon-headless --pane-dir `"$HostDir`"" -RedirectStandardOutput (Join-Path $HostDir 'daemon.out.txt') -RedirectStandardError (Join-Path $HostDir 'daemon.err.txt') | Out-Null
+# No output redirection: PowerShell would pump it, and the daemon dies of a broken pipe once this
+# script's PowerShell exits. The daemon writes its own log under $HostDir\logs.
+Start-Process -FilePath $Exe -ArgumentList "--daemon-headless --pane-dir `"$HostDir`"" | Out-Null
 $deadline = (Get-Date).AddSeconds(120)
 $healthy = $false
 while (-not $healthy -and (Get-Date) -lt $deadline) {
   try { $healthy = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$Port/health" -TimeoutSec 3).StatusCode -eq 200 } catch { Start-Sleep -Seconds 2 }
 }
-if (-not $healthy) { Get-Content (Join-Path $HostDir 'daemon.err.txt') -Tail 40 -ErrorAction SilentlyContinue; throw 'fake host daemon never answered /health' }
+if (-not $healthy) { Get-ChildItem (Join-Path $HostDir 'logs') -File -ErrorAction SilentlyContinue | Get-Content -Tail 40; throw 'fake host daemon never answered /health' }
 Write-Host "Fake host daemon healthy on 127.0.0.1:$Port"
 
 foreach ($name in 'Hello-World', 'montlakev2') {

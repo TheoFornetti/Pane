@@ -133,23 +133,25 @@ install_ts_state_guard() {
 STATE="${RP_TS_STATE:-/var/lib/tailscale/tailscaled.state}"
 DIR="${RP_TS_BACKUP_DIR:-/var/lib/rp-ts-backup}"
 BACKUP="$DIR/tailscaled.state"
+# Every action is also appended (in place) to events.log beside the backup, which survives resumes.
+say() { echo "rp-tailscale-state: $*"; mkdir -p "$DIR" && echo "$(date -u +%FT%TZ) boot=$(cut -c1-8 /proc/sys/kernel/random/boot_id) $*" >> "$DIR/events.log"; }
 valid() { [ -f "$1" ] && [ "$(stat -c %s "$1")" -ge 100 ] && python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$1" 2>/dev/null; }
 case "${1:-}" in
   backup)
-    valid "$STATE" || { echo "rp-tailscale-state: state missing or invalid; backup left as is"; exit 0; }
+    valid "$STATE" || { say "backup skipped: state missing or invalid ($(stat -c %s "$STATE" 2>/dev/null || echo missing) bytes)"; exit 0; }
     [ -f "$BACKUP" ] && cmp -s "$STATE" "$BACKUP" && exit 0
     mkdir -p "$DIR" && chmod 700 "$DIR"
     # cp into the existing file writes it in place: no temp file, no rename.
     [ -f "$BACKUP" ] || { : > "$BACKUP" && chmod 600 "$BACKUP"; }
     cp "$STATE" "$BACKUP" && chmod 600 "$BACKUP" && sync "$BACKUP" 2>/dev/null
-    echo "rp-tailscale-state: backed up ($(stat -c %s "$BACKUP") bytes)" ;;
+    say "backed up ($(stat -c %s "$BACKUP") bytes)" ;;
   restore)
-    valid "$STATE" && exit 0
-    valid "$BACKUP" || { echo "rp-tailscale-state: state invalid and no valid backup"; exit 0; }
+    valid "$STATE" && { say "restore check: state ok ($(stat -c %s "$STATE") bytes)"; exit 0; }
+    valid "$BACKUP" || { say "restore check: state invalid and no valid backup"; exit 0; }
     mkdir -p "$(dirname "$STATE")"
     cp "$BACKUP" "$STATE" && chmod 600 "$STATE" && sync "$STATE" 2>/dev/null
-    echo "rp-tailscale-state: RESTORED tailscaled.state from backup ($(stat -c %s "$STATE") bytes)" ;;
-  forget) rm -f "$BACKUP"; echo "rp-tailscale-state: backup removed" ;;
+    say "RESTORED tailscaled.state from backup ($(stat -c %s "$STATE") bytes)" ;;
+  forget) rm -f "$BACKUP"; say "backup removed" ;;
   *) echo "usage: rp-tailscale-state backup|restore|forget" >&2; exit 2 ;;
 esac
 GUARD

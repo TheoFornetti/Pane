@@ -67,8 +67,21 @@ rec mint PASS "B minted peer records for A (allowlisted to Session $B_SESSION) a
 cl remote pairing-mode "$PA" | jget 'd["baseUrl"]' | grep -q "$B_HOST" && rec peer-code-target PASS "A's code points at B's tailnet URL" || rec peer-code-target FAIL "A's code baseUrl is not B"
 tokfile() { (umask 077; python3 -c 'import sys,json;sys.path.insert(0,sys.argv[2]);import cloudlab;print(cloudlab.read_pairing(sys.argv[1])["token"])' "$1" "$E2E_LIB" > "$1.tok"); echo "$1.tok"; }
 PAT=$(tokfile "$PA"); PCT=$(tokfile "$PC")
-orch_count() {  # deliveries = framed user messages carrying the marker in the orchestrator's Claude transcript
-  sbx "$B_ID" 30 <<<"cat ~/.claude/projects/*/*.jsonl 2>/dev/null | grep -o 'peer message from [^]]*\] [a-z]* $1' | wc -l"; }
+orch_count() {  # deliveries = user-message entries in the orchestrator's Claude transcript carrying the framed marker
+  sbx "$B_ID" 30 <<SH
+cat ~/.claude/projects/*/*.jsonl 2>/dev/null | python3 -c "
+import sys, json
+n = 0
+for line in sys.stdin:
+    try: d = json.loads(line)
+    except Exception: continue
+    if d.get('type') != 'user' or d.get('isMeta'): continue
+    c = (d.get('message') or {}).get('content')
+    t = c if isinstance(c, str) else ' '.join(x.get('text', '') for x in (c or []) if isinstance(x, dict))
+    if 'peer message from' in t and '\$1' in t: n += 1
+print(n)"
+SH
+}
 orch_line() { sbx "$B_ID" 30 <<<"cat ~/.claude/projects/*/*.jsonl 2>/dev/null | grep -o '\[peer message from [^]]*\] [a-z]* $1' | head -1"; }
 peer_inv() { cl remote invoke "$B_PAIR" "$1" "$2" --token-file "$3"; }  # B's baseUrl, peer token
 

@@ -171,8 +171,21 @@ path = os.path.expanduser('~/.config/runpane-cloud/peers.json'); json.dump(doc, 
 PY
 shred -u /home/user/rcl/peer-b.code
 SH
-orch_count() {  # deliveries = framed user messages carrying the marker in the orchestrator's Claude transcript
-  sbx "$X_ID" 30 <<<"cat ~/.claude/projects/*/*.jsonl 2>/dev/null | grep -o 'peer message from [^]]*\] [a-z]* $1' | wc -l"; }
+orch_count() {  # deliveries = user-message entries in the orchestrator's Claude transcript carrying the framed marker
+  sbx "$X_ID" 30 <<SH
+cat ~/.claude/projects/*/*.jsonl 2>/dev/null | python3 -c "
+import sys, json
+n = 0
+for line in sys.stdin:
+    try: d = json.loads(line)
+    except Exception: continue
+    if d.get('type') != 'user' or d.get('isMeta'): continue
+    c = (d.get('message') or {}).get('content')
+    t = c if isinstance(c, str) else ' '.join(x.get('text', '') for x in (c or []) if isinstance(x, dict))
+    if 'peer message from' in t and '\$1' in t: n += 1
+print(n)"
+SH
+}
 orch_line() { sbx "$X_ID" 30 <<<"cat ~/.claude/projects/*/*.jsonl 2>/dev/null | grep -o '\[peer message from [^]]*\] [a-z]* $1' | head -1"; }
 lst=$(sbx "$A_ID" 60 <<<"/home/user/rcl/rp --host $X_HOST panels list --json"); printf '%s\n' "$lst" | ev a-panels-list.json >/dev/null
 ids=$(python3 -c 'import json,sys

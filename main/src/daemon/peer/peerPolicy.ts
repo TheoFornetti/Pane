@@ -1,4 +1,5 @@
 import type { RemoteDaemonClientRecord } from '../../../../shared/types/remoteDaemon';
+import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { JsonObject, JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 /**
@@ -11,8 +12,6 @@ export const PEER_ALLOWED_CHANNELS = [
   'runpane:panels:submit',
   'runpane:workspace:wait',
 ] as const;
-
-export type PeerAllowedChannel = typeof PEER_ALLOWED_CHANNELS[number];
 
 export const DEFAULT_PEER_SUBMIT_LIMIT = 10;
 export const DEFAULT_PEER_SUBMIT_WINDOW_MS = 60_000;
@@ -48,13 +47,32 @@ export function isPeerClient(client: Pick<RemoteDaemonClientRecord, 'scope'> | n
   return client?.scope === 'peer';
 }
 
-export function isPeerAllowedChannel(channel: string): channel is PeerAllowedChannel {
-  return (PEER_ALLOWED_CHANNELS as readonly string[]).includes(channel);
+const PEER_ALLOWED_CHANNEL_SET: ReadonlySet<string> = new Set(PEER_ALLOWED_CHANNELS);
+
+export function isPeerAllowedChannel(channel: string): boolean {
+  return PEER_ALLOWED_CHANNEL_SET.has(channel);
 }
 
 export function peerDenial(statusCode: number, code: string, message: string): PeerDenial {
   return { ok: false, statusCode, code, message };
 }
+
+const submitRequestSchema = boundary.object({
+  panelId: boundary.string,
+  input: boundary.string,
+  asFilePointer: boundary.optional(boundary.boolean),
+  idempotencyKey: boundary.optional(boundary.string),
+});
+const sessionScopeSchema = boundary.object({
+  session: boundary.optional(boundary.string),
+  paneId: boundary.optional(boundary.string),
+});
+const workspaceScopeSchema = boundary.object({
+  paneIds: boundary.optional(boundary.json),
+  excludePaneIds: boundary.optional(boundary.json),
+  repo: boundary.optional(boundary.json),
+  as: boundary.optional(boundary.string),
+});
 
 /**
  * Decide a peer invoke. Pure: callers supply the peer record and the current
@@ -76,19 +94,14 @@ export function authorizePeerInvoke(
     return peerDenial(403, 'ERR_PEER_NOT_ALLOWLISTED', 'This peer is not on any Session allowlist on this host.');
   }
 
-  const request = readRequestObject(args[0]);
+  const request = decodeOptionalBoundary(args[0] ?? {}, boundary.jsonObject);
   if (!request) {
     return peerDenial(400, 'ERR_PEER_BAD_REQUEST', `${channel} needs a request object.`);
   }
 
-  switch (channel) {
-    case 'runpane:panels:submit':
-      return authorizeSubmit(peer, request, allowedSessions);
-    case 'runpane:panels:list':
-      return authorizePanelList(request, allowedSessions);
-    case 'runpane:workspace:wait':
-      return authorizeWorkspaceWait(peer, request, allowedSessions);
-  }
+  if (channel === 'runpane:panels:submit') return authorizeSubmit(peer, request, allowedSessions);
+  if (channel === 'runpane:panels:list') return authorizePanelList(request, allowedSessions);
+  return authorizeWorkspaceWait(peer, request, allowedSessions);
 }
 
 function authorizeSubmit(
@@ -96,7 +109,11 @@ function authorizeSubmit(
   request: JsonObject,
   allowedSessions: readonly PeerSessionInfo[],
 ): PeerDecision {
-  const panelId = typeof request.panelId === 'string' ? request.panelId.trim() : '';
+  const submit = decodeOptionalBoundary(request, submitRequestSchema);
+  if (!submit) {
+    return peerDenial(400, 'ERR_PEER_BAD_REQUEST', 'Peer submit needs panelId and text input.');
+  }
+  const panelId = submit.panelId.trim();
   if (!allowedSessions.some(session => session.orchestratorPanelId === panelId)) {
     return peerDenial(
       403,
@@ -104,14 +121,11 @@ function authorizeSubmit(
       'Peers may submit only to the orchestrator panel of a Session that allowlists them.',
     );
   }
-  if (typeof request.input !== 'string') {
-    return peerDenial(400, 'ERR_PEER_BAD_REQUEST', 'Peer submit needs text input.');
-  }
 
-  return {
-    ok: true,
-    args: [{ ...request, panelId, input: framePeerMessage(peer.label, request.input) }],
-  };
+  const forwarded: JsonObject = { panelId, input: framePeerMessage(peer.label, submit.input) };
+  if (submit.asFilePointer !== undefined) forwarded.asFilePointer = submit.asFilePointer;
+  if (submit.idempotencyKey !== undefined) forwarded.idempotencyKey = submit.idempotencyKey;
+  return { ok: true, args: [forwarded] };
 }
 
 function authorizePanelList(request: JsonObject, allowedSessions: readonly PeerSessionInfo[]): PeerDecision {
@@ -130,7 +144,11 @@ function authorizeWorkspaceWait(
   request: JsonObject,
   allowedSessions: readonly PeerSessionInfo[],
 ): PeerDecision {
-  if (request.paneIds !== undefined || request.excludePaneIds !== undefined || request.repo !== undefined) {
+  const scope = decodeOptionalBoundary(request, workspaceScopeSchema);
+  if (!scope) {
+    return peerDenial(400, 'ERR_PEER_BAD_REQUEST', 'Workspace wait request is malformed.');
+  }
+  if (scope.paneIds !== undefined || scope.excludePaneIds !== undefined || scope.repo !== undefined) {
     return peerDenial(403, 'ERR_PEER_SCOPE_FORBIDDEN', 'Peers may wait on a whole allowlisted Session only.');
   }
   const selected = selectSession(request, allowedSessions);
@@ -138,22 +156,18 @@ function authorizeWorkspaceWait(
 
   const next: JsonObject = { ...request, session: selected.session.id };
   delete next.paneId;
-  if (typeof request.as === 'string' && request.as.length > 0) {
+  if (scope.as) {
     // Cursors are durable per name; a peer never shares one with local consumers.
-    next.as = `peer.${peer.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12)}.${request.as}`.slice(0, 128);
+    next.as = `peer.${peer.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12)}.${scope.as}`.slice(0, 128);
   }
   return { ok: true, args: [next] };
 }
 
-function selectSession(
-  request: JsonObject,
-  allowedSessions: readonly PeerSessionInfo[],
-): { ok: true; session: PeerSessionInfo } | PeerDenial {
-  const selector = typeof request.session === 'string' && request.session.trim()
-    ? request.session.trim()
-    : typeof request.paneId === 'string' && request.paneId.trim()
-      ? request.paneId.trim()
-      : undefined;
+type SessionSelection = { ok: true; session: PeerSessionInfo } | PeerDenial;
+
+function selectSession(request: JsonObject, allowedSessions: readonly PeerSessionInfo[]): SessionSelection {
+  const scope = decodeOptionalBoundary(request, sessionScopeSchema);
+  const selector = scope?.session?.trim() || scope?.paneId?.trim() || undefined;
   if (selector === undefined) {
     if (allowedSessions.length === 1) return { ok: true, session: allowedSessions[0] };
     return peerDenial(400, 'ERR_PEER_SESSION_REQUIRED', 'More than one Session allowlists this peer; name one with session.');
@@ -191,11 +205,6 @@ export function stripControlCharacters(text: string): string {
     if (!isControl) result += character;
   }
   return result;
-}
-
-function readRequestObject(value: JsonValue | undefined): JsonObject | null {
-  if (value === undefined || value === null) return {};
-  return typeof value === 'object' && !Array.isArray(value) ? value : null;
 }
 
 /** Sliding-window submit limit per peer record. */

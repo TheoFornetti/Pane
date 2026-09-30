@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import type {
+  PaneRemoteConnectionImportPayload,
   RemoteDaemonClientRecord,
   RemoteDaemonConfig,
   RemoteDaemonHostAccess,
@@ -15,6 +16,16 @@ export interface PeerSummary {
   lastUsedAt?: string;
   scope: 'peer';
   allowedSessionIds: string[];
+}
+
+export interface PeerAccessChange {
+  config: RemoteDaemonConfig;
+  peer: PeerSummary;
+}
+
+export interface PeerRevocation {
+  config: RemoteDaemonConfig;
+  peerId: string;
 }
 
 export interface MintedPeer {
@@ -39,14 +50,15 @@ export function mintPeerRecord(
     scope: 'peer',
     allowedSessionIds: [...new Set(input.allowedSessionIds)],
   };
-  const connectionCode = encodePaneRemoteConnection({
+  const payload: PaneRemoteConnectionImportPayload = {
     v: 1,
     label,
     baseUrl: input.access.baseUrl,
     token,
     transport: 'http+sse',
-    ...(input.access.tunnel ? { tunnel: input.access.tunnel } : {}),
-  });
+  };
+  if (input.access.tunnel) payload.tunnel = input.access.tunnel;
+  const connectionCode = encodePaneRemoteConnection(payload);
   return {
     config: withClients(config, [...config.host.clients, record]),
     peer: toPeerSummary(record),
@@ -77,7 +89,7 @@ export function setPeerSessionAccess(
   peerSelector: string,
   sessionId: string,
   allowed: boolean,
-): { config: RemoteDaemonConfig; peer: PeerSummary } {
+): PeerAccessChange {
   const target = findPeer(config, peerSelector);
   const current = new Set(target.allowedSessionIds ?? []);
   if (allowed) current.add(sessionId);
@@ -92,7 +104,7 @@ export function setPeerSessionAccess(
 export function revokePeer(
   config: RemoteDaemonConfig,
   peerSelector: string,
-): { config: RemoteDaemonConfig; peerId: string } {
+): PeerRevocation {
   const target = findPeer(config, peerSelector);
   return {
     config: withClients(config, config.host.clients.filter(record => record.id !== target.id)),
@@ -105,14 +117,15 @@ function isPeerRecord(record: RemoteDaemonClientRecord): boolean {
 }
 
 function toPeerSummary(record: RemoteDaemonClientRecord): PeerSummary {
-  return {
+  const summary: PeerSummary = {
     id: record.id,
     label: record.label,
     createdAt: record.createdAt,
-    ...(record.lastUsedAt ? { lastUsedAt: record.lastUsedAt } : {}),
     scope: 'peer',
     allowedSessionIds: [...(record.allowedSessionIds ?? [])],
   };
+  if (record.lastUsedAt) summary.lastUsedAt = record.lastUsedAt;
+  return summary;
 }
 
 function withClients(config: RemoteDaemonConfig, clients: RemoteDaemonClientRecord[]): RemoteDaemonConfig {

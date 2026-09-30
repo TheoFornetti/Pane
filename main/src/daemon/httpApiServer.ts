@@ -10,7 +10,7 @@ import {
   type RemotePaneAnalyticsSink,
 } from '../services/remoteAnalytics';
 import { terminalPanelManager } from '../services/terminalPanelManager';
-import type { PaneCommandRegistry } from './commandRegistry';
+import type { PaneCommandRegistry, PaneCommandValue } from './commandRegistry';
 import { authenticateRemoteDaemonBearerToken } from './auth';
 import { isPaneDaemonEventChannel } from './server';
 import {
@@ -24,7 +24,7 @@ import {
 } from '../../../shared/types/remoteDaemon';
 import { remoteHostRuntimeStateStore } from './remoteHostRuntimeState';
 import { getRemotePwaAssetResponse } from './pwaStaticAssets';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { BoundarySchema, JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { serializeJsonTransport } from './jsonTransport';
 import {
@@ -612,7 +612,7 @@ export class PaneRemoteHttpApiServer {
     response: ServerResponse,
     channel: string,
     buildArgs: () => JsonValue[],
-    transformResult?: (result: unknown) => unknown,
+    transformResult?: (result: PaneCommandValue) => PaneCommandValue,
   ): Promise<void> {
     try {
       const result = await this.commandRegistry.invoke(channel, buildArgs());
@@ -996,28 +996,26 @@ export class PaneRemoteHttpApiServer {
  */
 function namespaceIdempotencyKey(channel: string, args: readonly JsonValue[], clientId: string): JsonValue[] {
   const next = [...args];
-  const request = next[0];
-  if (
-    channel !== 'runpane:panels:submit'
-    || typeof request !== 'object' || request === null || Array.isArray(request)
-    || typeof request.idempotencyKey !== 'string'
-  ) {
-    return next;
-  }
-  next[0] = { ...request, idempotencyKey: `${clientId}:${request.idempotencyKey}` };
+  if (channel !== 'runpane:panels:submit') return next;
+  const request = decodeOptionalBoundary(next[0], boundary.jsonObject);
+  const key = decodeOptionalBoundary(request?.idempotencyKey, boundary.string);
+  if (!request || key === undefined) return next;
+  next[0] = { ...request, idempotencyKey: `${clientId}:${key}` };
   return next;
 }
 
-function filterPanelListResult(result: unknown, visiblePanelIds: ReadonlySet<string>): unknown {
-  if (typeof result !== 'object' || result === null || !('panels' in result) || !Array.isArray(result.panels)) {
-    return result;
-  }
+function filterPanelListResult(result: PaneCommandValue, visiblePanelIds: ReadonlySet<string>): PaneCommandValue {
+  const listed = serializeJsonTransport(result, boundary.object({
+    ok: boundary.boolean,
+    paneId: boundary.string,
+    panels: boundary.array(boundary.jsonObject),
+  }));
   return {
-    ...result,
-    panels: result.panels.filter((panel: unknown) => (
-      typeof panel === 'object' && panel !== null && 'id' in panel && typeof panel.id === 'string'
-      && visiblePanelIds.has(panel.id)
-    )),
+    ...listed,
+    panels: listed.panels.filter(panel => {
+      const panelId = decodeOptionalBoundary(panel.id, boundary.string);
+      return panelId !== undefined && visiblePanelIds.has(panelId);
+    }),
   };
 }
 

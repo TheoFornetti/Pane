@@ -1,5 +1,5 @@
 import type { PaneCommandRegistry } from '../commandRegistry';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PeerSessionInfo } from './peerPolicy';
 
 const sessionListSchema = boundary.object({
@@ -17,8 +17,8 @@ const sessionListSchema = boundary.object({
 export async function readPeerSessions(registry: Pick<PaneCommandRegistry, 'invoke'>): Promise<PeerSessionInfo[]> {
   const result = decodeBoundary(await registry.invoke('runpane:sessions:list', []), sessionListSchema);
   return result.sessions.flatMap(session => {
-    const orchestratorPanelId = session.panelIds[session.agent];
-    if (typeof orchestratorPanelId !== 'string' || !orchestratorPanelId) return [];
+    const orchestratorPanelId = decodeOptionalBoundary(session.panelIds[session.agent], boundary.nonEmptyString);
+    if (orchestratorPanelId === undefined) return [];
     return [{
       id: session.id,
       name: session.name,

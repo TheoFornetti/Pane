@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { JsonObject } from '../../boundaryDecoder';
+import type { JsonObject, JsonValue } from '../../boundaryDecoder';
 import type { CloudDeps } from '../commands';
 import { NO_COORDINATOR } from '../coordinatorSync';
 import { encodePairingCode } from '../pairing';
@@ -261,7 +261,7 @@ export async function createTestHarness(): Promise<TestHarness> {
     async probeCoordinatorHealth() {
       return world.coordinatorHealthy ? { ok: true, status: 200, version: '2.4.141-test' } : { ok: false };
     },
-    async invokeDaemon(profile, channel, args) {
+    async invokeDaemon(profile, channel, args): Promise<JsonValue | undefined> {
       const host = new URL(profile.baseUrl).hostname.split('.')[0];
       world.calls.push(`invoke ${host} ${channel}`);
       const daemon = world.daemons.get(host);
@@ -269,7 +269,7 @@ export async function createTestHarness(): Promise<TestHarness> {
       const request = args[0] ?? {};
       switch (channel) {
         case 'runpane:sessions:list':
-          return { ok: true, sessions: daemon.sessions.map((session) => ({ ...session })) };
+          return { ok: true, sessions: daemon.sessions.map((session) => ({ id: session.id, name: session.name, archived: session.archived === true })) };
         case 'runpane:peers:mint': {
           const peer = { id: `peer-${daemon.peers.length + 1}`, label: String(request.label), sessions: Array.isArray(request.sessions) ? request.sessions.filter((value): value is string => typeof value === 'string') : [] };
           daemon.peers.push(peer);

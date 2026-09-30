@@ -93,29 +93,6 @@ else
   gh release create "$TAG" --repo "$FORK_REPO" --prerelease --target "$COMMIT" \
     --title "Runpane Cloud rc $SHA8" --notes "$NOTES" "$WORK"/* >&2
 fi
-DL="https://github.com/$FORK_REPO/releases/download/$TAG"
-# Anonymous check: the fork is public, so sandboxes can fetch without credentials.
-code=$(curl -sS -o /dev/null -w '%{http_code}' -L -r 0-0 "$DL/pane_${VERSION}_amd64.deb")
-log "anonymous download check: HTTP $code"
-case "$code" in 200|206) ;; *) log "release asset not publicly downloadable"; exit 1;; esac
-
-python3 - "$DIST_CURRENT" "$TAG" "$VERSION" "$COMMIT" "$REF" "$DL" "$FORK_REPO" <<'PY'
-import sys, re, datetime, os
-path, tag, version, commit, ref, dl, repo = sys.argv[1:]
-block = f"""<!-- artifacts:start -->
-## Artifacts (updated {datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%MZ')})
-- Release: https://github.com/{repo}/releases/tag/{tag} (prerelease)
-- Commit: `{commit}` (branch `{ref}`), version `{version}`
-- Pane .deb (linux x64): {dl}/pane_{version}_amd64.deb
-- runpane CLI tarball: {dl}/runpane-{version}.tgz  (`npm i -g <url>`)
-- Checksums: {dl}/SHA256SUMS.txt ; build info: {dl}/build-info.json
-<!-- artifacts:end -->"""
-text = open(path).read() if os.path.exists(path) else "# dist-current (m2-dist; always the latest published fork build)\n\n<!-- golden:start -->\n## Golden image\n(not built yet)\n<!-- golden:end -->\n"
-if "<!-- artifacts:start -->" in text:
-    text = re.sub(r"<!-- artifacts:start -->.*?<!-- artifacts:end -->", lambda _: block, text, flags=re.S)
-else:
-    text = text.replace("<!-- golden:start -->", block + "\n\n<!-- golden:start -->", 1)
-open(path, "w").write(text)
-PY
-log "updated $DIST_CURRENT"
-echo "https://github.com/$FORK_REPO/releases/tag/$TAG"
+# Anonymous download check (the fork is public, so sandboxes fetch without credentials) + status file.
+DIST_CURRENT="$DIST_CURRENT" FORK_REPO="$FORK_REPO" INTEGRATION_REF="$INTEGRATION_REF" \
+  "$(dirname "$0")/record-release.sh" "$TAG"

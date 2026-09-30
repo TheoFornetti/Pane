@@ -8,9 +8,18 @@ the scripts refuse a `greenfield-inc/*` repo.
 |---|---|---|
 | `build-artifacts.sh [out]` | build host (boat devbox), repo root | frontend + main build, `electron-builder --linux deb --x64`, `npm pack` of `packages/runpane`, `SHA256SUMS.txt`, `build-info.json` |
 | `publish-release.sh --devbox <id> --ref <branch>` | operator (agentbox) | runs the build on the devbox, downloads the files (in 45 MiB parts: boat `GET /artifacts` caps at 50 MiB), verifies sha256, `gh release create rc-<sha8> --prerelease`, checks anonymous download, updates `dist-current.md` |
+| `record-release.sh rc-<sha8>` | operator | for a published prerelease: anonymous download check, CLI tarball sha256 check, updates `dist-current.md` (called by `publish-release.sh`; run it by hand for releases built by Actions) |
 | `make-golden.sh --tag rc-<sha8>` | operator | sandbox → `golden/provision.sh` → bootstrap's `golden-scrub.sh` → `rp-golden-check golden` + `rp-golden-payload-check` → named snapshot `rp-loop-golden-<sha8>` → destroys the source → forks a gate sandbox from the snapshot → `golden/gate-fork.sh` → destroys the gate |
 | `release.sh --devbox <id> --ref <branch>` | operator | both of the above, then, for `rc/integration` only, prunes older `rp-loop-golden-<sha8>` snapshots (keeps `KEEP_GOLDENS`, default 2) |
 | `desktop-switcher-proof.mjs` | a Linux box on the tailnet, repo root, under `xvfb-run` | drives a packaged desktop (no mocks) against a live cloud Session: live `cloud sync` import, the host switcher, connect, a remote terminal, the asleep state; writes screenshots, a Playwright trace and `results.json` (settings in the file header) |
+
+## GitHub Actions (no devbox)
+
+`.github/workflows/rc-integration.yml` (fork only) runs the integrator suite on every push to `rc/integration`
+and to the integrator's candidate branch `rc/p2/p2-integrator`. On `rc/integration` it then runs
+`build-artifacts.sh` on `ubuntu-24.04` (the boat sandbox OS) and publishes the prerelease `rc-<sha8>` with the
+workflow's own token. A merge commit whose message contains `[no-release]` skips the publish (docs-only merges).
+Afterwards, run `record-release.sh rc-<sha8>` on agentbox to update `dist-current.md`. This costs 0 boat starts.
 
 ## Integration vs branch builds
 

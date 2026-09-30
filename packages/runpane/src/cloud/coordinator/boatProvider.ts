@@ -143,8 +143,10 @@ export class BoatCoordinatorProvider implements CoordinatorProvider {
     }
     if (!response.ok) {
       const code = readErrorCode(parsed);
+      const detail = readErrorMessage(parsed);
       throw new BoatProviderError(
-        `boat ${method} ${pathAndQuery.split('?')[0]} failed: HTTP ${response.status}${code ? ` (${code})` : ''}`,
+        `boat ${method} ${pathAndQuery.split('?')[0]} failed: HTTP ${response.status}${code ? ` (${code})` : ''}`
+          + (detail ? `: ${detail}` : ''),
         response.status,
         code,
       );
@@ -158,6 +160,15 @@ const boatErrorCodeReaders = [
   (value: JsonValue) => decodeBoundary(value, boundary.object({ error: boundary.string })).error,
   (value: JsonValue) => decodeBoundary(value, boundary.object({ error: boundary.object({ code: boundary.string }) })).error.code,
 ];
+
+/** boat's human message, e.g. which start-limit window (minute/hour/day) refused a resume. */
+function readErrorMessage(parsed: JsonValue): string | null {
+  try {
+    return decodeBoundary(parsed, boundary.object({ message: boundary.string })).message;
+  } catch {
+    return null;
+  }
+}
 
 function readErrorCode(parsed: JsonValue): string | null {
   for (const read of boatErrorCodeReaders) {

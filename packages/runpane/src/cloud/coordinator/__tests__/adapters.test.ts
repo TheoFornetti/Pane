@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { BoatCoordinatorProvider, mapBoatState } from '../boatProvider';
+import { BoatCoordinatorProvider, BoatProviderError, mapBoatState } from '../boatProvider';
 import { parseCoordinatorConfig } from '../config';
 import { decodeHealth, decodeSafeToStop, HttpDaemonProbe } from '../daemonProbe';
 import { parseDirectory } from '../directory';
@@ -39,6 +39,9 @@ describe('boat provider', () => {
           return jsonResponse(200, { ok: true, sandboxes: [{ id: 'bx_b', name: 'rp-b', state: 'archived' }], pageInfo: { nextCursor: null } });
         }
         if (url.endsWith('/sandboxes/bx_gone')) return jsonResponse(404, { ok: false, error: { code: 'not_found' } });
+        if (url.endsWith('/sandboxes/bx_limited/resume')) {
+          return jsonResponse(429, { ok: false, code: 'rate_limited', message: 'Rate limit hit: 60 sandbox starts per hour', error: { code: 'rate_limited' } });
+        }
         return jsonResponse(202, { ok: true, id: 'bx_a', status: 'resuming' });
       },
     });
@@ -52,6 +55,9 @@ describe('boat provider', () => {
     const headers = new Headers(resume.init.headers);
     assert.equal(headers.get('authorization'), 'Bearer boat_key');
     assert.equal('delete' in provider, false);
+    await assert.rejects(provider.resume('bx_limited'), (error: Error) => (
+      error instanceof BoatProviderError && error.status === 429 && /rate_limited\): Rate limit hit: 60 sandbox starts per hour/.test(error.message)
+    ));
   });
 });
 

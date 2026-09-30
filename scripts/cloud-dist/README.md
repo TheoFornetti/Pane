@@ -51,6 +51,14 @@ The identity scrub and strip-list check are the files `runpane cloud` bootstrap 
 `GOLDEN_ASSETS_REF=origin/rc/w1/m1-bootstrap`. `golden/payload-check.sh` covers only what this image adds:
 the Pane version, Tailscale, and Chromium.
 
+## boat start budget
+
+boat limits sandbox starts per account: 12 per minute, 60 per hour, 200 per day on plan box_20. Every create, fork and resume
+by every peer counts. One `make-golden.sh` run costs **2 starts** (the source sandbox and the gate fork). A build costs
+none, because it reuses the devbox. Both creates go through `sb-create-retry.sh`: it waits out `429 rate_limited`
+(`START_WAIT_MAX_S`, default 1 h, polled every `START_WAIT_STEP_S`, default 120 s), so a limit hit between the
+snapshot and the gate doesn't abort the run and waste the start already spent. Other create errors still fail at once.
+
 ## Environment
 
 `BOAT_HDR` (curl header file holding the boat `Authorization` header), `RC_BIN` (the rc-loop helpers

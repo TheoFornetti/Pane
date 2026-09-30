@@ -67,7 +67,7 @@ sys.exit(r.get("exitCode", 1) if isinstance(r.get("exitCode"), int) else 1)'
 run_retry() { for i in $(seq 1 20); do out=$(run "$@") && { printf '%s\n' "$out"; return 0; }; [ "$i" -ge 3 ] && { printf '%s\n' "$out"; return 1; }; sleep 3; done; }
 
 # 1. source sandbox
-SRC=$("$RC_BIN/sb-create.sh" "golden-$SHA8" large)
+SRC=$("$HERE/sb-create-retry.sh" "golden-$SHA8" large)
 log "source sandbox $SRC"
 wait_idle "$SRC"; log "source idle"
 # Single source for the identity scrub/check: runpane cloud bootstrap runs the same files on every new sandbox.
@@ -107,7 +107,7 @@ log "named snapshot $NAME: $st"
 # 4. gate fork from the named snapshot
 [ "$KEEP_SOURCE" = 1 ] || { "$RC_BIN/sb-destroy.sh" "$SRC" | tail -1; log "source destroyed (gate forks from the snapshot alone)"; }
 TF=$(date +%s%3N)
-GATE=$("$RC_BIN/sb-create.sh" "golden-gate-$SHA8" large "$NAME")
+GATE=$("$HERE/sb-create-retry.sh" "golden-gate-$SHA8" large "$NAME")
 wait_idle "$GATE"; log "gate fork $GATE idle in $(( $(date +%s%3N) - TF ))ms"
 gerr=$(curl -sS -H @"$BOAT_HDR" "$BOAT/sandboxes/$GATE" | python3 -c 'import json,sys;print((json.load(sys.stdin).get("sandbox") or {}).get("error") or "")')
 [ -z "$gerr" ] || log "WARN boat reports on the gate fork: $gerr"

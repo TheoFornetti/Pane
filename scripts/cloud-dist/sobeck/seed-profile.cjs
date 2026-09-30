@@ -69,8 +69,8 @@ const profile = {
   baseUrl,
   token: payload.token,
   transport: 'http+sse',
-  ...(payload.tunnel ? { tunnel: payload.tunnel } : {}),
 };
+if (payload.tunnel) profile.tunnel = payload.tunnel;
 if (index === -1) profiles.push(profile); else profiles[index] = profile;
 
 const next = {

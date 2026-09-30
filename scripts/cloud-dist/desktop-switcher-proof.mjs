@@ -178,11 +178,12 @@ try {
     const timeline = [];
     const waitMs = Number(env.ASLEEP_WAIT_MS ?? 20_000);
     while (Date.now() - pickedAt < waitMs) {
-      const labels = await page.evaluate(() => [...new Set(
-        [...document.querySelectorAll('[aria-label]')]
+      const labels = await page.evaluate(() => [...new Set([
+        ...[...document.querySelectorAll('[aria-label]')]
           .map((element) => element.getAttribute('aria-label') ?? '')
           .filter((label) => /switch host|remote runtime|cloud host|connect/i.test(label)),
-      )]);
+        ...[...document.querySelectorAll('[role="dialog"] h2')].map((heading) => `dialog: ${heading.textContent ?? ''}`),
+      ])]);
       const sample = `${String(Math.round((Date.now() - pickedAt) / 1000)).padStart(3)} s  ${labels.join(' | ')}`;
       if (timeline.at(-1)?.slice(6) !== sample.slice(6)) timeline.push(sample);
       await page.waitForTimeout(2000);
@@ -190,15 +191,22 @@ try {
     fs.writeFileSync(path.join(out, 'asleep-timeline.txt'), `${timeline.join('\n')}\n`);
     log('asleep timeline:', timeline.join(' || '));
     await shot('asleep-sidebar');
+    // A failed pick of a sleeping cloud host explains itself in the error dialog.
+    const dialog = page.getByRole('dialog', { name: 'Cloud host asleep or unreachable' });
+    const dialogText = await dialog.isVisible().catch(() => false) ? (await dialog.textContent()) ?? '' : '';
+    if (dialogText) {
+      fs.writeFileSync(path.join(out, 'asleep-dialog.txt'), `${dialogText}\n`);
+      await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    }
     const chipLabel = await switcherChip.first().getAttribute('aria-label');
     await switcherChip.first().click();
     await page.waitForTimeout(500);
     await shot('asleep-switcher-open');
     const menuText = (await page.getByRole('menu').first().textContent().catch(() => '')) ?? '';
     const bodyText = (await page.locator('body').textContent()) ?? '';
-    const hint = /runpane cloud wake/.test(menuText) || /runpane cloud wake/.test(bodyText);
+    const hint = [menuText, bodyText, dialogText].some((text) => /runpane cloud wake/.test(text));
     fs.writeFileSync(path.join(out, 'asleep-switcher.txt'), `chip: ${chipLabel}\nmenu: ${menuText}\n`);
-    check('asleep-names-wake-command', hint, `chip "${chipLabel}"; switcher "${menuText.replace(/\s+/g, ' ').slice(0, 300)}"`);
+    check('asleep-names-wake-command', hint, `chip "${chipLabel}"; switcher "${menuText.replace(/\s+/g, ' ').slice(0, 300)}"${dialogText ? `; dialog "${dialogText.slice(0, 300)}"` : ''}`);
   }
 } catch (error) {
   check('run-completed', false, error instanceof Error ? error.message.split('\n')[0] : String(error));

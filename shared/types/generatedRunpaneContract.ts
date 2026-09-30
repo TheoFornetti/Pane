@@ -2170,7 +2170,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panes move --pane <pane-id> --folder <folder-id> --yes [--json] [--pane-dir <path>]",
         "  runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]",
         "  runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]",
-        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|github|git> [options]",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -3552,7 +3552,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator|peers|github|git> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|github|git> [options]",
         "",
         "Run each Pane Session on its own cloud sandbox with a normal Pane daemon, paired to your Pane apps as a remote host.",
         "Keys stay on this machine (~/.config/runpane-cloud, 0600). Pane desktop only lists the saved remote hosts.",
@@ -4881,7 +4881,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator|peers|github|git> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|github|git> [options]",
         "",
         "`runpane cloud` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud"

@@ -581,8 +581,9 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     assert.ok((pushed.node ?? '').startsWith('rp-one.tail.ts.net'));
     const audit = await h.call('user:red', 'GET', 'audit?limit=5');
     assert.equal(jsonList(audit.body.entries).length, 5);
+    // A Session must not read other Sessions' calls.
     const peer = await h.call('s1', 'GET', 'audit');
-    assert.equal(peer.body.code, undefined);
+    assert.deepEqual([peer.status, peer.body.code], [403, 'forbidden']);
   });
 });
 

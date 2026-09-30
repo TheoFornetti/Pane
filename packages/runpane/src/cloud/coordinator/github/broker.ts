@@ -222,6 +222,8 @@ export class GitHubBroker {
       }
       if (route.endpoint === 'GET status') return { status: 200, body: await this.status(entry) };
       if (route.endpoint === 'GET audit') {
+        // The audit covers every Session's calls: only the user reads it, never a Session.
+        if (call.caller.role !== 'user') throw new BrokerError('forbidden', 'the audit is only for the user (runpane cloud coordinator github audit)');
         const limit = Number(call.query.get('limit') ?? '100');
         return { status: 200, body: { ok: true, entries: this.deps.audit.recent(Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 100) } };
       }

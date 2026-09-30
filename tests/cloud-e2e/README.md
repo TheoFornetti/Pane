@@ -34,6 +34,10 @@ Gates never read daemon internals (SQLite, config files) except where a check is
 | `gates/m2-safestop.sh` | M2: safe-to-stop refuses in each of the 6 conditions; flush survives a power-off; `/health` version + readiness |
 | `gates/m3-peers.sh` | M3: peer submit lands framed in the orchestrator panel; shell/events/WS/non-allowlisted → 403; idempotency |
 | `gates/m4-coordinator.sh` | M4: reconciler never destroys; idle-stop through the `serve` loop respects safe-to-stop; `/cloud/status` never wakes; `/cloud/wake`; runaway guard |
+| `gates/p3-broker.sh` | **P3 broker (phase3-design §9 P2+P3, 2 starts)**: fresh coordinator + Session; broker pointed at a fake GitHub on the coordinator's loopback; a real Claude agent pushes, opens a draft PR and an issue with no client attached; live refusals (master, namespace, workflow file, merge, another Session's PR/issue, repo allowlist, token from another node); fake log + audit + socket samples + ACL as evidence |
+| `lib/fakegithub.py` | Fake GitHub (stdlib): real `git http-backend`, App JWT (RS256) + downscoped installation tokens, per-endpoint permissions, GitHub's workflow-push rule, no branch protection; JSONL request log; admin seeding. `lib/fakegithub-selftest.sh` proves it (runs in fork CI) |
+| `lib/broker.sh` | Broker gate helpers: deploy the fake on a sandbox, raw in-Session broker calls with the Session's own token, and the `runpane` spellings owned by the broker/agent CLI (one place) |
+| `p4-montlake.sh` | **P4, one command**: `p4-montlake.sh <App .pem or fine-grained PAT file> <host>` against real montlakev2: draft PR + issue from `cloud/<host>/p3-proof`, refusals, then closes both, deletes the branch and checks master is unchanged |
 | `run-gates.sh` | Runs a list of gates from a snapshot copy (edits never corrupt a running run) and refreshes the matrix |
 | `sweep.sh` | Deletes stray `rp-loop-e2e-*` sandboxes and tailnet devices after an aborted run |
 | `morning-smoke.sh` | One command for a user to prove their own setup end to end |

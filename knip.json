@@ -92,10 +92,13 @@
         "src/installers.ts",
         "src/releases.ts",
         "src/telemetry.ts",
+        "src/cloud/coordinator/main.ts",
+        "src/cloud/coordinator/index.ts",
+        "src/**/__tests__/**/*.ts",
         "scripts/mark-executable.js"
       ],
       "project": ["src/**/*.ts", "scripts/**/*.js"],
-      "ignoreBinaries": ["ditto"]
+      "ignoreBinaries": ["ditto", "loginctl"]
     },
     "mobile": {
       "entry": ["capacitor.config.ts", "src/**/*.test.ts", "scripts/**/*.mjs"],

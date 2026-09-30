@@ -311,7 +311,7 @@ describe('nodeHttpTransport', () => {
     const server = http.createServer((request) => request.socket.destroy());
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const { port } = listeningAddress(server);
-    const base = { method: 'POST' as const, headers: {}, body: '{}', connectTimeoutMs: 2_000, timeoutMs: 2_000 };
+    const base = { method: 'POST' as const, headers: { Authorization: 'Bearer t' }, body: '{}', connectTimeoutMs: 2_000, timeoutMs: 2_000 };
     try {
       await assert.rejects(
         nodeHttpTransport({ ...base, url: `http://127.0.0.1:${port}/invoke` }),
@@ -329,7 +329,7 @@ describe('nodeHttpTransport', () => {
   it('times out a connection that never opens as a connect error', async () => {
     // 10.255.255.1 is unroutable, so the SYN goes unanswered like an offline tailnet node.
     await assert.rejects(
-      nodeHttpTransport({ url: 'http://10.255.255.1:9/invoke', method: 'GET', headers: {}, connectTimeoutMs: 300, timeoutMs: 5_000 }),
+      nodeHttpTransport({ url: 'http://10.255.255.1:9/invoke', method: 'GET', headers: { Authorization: 'Bearer t' }, connectTimeoutMs: 300, timeoutMs: 5_000 }),
       { name: 'RemoteConnectError' },
     );
   });

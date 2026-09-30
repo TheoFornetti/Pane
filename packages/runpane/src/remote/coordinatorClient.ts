@@ -1,6 +1,6 @@
 import { boundary, decodeBoundary } from '../boundaryDecoder';
 import type { CoordinatorRef } from './hostDirectory';
-import { DEFAULT_CONNECT_TIMEOUT_MS, nodeHttpTransport, type RemoteHttpTransport } from './remoteDaemonClient';
+import { DEFAULT_CONNECT_TIMEOUT_MS, nodeHttpTransport, type RemoteHttpHeaders, type RemoteHttpTransport } from './remoteDaemonClient';
 
 /** `awake` is the coordinator's success answer; the other four are the plan's sleep states. */
 export type CloudHostStatus = 'awake' | 'asleep' | 'waking' | 'daemon-down' | 'lost';
@@ -52,10 +52,8 @@ export class CoordinatorClient {
   }
 
   private async call(method: 'GET' | 'POST', path: string, body: string | undefined, timeoutMs: number): Promise<CloudHostState> {
-    const authorization = `Bearer ${this.coordinator.token}`;
-    const headers = body === undefined
-      ? { Authorization: authorization }
-      : { Authorization: authorization, 'Content-Type': 'application/json' };
+    const headers: RemoteHttpHeaders = { Authorization: `Bearer ${this.coordinator.token}` };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
     let response;
     try {
       response = await this.transport({

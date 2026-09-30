@@ -14,10 +14,15 @@ export interface RemoteHostProfile {
   token: string;
 }
 
+export interface RemoteHttpHeaders {
+  Authorization: string;
+  'Content-Type'?: 'application/json';
+}
+
 export interface RemoteHttpRequest {
   url: string;
   method: 'GET' | 'POST';
-  headers: Record<string, string>;
+  headers: RemoteHttpHeaders;
   body?: string;
   /** Give up if the TCP/TLS connection has not opened by then. */
   connectTimeoutMs: number;

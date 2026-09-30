@@ -22,4 +22,11 @@ describe('--host / --thread parsing', () => {
     assert.equal(takesDaemonTarget('panels list'), true);
     assert.equal(takesDaemonTarget('doctor'), false);
   });
+
+  it('points cloud safe-to-stop at --host (it asks a daemon), but not the rest of runpane cloud', () => {
+    const parsed = parseRunpaneArgs(['cloud', 'safe-to-stop', '--host', 'rp-b', '--dry-run', '--json']);
+    assert.equal(parsed.command, 'cloud safe-to-stop');
+    assert.equal(parsed.host, 'rp-b');
+    assert.equal(takesDaemonTarget('cloud safe-to-stop'), true);
+  });
 });

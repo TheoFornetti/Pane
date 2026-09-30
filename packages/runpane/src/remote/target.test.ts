@@ -218,6 +218,30 @@ describe('invokeRemote wake policy', () => {
     assert.match(submitted.idempotencyKey, /^runpane-cli:/);
   });
 
+  it('resolves --panel orchestrator for a full client through its Sessions', async () => {
+    const delivered: { channel: string; args: unknown[] }[] = [];
+    const transport = async (request: RemoteHttpRequest): Promise<RemoteHttpResponse> => {
+      const body = decodeBoundary(JSON.parse(request.body ?? '{}'), boundary.object({ channel: boundary.string, args: boundary.array(boundary.json) }));
+      delivered.push(body);
+      if (body.channel === 'runpane:panels:list') {
+        return { status: 500, body: JSON.stringify({ ok: false, error: { message: 'Panel list request must include paneId' } }) };
+      }
+      if (body.channel === 'runpane:sessions:list') {
+        return { status: 200, body: JSON.stringify({ ok: true, result: { ok: true, sessions: [
+          { id: 'legacy-pane-chat', name: 'Pane Chat', agent: 'claude', panelIds: { claude: '__pane_chat_terminal__' } },
+          { id: 's-old', name: 'old', archived: true, agent: 'claude', panelIds: { claude: 'orch-old' } },
+          { id: 's-main', name: 'main', agent: 'claude', panelIds: { claude: 'orch-main', codex: 'other' } },
+        ] } }) };
+      }
+      return { status: 200, body: JSON.stringify({ ok: true, result: { ok: true } }) };
+    };
+    await invokeRemote(cloudTarget(), 'runpane:panels:submit', [{ panelId: 'orchestrator', input: 'hi' }], { ...fast, transport });
+    // panels:list is a reviewed read, so the client retries the refusal before falling back.
+    assert.deepEqual([...new Set(delivered.map((call) => call.channel))], ['runpane:panels:list', 'runpane:sessions:list', 'runpane:panels:submit']);
+    const submitted = decodeBoundary(delivered[delivered.length - 1]!.args[0], boundary.object({ panelId: boundary.string }));
+    assert.equal(submitted.panelId, 'orch-main');
+  });
+
   it('names the coordinator\'s reason when it rejects the caller', async () => {
     const transport = async (request: RemoteHttpRequest): Promise<RemoteHttpResponse> => {
       if (request.url.startsWith(COORD_URL)) {
@@ -239,6 +263,23 @@ describe('invokeRemote wake policy', () => {
     await assert.rejects(
       invokeRemote(target, 'runpane:panels:submit', [{ panelId: 'x', input: 'hi' }], { ...fast, transport }),
       { name: 'RemoteTargetError', code: 'ERR_RUNPANE_HOST_UNREACHABLE' },
+    );
+  });
+
+  it('tells the user to wake an unreachable cloud host when no coordinator is configured', async () => {
+    const transport = async (): Promise<RemoteHttpResponse> => {
+      throw new RemoteConnectError('connect ETIMEDOUT', 'ETIMEDOUT');
+    };
+    const target: DaemonTarget = {
+      host: {
+        id: 'cloud-x', label: 'Checkout', baseUrl: 'https://rp-x1234567.example.ts.net', token: 't',
+        cloud: { provider: 'boat', sandboxId: 'bx_1', sessionId: 'x1234567ab', hostname: 'rp-x1234567' },
+      },
+      source: 'test',
+    };
+    await assert.rejects(
+      invokeRemote(target, 'runpane:panels:list', [{}], { ...fast, transport }),
+      { name: 'RemoteTargetError', code: 'ERR_RUNPANE_HOST_UNREACHABLE', message: /run `runpane cloud wake rp-x1234567`/iu },
     );
   });
 });

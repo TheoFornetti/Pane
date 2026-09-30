@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { getRemoteExecutableHealthPresentation, getRemoteHostSwitcherModel, LOCAL_RUNTIME_ID } from './remoteRuntimePresentation';
+import {
+  getCloudWakeCommand,
+  getRemoteExecutableHealthPresentation,
+  getRemoteFooterStatus,
+  getRemoteHostSwitcherModel,
+  LOCAL_RUNTIME_ID,
+} from './remoteRuntimePresentation';
 import {
   createDefaultRemoteDaemonHostRuntimeState,
   createDefaultRemotePaneConnectionState,
@@ -125,5 +131,50 @@ describe('getRemoteHostSwitcherModel', () => {
     };
     expect(getRemoteHostSwitcherModel(local, hosting, [profile]).hostingSummary).toBe('Hosting · 1 client connected');
     expect(getRemoteHostSwitcherModel(local, idleHost, [profile]).hostingSummary).toBeNull();
+  });
+});
+
+describe('cloud host asleep hint', () => {
+  const cloudProfile: RemotePaneConnectionProfile = {
+    id: 'cloud-abc',
+    label: 'Checkout',
+    baseUrl: 'https://rp-abc12345.example.ts.net',
+    token: 'synthetic',
+    transport: 'http+sse',
+    cloud: { provider: 'boat', sandboxId: 'bx_1', sessionId: 'abc12345xy', nodeId: 'n1', hostname: 'rp-abc12345', version: 1 },
+  };
+  const plainProfile: RemotePaneConnectionProfile = {
+    id: 'mac', label: 'Mac', baseUrl: 'https://mac.example.ts.net', token: 'synthetic', transport: 'http+sse',
+  };
+  const idleHost = createDefaultRemoteDaemonHostRuntimeState();
+  const failed = (profile: RemotePaneConnectionProfile): RemotePaneConnectionState => ({
+    ...createDefaultRemotePaneConnectionState(),
+    mode: 'remote',
+    status: 'error',
+    activeProfileId: profile.id,
+    activeProfileLabel: profile.label,
+    activeBaseUrl: profile.baseUrl,
+    lastError: 'fetch failed',
+  });
+
+  it('names the wake command only for profiles runpane cloud created', () => {
+    expect(getCloudWakeCommand(cloudProfile)).toBe('runpane cloud wake rp-abc12345');
+    expect(getCloudWakeCommand(plainProfile)).toBeNull();
+    expect(getCloudWakeCommand(undefined)).toBeNull();
+  });
+
+  it('tells the user to wake a cloud host whose connection failed', () => {
+    const status = getRemoteFooterStatus(failed(cloudProfile), idleHost, [cloudProfile, plainProfile]);
+    expect(status.title).toBe('Cloud host asleep or unreachable');
+    expect(status.description).toContain('`runpane cloud wake rp-abc12345`');
+    expect(getRemoteHostSwitcherModel(failed(cloudProfile), idleHost, [cloudProfile]).cloudWakeCommand)
+      .toBe('runpane cloud wake rp-abc12345');
+  });
+
+  it('keeps the generic failure for other hosts and for a connected cloud host', () => {
+    expect(getRemoteFooterStatus(failed(plainProfile), idleHost, [cloudProfile, plainProfile]).title).toBe('Remote connection failed');
+    const connected = { ...failed(cloudProfile), status: 'connected' as const };
+    expect(getRemoteFooterStatus(connected, idleHost, [cloudProfile]).title).toBe('Connected to Checkout');
+    expect(getRemoteHostSwitcherModel(connected, idleHost, [cloudProfile]).cloudWakeCommand).toBeNull();
   });
 });

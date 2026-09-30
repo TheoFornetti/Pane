@@ -1,12 +1,12 @@
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { JsonObject } from '../../boundaryDecoder';
+import type { JsonObject, JsonValue } from '../../boundaryDecoder';
 import type { CloudDeps } from '../commands';
 import { NO_COORDINATOR } from '../coordinatorSync';
 import { encodePairingCode } from '../pairing';
 import type { BootstrapPort, ProvisionRequest, TailnetDevice, TailnetPort } from '../ports';
-import type { CloudProvider, CloudSandbox, CloudSize, CreateSandboxRequest, SandboxHandle } from '../provider';
+import { CloudProviderError, type CloudProvider, type CloudSandbox, type CloudSize, type CreateSandboxRequest, type SandboxHandle } from '../provider';
 import { createCloudStore } from '../store';
 
 /**
@@ -30,6 +30,20 @@ interface FakeWorld {
   scripts: { sandboxId: string; script: string }[];
   healthy: Set<string>;
   failProvision?: string;
+  /** Files written into sandboxes, by `<sandboxId>:<path>`. */
+  files: Map<string, string>;
+  /** Fake daemons: Sessions and peer records per sandbox hostname. */
+  daemons: Map<string, FakeDaemon>;
+  coordinatorHealthy: boolean;
+  /** Shared by every fake provider instance, so ids stay unique across `createProvider` calls. */
+  sandboxCounter: number;
+  createdByKey: Map<string, string>;
+  /** Hosts whose tailnet node comes back logged out after a resume (healthy again once repaired). */
+  loggedOut: Set<string>;
+  /** When true, a coordinator is configured and `wake` goes through it. */
+  coordinatorWakes?: boolean;
+  /** When set, scoped keys longer than this many days are refused like boat does. */
+  maxKeyTtlDays?: number;
   /** boat names sandboxes only through a later PATCH: create returns them unnamed when set. */
   createUnnamed?: boolean;
   /** What the daemon's safe-to-stop answers `cloud stop`; 'unreachable' makes the call fail. */
@@ -37,13 +51,20 @@ interface FakeWorld {
   failRename?: string;
 }
 
+export interface FakeDaemon {
+  sessions: { id: string; name: string; archived?: boolean }[];
+  peers: { id: string; label: string; sessions: string[] }[];
+}
+
 function createFakeWorld(): FakeWorld {
-  return { sandboxes: new Map(), devices: [], calls: [], scripts: [], healthy: new Set() };
+  return {
+    sandboxes: new Map(), devices: [], calls: [], scripts: [], healthy: new Set(),
+    files: new Map(), daemons: new Map(), coordinatorHealthy: true, sandboxCounter: 0, createdByKey: new Map(), loggedOut: new Set(),
+  };
 }
 
 function createFakeProvider(world: FakeWorld): CloudProvider {
-  let counter = 0;
-  const createdByKey = new Map<string, string>();
+  const createdByKey = world.createdByKey;
   const need = (id: string): FakeSandbox => {
     const sandbox = world.sandboxes.get(id);
     if (!sandbox) throw new Error(`fake: no sandbox ${id}`);
@@ -61,10 +82,14 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
     async runScript(script) {
       world.calls.push(`script ${id}`);
       world.scripts.push({ sandboxId: id, script });
-      return { exitCode: 0, stdout: '', stderr: '' };
+      if (script.includes('tailscale ip -4')) return { exitCode: 0, stdout: '100.64.0.9\n', stderr: '' };
+      const install = /install -m 600 (\S+) (\S+peers\.json)/u.exec(script);
+      if (install) world.files.set(`${id}:${install[2]}`, world.files.get(`${id}:${install[1]}`) ?? '');
+      return { exitCode: 0, stdout: script.includes('RP_AGENT_ENV') ? 'RP_AGENT_ENV ok\n' : 'RP_COORD ok\n', stderr: '' };
     },
-    async writeFile(filePath) {
+    async writeFile(filePath, content) {
       world.calls.push(`write ${id} ${filePath}`);
+      world.files.set(`${id}:${filePath}`, content);
     },
   });
   return {
@@ -76,9 +101,9 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       world.calls.push(`create ${request.name} ${request.size} ${request.fromSnapshot ?? '-'}`);
       const existing = createdByKey.get(request.idempotencyKey);
       if (existing) return snapshot(need(existing));
-      counter += 1;
+      world.sandboxCounter += 1;
       const sandbox: FakeSandbox = {
-        id: `bx_fake${String(counter).padStart(4, '0')}`,
+        id: `bx_fake${String(world.sandboxCounter).padStart(4, '0')}`,
         name: world.createUnnamed ? '' : request.name,
         state: 'starting',
         providerState: 'provisioning',
@@ -126,6 +151,16 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       world.sandboxes.delete(id);
     },
     handle,
+    async createScopedKey(request) {
+      if (world.maxKeyTtlDays !== undefined && Number.parseInt(request.ttl, 10) > world.maxKeyTtlDays) {
+        throw new CloudProviderError('boat POST /api-keys/scoped failed with HTTP 403 (api_key_action_forbidden): A delegated key cannot outlive its parent.', 403, 'api_key_action_forbidden');
+      }
+      world.calls.push(`scoped-key ${request.name} ${request.actions.join(',')}`);
+      return { id: 'sak_fake1', secret: 'scoped-secret-value' };
+    },
+    async revokeKey(keyId) {
+      world.calls.push(`revoke-key ${keyId}`);
+    },
   };
 }
 
@@ -145,10 +180,27 @@ function createFakeBootstrap(world: FakeWorld): BootstrapPort {
   return {
     cloudHostname: (sessionId, prefix) => `${prefix}-${sessionId.slice(0, 8)}`,
     createTailnet: () => createFakeTailnet(world),
+    async repairTailnet(sandbox, request) {
+      world.calls.push(`repair ${sandbox.id} ${request.hostname}`);
+      if (!world.loggedOut.has(request.hostname)) return { reenrolled: false, backendState: 'Running' };
+      world.loggedOut.delete(request.hostname);
+      if (request.hostname.endsWith('-coord')) world.coordinatorHealthy = true;
+      world.devices = world.devices.filter((device) => device.hostname !== request.hostname);
+      const nodeId = `n${request.hostname.replace(/-/g, '')}NEW`;
+      world.devices.push({ nodeId, hostname: request.hostname, name: `${request.hostname}.tailtest.ts.net`, online: true });
+      return { reenrolled: true, previousBackendState: 'NeedsLogin', nodeId, magicDnsName: `${request.hostname}.tailtest.ts.net`, deletedNodeIds: [request.oldNodeId ?? ''] };
+    },
+    async joinTailnet(sandbox, request) {
+      world.calls.push(`join ${sandbox.id} ${request.hostname}`);
+      const nodeId = `n${request.hostname.replace(/-/g, '')}CNTRL`;
+      const magicDnsName = `${request.hostname}.tailtest.ts.net`;
+      world.devices.push({ nodeId, hostname: request.hostname, name: magicDnsName, online: true });
+      return { nodeId, magicDnsName, tailscaleIps: ['100.64.0.9'] };
+    },
     async waitForDaemonHealth(baseUrl) {
       const host = new URL(baseUrl).hostname.split('.')[0];
       const sandbox = [...world.sandboxes.values()].find((candidate) => candidate.name === host);
-      const ok = world.healthy.has(host) && sandbox?.state === 'running';
+      const ok = world.healthy.has(host) && !world.loggedOut.has(host) && sandbox?.state === 'running';
       return ok ? { ok, elapsedMs: 1, status: 200, version: '2.4.141' } : { ok, elapsedMs: 1 };
     },
     async provision(sandbox: SandboxHandle, request: ProvisionRequest) {
@@ -236,6 +288,46 @@ export async function createTestHarness(): Promise<TestHarness> {
       world.pushedDirectories.push(directory);
       const sessions = directory.sessions;
       return { pushed: true, sessions: Array.isArray(sessions) ? sessions.length : 0 };
+    },
+    async wakeViaCoordinator(sessionId) {
+      if (!world.coordinatorWakes) return null;
+      world.calls.push(`coordinator-wake ${sessionId}`);
+      const sandbox = [...world.sandboxes.values()].find((candidate) => candidate.name.endsWith(sessionId.slice(0, 8)));
+      if (!sandbox || sandbox.state !== 'stopped') return { status: 'lost' };
+      sandbox.state = 'running';
+      sandbox.pending = [];
+      return { status: 'awake', version: '2.4.141-pinned', detail: 'upgraded to pinned 2.4.141-pinned' };
+    },
+    async packCoordinatorApp() {
+      return { archiveBase64: 'ZmFrZQ==', version: '2.4.141-test' };
+    },
+    async probeCoordinatorHealth() {
+      return world.coordinatorHealthy ? { ok: true, status: 200, version: '2.4.141-test' } : { ok: false };
+    },
+    async invokeDaemon(profile, channel, args): Promise<JsonValue | undefined> {
+      const host = new URL(profile.baseUrl).hostname.split('.')[0];
+      world.calls.push(`invoke ${host} ${channel}`);
+      const daemon = world.daemons.get(host);
+      if (!daemon) throw new Error('connect ECONNREFUSED');
+      const request = args[0] ?? {};
+      switch (channel) {
+        case 'runpane:sessions:list':
+          return { ok: true, sessions: daemon.sessions.map((session) => ({ id: session.id, name: session.name, archived: session.archived === true })) };
+        case 'runpane:peers:mint': {
+          const peer = { id: `peer-${daemon.peers.length + 1}`, label: String(request.label), sessions: Array.isArray(request.sessions) ? request.sessions.map(String) : [] };
+          daemon.peers.push(peer);
+          const connectionCode = encodePairingCode({ v: 1, label: host, baseUrl: profile.baseUrl, token: `peer-token-${peer.id}`, transport: 'http+sse' });
+          return { ok: true, peer: { id: peer.id, label: peer.label, scope: 'peer', allowedSessionIds: peer.sessions }, connectionCode };
+        }
+        case 'runpane:peers:revoke': {
+          const before = daemon.peers.length;
+          daemon.peers = daemon.peers.filter((peer) => peer.id !== request.peer);
+          if (daemon.peers.length === before) throw new Error('Unknown peer');
+          return { ok: true, revoked: true, peerId: String(request.peer) };
+        }
+        default:
+          throw new Error(`fake daemon: unexpected ${channel}`);
+      }
     },
   };
   return { deps, world, out, err, root, desktopDir: path.join(root, 'desktop') };

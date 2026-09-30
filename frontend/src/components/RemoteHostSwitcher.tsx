@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react';
-import { Laptop, Plug, Radio, Server } from 'lucide-react';
+import { Copy, Laptop, Plug, Radio, Server } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { API } from '../utils/api';
 import { useConfigStore } from '../stores/configStore';
@@ -57,7 +57,7 @@ export function RemoteHostSwitcher({
       id: profile.id,
       label: profile.label,
       description: remote && profile.id === model.selectedId
-        ? `${activeStatusText} · ${profile.baseUrl}`
+        ? (model.cloudWakeCommand ? `Asleep? Run ${model.cloudWakeCommand}` : `${activeStatusText} · ${profile.baseUrl}`)
         : profile.baseUrl,
       icon: Server,
       disabled: switching,
@@ -82,6 +82,16 @@ export function RemoteHostSwitcher({
       width="lg"
       footer={({ close }) => (
         <>
+          {model.cloudWakeCommand && (
+            <DropdownMenuItem
+              icon={Copy}
+              label="Copy wake command"
+              onClick={() => {
+                close();
+                void navigator.clipboard.writeText(model.cloudWakeCommand ?? '').catch(() => undefined);
+              }}
+            />
+          )}
           {model.hostingSummary && (
             <DropdownMenuItem icon={Radio} label={model.hostingSummary} onClick={() => { close(); onOpenHosting(); }} />
           )}

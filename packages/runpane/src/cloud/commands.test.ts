@@ -358,7 +358,7 @@ test('setup stores keys 0600, verifies them, and never prints them', async () =>
 
 test('coordinator subcommands are delegated with their raw arguments', async () => {
   const harness = await createTestHarness();
-  await assert.rejects(run(harness, ['coordinator', 'status']), /not available/u);
+  await assert.rejects(run(harness, ['coordinator', 'alerts']), /not available/u);
   let seen: string[] = [];
   harness.deps.runCoordinator = async (argv) => {
     seen = argv;

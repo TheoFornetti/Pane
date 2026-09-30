@@ -50,6 +50,20 @@ export interface SandboxHandle {
   writeFile(path: string, content: string): Promise<void>;
 }
 
+/** A provider API key limited to some actions, e.g. the coordinator's stop/resume-only key. */
+export interface ScopedKeyRequest {
+  name: string;
+  /** Provider duration string, e.g. "365d". */
+  ttl: string;
+  actions: string[];
+}
+
+interface ScopedKey {
+  id: string;
+  /** Returned once by the provider; callers write it to a 0600 file and never print it. */
+  secret: string;
+}
+
 export interface CloudProvider {
   readonly name: 'boat';
   /** Cheap authenticated call, used by `runpane cloud setup` to check the key. */
@@ -64,6 +78,9 @@ export interface CloudProvider {
   /** Permanently deletes the sandbox and its disk. Idempotent: a 404 counts as deleted. */
   destroy(sandboxId: string): Promise<void>;
   handle(sandboxId: string): SandboxHandle;
+  createScopedKey(request: ScopedKeyRequest): Promise<ScopedKey>;
+  /** Revokes an API key. Idempotent: a 404 counts as revoked. */
+  revokeKey(keyId: string): Promise<void>;
 }
 
 export class CloudProviderError extends Error {

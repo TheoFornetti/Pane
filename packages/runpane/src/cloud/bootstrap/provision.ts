@@ -117,42 +117,8 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     return value;
   };
   const runner = new StepRunner(sandbox, home);
-
-  await step('upload-scripts', () => uploadScripts(sandbox, home));
-  const identity = await step('identity', () => runner.run('identity', [options.sessionId], identityStepSchema),
-    (value) => (value.reset === true ? 'reset' : 'already this session'));
-  await step('tailscale-install', () => runner.run('tailscale-install', [], envelopeSchema));
-  const current = await runner.run('tailnet-identity', [], tailnetStepSchema);
-  const alreadyJoined = current.backendState === 'Running';
-  if (!alreadyJoined) {
-    await step('check', async () => {
-      const check = await runner.run('check', [], checkStepSchema, { allowFailure: true });
-      if (!check.ok) {
-        const failed = check.failed?.join('; ') ?? 'unknown';
-        throw new BootstrapError('check', `identity strip-list check failed: ${failed}`);
-      }
-      return check;
-    }, (value) => `${String(value.passed)} passed`);
-  }
-
-  const tailnetTcpPorts = options.tailnetTcpPorts ?? [443];
-  await step('firewall', () => runner.run('firewall', [tailnetTcpPorts.join(',')], firewallStepSchema, { timeoutSeconds: 300 }),
-    (value) => `tailnet tcp ${(value.allowedTcp ?? tailnetTcpPorts).join(',')} only`);
-
-  const deletedStaleNodeIds: string[] = [];
-  const tailnet = await step('tailscale-join', async () => {
-    if (alreadyJoined) {
-      return parseIdentity(current);
-    }
-    // M0: a device left under this hostname would push the new node to "<hostname>-1".
-    for (const device of await options.tailscale.findDevicesByHostname(hostname)) {
-      if (await options.tailscale.deleteDevice(device.nodeId)) {
-        deletedStaleNodeIds.push(device.nodeId);
-      }
-    }
-    return joinTailnet(sandbox, runner, options.tailscale, home, hostname, tags);
-  }, (value) => value.magicDnsName);
-  assertTailnetIdentity(tailnet, hostname, tags);
+  const { identity, tailnet, deletedStaleNodeIds } = await prepareAndJoin(sandbox, runner, options, hostname, tags, home, step,
+    options.tailnetTcpPorts ?? [443]);
 
   const runpaneSpec = options.paneSource.kind === 'runpane-npm' ? options.paneSource.spec : '';
   const install = await step('install-pane', () => runner.run('install-pane', [
@@ -228,6 +194,92 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
   };
 }
 
+type StepFn = <T>(name: ProvisionStepName, run: () => Promise<T>, detail?: (value: T) => string) => Promise<T>;
+
+/**
+ * The first half of provisioning, shared with `joinSandboxToTailnet`: identity reset, Tailscale
+ * install, the strip-list check, stale-device cleanup and the tagged join (never Tailscale SSH).
+ */
+async function prepareAndJoin(
+  sandbox: SandboxHandle,
+  runner: StepRunner,
+  options: { sessionId: string; tailscale: TailscaleApi },
+  hostname: string,
+  tags: string[],
+  home: string,
+  step: StepFn,
+  tailnetTcpPorts: number[],
+): Promise<{ identity: { reset?: boolean }; tailnet: TailnetIdentity; deletedStaleNodeIds: string[] }> {
+  await step('upload-scripts', () => uploadScripts(sandbox, home));
+  const identity = await step('identity', () => runner.run('identity', [options.sessionId], identityStepSchema),
+    (value) => (value.reset === true ? 'reset' : 'already this session'));
+  await step('tailscale-install', () => runner.run('tailscale-install', [], envelopeSchema));
+  const current = await runner.run('tailnet-identity', [], tailnetStepSchema);
+  const alreadyJoined = current.backendState === 'Running';
+  if (!alreadyJoined) {
+    await step('check', async () => {
+      const check = await runner.run('check', [], checkStepSchema, { allowFailure: true });
+      if (!check.ok) {
+        const failed = check.failed?.join('; ') ?? 'unknown';
+        throw new BootstrapError('check', `identity strip-list check failed: ${failed}`);
+      }
+      return check;
+    }, (value) => `${String(value.passed)} passed`);
+  }
+
+  await step('firewall', () => runner.run('firewall', [tailnetTcpPorts.join(',')], firewallStepSchema, { timeoutSeconds: 300 }),
+    (value) => `tailnet tcp ${(value.allowedTcp ?? tailnetTcpPorts).join(',')} only`);
+
+  const deletedStaleNodeIds: string[] = [];
+  const tailnet = await step('tailscale-join', async () => {
+    if (alreadyJoined) {
+      return parseIdentity(current);
+    }
+    // M0: a device left under this hostname would push the new node to "<hostname>-1".
+    for (const device of await options.tailscale.findDevicesByHostname(hostname)) {
+      if (await options.tailscale.deleteDevice(device.nodeId)) {
+        deletedStaleNodeIds.push(device.nodeId);
+      }
+    }
+    return joinTailnet(sandbox, runner, options.tailscale, home, hostname, tags);
+  }, (value) => value.magicDnsName);
+  assertTailnetIdentity(tailnet, hostname, tags);
+  return { identity, tailnet, deletedStaleNodeIds };
+}
+
+interface JoinOnlyOptions {
+  /** Keys the one-time identity reset, like a cloud Session id does in provisionSandbox. */
+  sessionId: string;
+  hostname: string;
+  /** The only tcp ports this node accepts from the tailnet (the coordinator: its API port). */
+  tailnetTcpPorts: number[];
+  tailscale: TailscaleApi;
+  tags?: string[];
+  sandboxHome?: string;
+  onStep?: (step: ProvisionStep) => void;
+}
+
+/**
+ * Joins a sandbox to the tailnet with the same identity reset, strip-list check and tagged,
+ * SSH-off key as a cloud Session, without installing Pane. Used for the coordinator's sandbox.
+ * Safe to re-run: an already joined node is kept.
+ */
+export async function joinSandboxToTailnet(sandbox: SandboxHandle, options: JoinOnlyOptions): Promise<TailnetIdentity> {
+  const home = options.sandboxHome ?? DEFAULT_SANDBOX_HOME;
+  const hostname = assertHostname(options.hostname);
+  const step: StepFn = async (name, run, detail) => {
+    options.onStep?.({ step: name, state: 'start' });
+    const started = Date.now();
+    const value = await run();
+    options.onStep?.({ step: name, state: 'done', elapsedMs: Date.now() - started, detail: detail?.(value) });
+    return value;
+  };
+  const runner = new StepRunner(sandbox, home);
+  const { tailnet } = await prepareAndJoin(sandbox, runner, options, hostname, options.tags ?? [CLOUD_SESSION_TAG], home, step,
+    options.tailnetTcpPorts);
+  return tailnet;
+}
+
 /**
  * Repair path: gives a sandbox a fresh tailnet node under the SAME hostname. Deletes the old
  * device(s) through the API first (M0: otherwise the name gets a -1 suffix and the old name keeps
@@ -263,6 +315,40 @@ export async function reenrolSandbox(sandbox: SandboxHandle, options: ReenrolOpt
     await runner.run('serve-restore', [], envelopeSchema);
   }
   return { ...identity, deletedNodeIds, elapsedMs: Date.now() - started };
+}
+
+interface RepairOptions {
+  hostname: string;
+  tailscale: TailscaleApi;
+  oldNodeId?: string;
+  /** False for a node without a Pane daemon behind Tailscale Serve (the coordinator). */
+  restoreServe?: boolean;
+  sandboxHome?: string;
+}
+
+type RepairResult =
+  | { reenrolled: false; backendState: string }
+  | ({ reenrolled: true; previousBackendState: string } & ReenrolResult);
+
+/**
+ * Wake-time repair: when a resumed sandbox's node is no longer logged in (seen live on boat: an
+ * incremental restore brought tailscaled.state back empty), re-enrol it under the same hostname.
+ * A node that is running is left alone, so this is safe to call whenever /health does not answer.
+ */
+export async function repairTailnetIfLoggedOut(sandbox: SandboxHandle, options: RepairOptions): Promise<RepairResult> {
+  const home = options.sandboxHome ?? DEFAULT_SANDBOX_HOME;
+  await uploadScripts(sandbox, home);
+  const current = await new StepRunner(sandbox, home).run('tailnet-identity', [], tailnetStepSchema);
+  const backendState = current.backendState ?? 'unknown';
+  if (backendState === 'Running') return { reenrolled: false, backendState };
+  const result = await reenrolSandbox(sandbox, {
+    hostname: options.hostname,
+    tailscale: options.tailscale,
+    oldNodeId: options.oldNodeId,
+    restoreServe: options.restoreServe,
+    sandboxHome: home,
+  });
+  return { reenrolled: true, previousBackendState: backendState, ...result };
 }
 
 async function registerRepo(pairingCode: string, dir: string, name: string, transport?: RemoteHttpTransport): Promise<void> {

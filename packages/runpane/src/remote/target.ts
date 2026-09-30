@@ -105,8 +105,8 @@ export async function invokeRemote(
   // The key is fixed once, so every resend is the same logical submit.
   const requestArgs = withIdempotencyKey(channel, args);
   const deliver = async () => {
-    const resolved = await resolveOrchestratorPanel(channel, requestArgs, (listArgs) => (
-      client().invoke('runpane:panels:list', listArgs, { timeoutMs: 30_000 })
+    const resolved = await resolveOrchestratorPanel(channel, requestArgs, (listChannel, listArgs) => (
+      client().invoke(listChannel, listArgs, { timeoutMs: 30_000 })
     ));
     return client().invoke(channel, resolved, { timeoutMs: options.timeoutMs });
   };
@@ -121,7 +121,9 @@ export async function invokeRemote(
   if (!cloud || !target.coordinator) {
     throw new RemoteTargetError(
       `Could not reach ${target.host.label} at ${baseUrl}. ` +
-      (cloud ? 'No runpane cloud coordinator is configured, so it cannot be woken from here.' : 'Is the host up and on your tailnet?'),
+      (cloud
+        ? `It is probably asleep. Run \`runpane cloud wake ${cloud.hostname ?? target.host.label}\` (no runpane cloud coordinator is configured here to wake it on submit).`
+        : 'Is the host up and on your tailnet?'),
       'ERR_RUNPANE_HOST_UNREACHABLE',
     );
   }
@@ -186,12 +188,14 @@ async function pollUntilSettled(
 
 function hostStateError(target: DaemonTarget, state: CloudHostState, woke: boolean): RemoteTargetError {
   const name = target.host.label;
+  // The tailnet hostname is one shell word; a label like "Glue Beta" would break a pasted command.
+  const wakeName = target.host.cloud?.hostname ?? name;
   const detail = state.detail ? ` (${state.detail})` : '';
   const code = `ERR_RUNPANE_HOST_${state.status.toUpperCase().replace(/-/g, '_')}`;
   switch (state.status) {
     case 'asleep':
       return new RemoteTargetError(
-        `Cloud host ${name} is asleep${detail}. Only panels submit wakes a host; run \`runpane cloud wake ${name}\` to wake it.`,
+        `Cloud host ${name} is asleep${detail}. Only panels submit wakes a host; run \`runpane cloud wake ${wakeName}\` to wake it.`,
         code,
       );
     case 'waking':
@@ -250,16 +254,56 @@ const panelListSchema = boundary.object({
   })),
 });
 
-/** Resolves `--panel orchestrator` through the target's `panels:list`, which lists only orchestrator panels for a peer. */
+/** Every daemon has this built-in Session; a named Session the user created is the likelier target. */
+const PANE_CHAT_SESSION_ID = 'legacy-pane-chat';
+
+const sessionListSchema = boundary.object({
+  sessions: boundary.array(boundary.object({
+    id: boundary.string,
+    name: boundary.string,
+    archived: boundary.optional(boundary.boolean),
+    agent: boundary.optional(boundary.string),
+    panelIds: boundary.optional(boundary.jsonObject),
+  })),
+});
+
+/**
+ * Resolves `--panel orchestrator`. A peer's `panels:list` lists only the orchestrator panels it may
+ * reach; a full client's daemon wants a Pane there, so its Sessions' orchestrator panels are read
+ * from `sessions:list` instead (a peer may not call that).
+ */
 async function resolveOrchestratorPanel(
   channel: string,
   args: unknown[],
-  listPanels: (args: unknown[]) => Promise<JsonValue | undefined>,
+  invoke: (channel: string, args: unknown[]) => Promise<JsonValue | undefined>,
 ): Promise<unknown[]> {
   if (!WAKING_CHANNELS.has(channel)) return args;
   const request = firstRequestObject(args);
   if (!request || request.panelId !== ORCHESTRATOR_PANEL_SELECTOR) return args;
-  const { panels } = decodeBoundary(await listPanels([{}]), panelListSchema);
+  let panels: { id: string; title?: string | null }[];
+  try {
+    panels = decodeBoundary(await invoke('runpane:panels:list', [{}]), panelListSchema).panels;
+  } catch (error) {
+    // The daemon answers a full client's pane-less panels:list with an error (a 500, retried as a read).
+    if (error instanceof RemoteConnectError || error instanceof RemoteAuthError) throw error;
+    let listed: JsonValue | undefined;
+    try {
+      listed = await invoke('runpane:sessions:list', []);
+    } catch {
+      throw error;
+    }
+    const all = decodeBoundary(listed, sessionListSchema).sessions.filter((session) => session.archived !== true);
+    const named = all.filter((session) => session.id !== PANE_CHAT_SESSION_ID);
+    const sessions = named.length > 0 ? named : all;
+    panels = sessions.flatMap((session) => {
+      if (!session.agent || !session.panelIds) return [];
+      try {
+        return [{ id: decodeBoundary(session.panelIds[session.agent], boundary.nonEmptyString), title: session.name }];
+      } catch {
+        return []; // A Session whose orchestrator panel is not created yet.
+      }
+    });
+  }
   if (panels.length !== 1) {
     const found = panels.map((panel) => `${panel.id}${panel.title ? ` (${panel.title})` : ''}`).join(', ') || 'none';
     throw new RemoteTargetError(

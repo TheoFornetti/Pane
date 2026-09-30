@@ -46,7 +46,7 @@ export function buildCoordinator(
     webhookUrl: config.alerts.webhookUrl,
   });
   const activity = new SandboxActivity(clock);
-  const guard = new RunawayGuard(clock, config.guards);
+  const guard = new RunawayGuard(clock, config.guards, path.join(config.stateDir, 'resumes.json'));
   const scope = {
     managedNamePrefix: config.managedNamePrefix,
     selfSandboxId: config.selfSandboxId,

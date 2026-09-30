@@ -29,8 +29,10 @@ It runs on a tiny sandbox of its own (boat `small`), joined to the tailnet as `t
   and `destroy` run on the laptop with the unscoped key. Scope the key to the Sessions' sandbox ids when
   you can. The provider interface also has no delete method, so the code can't destroy a sandbox either.
 - **State.** The coordinator keeps no state that must persist (v4 I15). The provider and the directory
-  are the truth. What it keeps in memory (wake times, safe-to-stop streaks, resume counts) only makes it
-  more cautious after a restart.
+  are the truth. Wake times and safe-to-stop streaks live in memory; losing them only makes it more
+  cautious after a restart. The runaway guard's resume history (last hour) is kept in
+  `<stateDir>/resumes.json`, so the service, a restarted service and `coordinator wake --local` all count
+  the same resumes.
 
 ## What it does
 

@@ -17,7 +17,9 @@ client: it lists cloud Sessions next to your other remote hosts and never create
 - **A boat.dev API key** (`BOAT_DEV_API_KEY`) on a paid plan with a payment method. `runpane cloud`
   creates sandboxes without a provider time limit, which boat allows only with auto-pay on.
 - **A Tailscale OAuth client** with the `auth_keys` scope for `tag:rp-session`: its client id and its
-  secret (`TAILSCALE_OAUTH_SECRET`). Your tailnet policy must define `tag:rp-session`.
+  secret (`TAILSCALE_OAUTH_SECRET`). Your tailnet policy must define `tag:rp-session`. Recommended grants
+  (see [Tailnet policy](#tailnet-policy)): Sessions reach each other on tcp/443 only, plus the coordinator's
+  tcp/47300.
 - **Tailscale on every device that uses a cloud Session**: the laptop that runs `runpane`, and your phone
   if you use the phone app. Cloud Sessions are reachable only over the tailnet.
 - **Node.js 20+ and npm** on the laptop.
@@ -87,10 +89,12 @@ first TLS certificate). It:
 
 1. creates a sandbox named `rp-<8 chars>` (the same name is its tailnet host name; `setup --name-prefix`
    changes `rp`);
-2. joins your tailnet as `tag:rp-session`, with a single-use key and Tailscale SSH off;
+2. turns on a host firewall that lets only tcp/443 (Tailscale Serve) in over the tailnet, then joins your
+   tailnet as `tag:rp-session`, with a single-use key and Tailscale SSH off;
 3. starts the Pane daemon, reachable at `https://rp-<id>.<your-tailnet>.ts.net`;
 4. clones `--repo` (public HTTPS repositories only; add `--ref <branch>` for a branch) into
-   `/home/user/<repo>`;
+   `/home/user/<repo>` and registers it with the Session's Pane, so `runpane --host <Session> panes create
+   --repo <repo>` works right away;
 5. saves the host in `~/.config/runpane-cloud/hosts/` and the pairing code in
    `~/.config/runpane-cloud/hosts/<host>.pairing` (0600, never printed);
 6. adds the host to Pane desktop's saved remote hosts, if `~/.pane/config.json` exists.
@@ -268,6 +272,26 @@ Destroy costs no boat start.
 (including a coordinator wake) is one start. `stop`, `destroy`, `list` and `status` are free. The limits
 are **12 a minute, 60 an hour and 200 a day**. Past them boat answers HTTP 429 and `new`/`wake` exit 1
 with boat's message; the CLI does not retry. Wait and run it again.
+
+## Tailnet policy
+
+`runpane cloud` can't edit your tailnet policy (its OAuth client only mints keys). Each Session therefore
+guards itself: an nftables table `inet rp_tailnet` (`/etc/rp-tailnet-firewall.nft`, reloaded at boot by
+`rp-tailnet-firewall.service`, so it survives sleep and wake) accepts only replies and tcp/443 on
+`tailscale0`. The sandbox provider runs its own services on the machine (a desktop stream on 8090, an agent
+service on 8911, sshd), and without the firewall a compromised peer Session could reach them.
+
+Tighten the policy too, so the tailnet enforces the same thing. With grants:
+
+```json
+"grants": [
+  { "src": ["autogroup:member"], "dst": ["tag:rp-session"], "ip": ["tcp:443", "tcp:47300"] },
+  { "src": ["tag:rp-session"], "dst": ["tag:rp-session"], "ip": ["tcp:443", "tcp:47300"] }
+]
+```
+
+`tcp:47300` is only for the coordinator (section 6). Drop it if you don't run one. Keep your own rules
+for your other devices.
 
 ## Troubleshooting
 

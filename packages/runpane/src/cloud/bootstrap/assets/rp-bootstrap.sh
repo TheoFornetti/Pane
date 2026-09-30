@@ -275,9 +275,10 @@ PY
 # nothing (a refused issuance doesn't count against the limit).
 step_cert_status() {
   local fqdn="$1" hit=""
-  hit="$(sudo journalctl -u tailscaled --since '-20 min' --no-pager -o cat 2>/dev/null | grep -iE 'rateLimited|too many certificates' | tail -1)"
+  # set -o pipefail: a grep with no match, or tailscale cert failing (it does when refused), must not end the step.
+  hit="$(sudo journalctl -u tailscaled --since '-20 min' --no-pager -o cat 2>/dev/null | grep -iE 'rateLimited|too many certificates' | tail -1 || true)"
   if [ -z "$hit" ]; then
-    hit="$(cd /tmp && sudo timeout 60 tailscale cert --cert-file /dev/null --key-file /dev/null "$fqdn" 2>&1 | grep -iE 'rateLimited|too many certificates|429' | tail -1)"
+    hit="$(cd /tmp && sudo timeout 60 tailscale cert --cert-file /dev/null --key-file /dev/null "$fqdn" 2>&1 | grep -iE 'rateLimited|too many certificates|429' | tail -1 || true)"
   fi
   result "$(python3 -c 'import json,sys;print(json.dumps({"ok":True,"rateLimited":bool(sys.argv[1]),"detail":sys.argv[1][:300] or None}))' "$hit")"
 }

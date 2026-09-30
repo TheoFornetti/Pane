@@ -158,7 +158,7 @@ export function createCloudStore(dir: string = defaultCloudDir()): CloudStore {
 }
 
 /** Writes JSON through a 0600 temp file and a rename, creating parent dirs 0700. */
-export async function writePrivateJson(filePath: string, value: unknown): Promise<void> {
+export async function writePrivateJson(filePath: string, value: CloudCredentials | CloudSettings | CloudHostRecord): Promise<void> {
   await ensurePrivateDir(path.dirname(filePath));
   const tmp = `${filePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   await fs.writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
@@ -187,8 +187,8 @@ export async function readJsonFile<Value>(filePath: string): Promise<Value | und
   }
 }
 
-export function isNotFound(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+export function isNotFound(cause: unknown): boolean {
+  return cause instanceof Error && 'code' in cause && cause.code === 'ENOENT';
 }
 
 /** Finds a host by tailnet hostname, cloud Session id, label or sandbox id. */

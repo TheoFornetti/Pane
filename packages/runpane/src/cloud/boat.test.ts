@@ -2,11 +2,17 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createBoatProvider } from './boat';
 
+/** Request bodies the adapter sends, as the tests read them back. */
+interface SentBody {
+  path?: string;
+  content?: string;
+}
+
 interface Recorded {
   method: string;
   url: string;
   headers: Record<string, string>;
-  body: unknown;
+  body: SentBody | undefined;
 }
 
 function fakeFetch(responses: Array<{ status: number; body?: unknown }>) {
@@ -17,7 +23,7 @@ function fakeFetch(responses: Array<{ status: number; body?: unknown }>) {
       method: init?.method ?? 'GET',
       url: String(input),
       headers,
-      body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
     });
     const next = responses.shift();
     if (!next) throw new Error(`unexpected request ${init?.method} ${String(input)}`);
@@ -26,7 +32,13 @@ function fakeFetch(responses: Array<{ status: number; body?: unknown }>) {
   return { calls, impl };
 }
 
-const sandbox = (overrides: Record<string, unknown> = {}) => ({
+interface SandboxOverrides {
+  id?: string;
+  name?: string;
+  state?: string;
+}
+
+const sandbox = (overrides: SandboxOverrides = {}) => ({
   id: 'bx_abcdefgh', name: '', state: 'idle', type: 'large', desktopAvailable: false, snapshotAvailable: true, ...overrides,
 });
 
@@ -114,10 +126,9 @@ test('runScript uploads the script as a file, runs it with bash, and deletes it'
   assert.deepEqual(result, { exitCode: 3, stdout: 'out', stderr: 'err', timedOut: false });
   const upload = fetch.calls[0];
   assert.equal(upload.method, 'PUT');
-  assert.ok(upload.body && typeof upload.body === 'object' && 'path' in upload.body && 'content' in upload.body);
-  const filePath = String(upload.body.path);
+  const filePath = String(upload.body?.path);
   assert.match(filePath, /^\/home\/user\/\.runpane-cloud\/run-[0-9a-f]{12}\.sh$/u);
-  assert.equal(Buffer.from(String(upload.body.content), 'base64').toString('utf8'), 'echo "multi\nline"');
+  assert.equal(Buffer.from(String(upload.body?.content), 'base64').toString('utf8'), 'echo "multi\nline"');
   assert.deepEqual(fetch.calls[1].body, { command: `bash ${filePath}; rc=$?; rm -f ${filePath}; exit $rc`, timeoutSeconds: 600 });
 });
 

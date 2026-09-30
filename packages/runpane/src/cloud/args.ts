@@ -48,41 +48,41 @@ type BooleanFlag = {
   [Key in keyof CloudArgs]-?: CloudArgs[Key] extends boolean ? Key : never
 }[keyof CloudArgs];
 
-const VALUE_FLAGS: Record<string, ValueFlag> = {
-  '--label': 'label',
-  '--repo': 'repo',
-  '--ref': 'ref',
-  '--size': 'size',
-  '--from': 'fromSnapshot',
-  '--name-prefix': 'namePrefix',
-  '--pane-deb-url': 'paneDebUrl',
-  '--pane-npm-spec': 'paneNpmSpec',
-  '--desktop-dir': 'desktopDir',
-  '--timeout-ms': 'timeoutMs',
-  '--boat-key-file': 'boatKeyFile',
-  '--tailscale-client-id': 'tailscaleClientId',
-  '--tailscale-secret-file': 'tailscaleSecretFile',
-  '--tailscale-tailnet': 'tailscaleTailnet',
-  '--anthropic-key-file': 'anthropicKeyFile',
-  '--golden': 'golden',
-  '--max-live': 'maxLive',
-};
+const VALUE_FLAGS = new Map<string, ValueFlag>([
+  ['--label', 'label'],
+  ['--repo', 'repo'],
+  ['--ref', 'ref'],
+  ['--size', 'size'],
+  ['--from', 'fromSnapshot'],
+  ['--name-prefix', 'namePrefix'],
+  ['--pane-deb-url', 'paneDebUrl'],
+  ['--pane-npm-spec', 'paneNpmSpec'],
+  ['--desktop-dir', 'desktopDir'],
+  ['--timeout-ms', 'timeoutMs'],
+  ['--boat-key-file', 'boatKeyFile'],
+  ['--tailscale-client-id', 'tailscaleClientId'],
+  ['--tailscale-secret-file', 'tailscaleSecretFile'],
+  ['--tailscale-tailnet', 'tailscaleTailnet'],
+  ['--anthropic-key-file', 'anthropicKeyFile'],
+  ['--golden', 'golden'],
+  ['--max-live', 'maxLive'],
+]);
 
-const BOOLEAN_FLAGS: Record<string, BooleanFlag> = {
-  '--json': 'json',
-  '--yes': 'yes',
-  '-y': 'yes',
-  '--force': 'force',
-  '--no-wait': 'noWait',
-  '--no-import': 'noImport',
-  '--keep-on-failure': 'keepOnFailure',
-  '--no-golden': 'noGolden',
-  '--pane-preinstalled': 'panePreinstalled',
-  '--no-verify': 'noVerify',
-};
+const BOOLEAN_FLAGS = new Map<string, BooleanFlag>([
+  ['--json', 'json'],
+  ['--yes', 'yes'],
+  ['-y', 'yes'],
+  ['--force', 'force'],
+  ['--no-wait', 'noWait'],
+  ['--no-import', 'noImport'],
+  ['--keep-on-failure', 'keepOnFailure'],
+  ['--no-golden', 'noGolden'],
+  ['--pane-preinstalled', 'panePreinstalled'],
+  ['--no-verify', 'noVerify'],
+]);
 
 /** Flags each subcommand accepts, beyond --json. */
-const ALLOWED: Record<CloudSubcommand, readonly string[]> = {
+const ALLOWED = {
   setup: ['--boat-key-file', '--tailscale-client-id', '--tailscale-secret-file', '--tailscale-tailnet', '--anthropic-key-file',
     '--golden', '--no-golden', '--size', '--name-prefix', '--pane-deb-url', '--pane-npm-spec', '--pane-preinstalled', '--max-live',
     '--coordinator', '--no-coordinator', '--no-verify'],
@@ -96,7 +96,7 @@ const ALLOWED: Record<CloudSubcommand, readonly string[]> = {
   pair: ['--host'],
   sync: ['--desktop-dir'],
   coordinator: [],
-};
+} satisfies Record<CloudSubcommand, readonly string[]>;
 
 export function isCloudSubcommand(value: string | undefined): value is CloudSubcommand {
   return CLOUD_SUBCOMMANDS.some((name) => name === value);
@@ -126,7 +126,7 @@ export function parseCloudArgs(argv: readonly string[]): CloudArgs {
     return parsed;
   }
 
-  const allowed = new Set(['--json', ...ALLOWED[first]]);
+  const allowed = new Set<string>(['--json', ...ALLOWED[first]]);
   for (let index = 0; index < rest.length; index++) {
     const raw = rest[index];
     const separator = raw.startsWith('--') ? raw.indexOf('=') : -1;
@@ -146,7 +146,7 @@ export function parseCloudArgs(argv: readonly string[]): CloudArgs {
       parsed.coordinator = flag === '--coordinator';
       continue;
     }
-    const booleanKey = BOOLEAN_FLAGS[flag];
+    const booleanKey = BOOLEAN_FLAGS.get(flag);
     if (booleanKey) {
       parsed[booleanKey] = true;
       continue;
@@ -160,7 +160,9 @@ export function parseCloudArgs(argv: readonly string[]): CloudArgs {
       parsed.host = value;
       continue;
     }
-    assignValue(parsed, VALUE_FLAGS[flag], flag, value);
+    const valueKey = VALUE_FLAGS.get(flag);
+    if (!valueKey) throw new Error(`Unknown option for runpane cloud ${first}: ${flag}`);
+    assignValue(parsed, valueKey, flag, value);
   }
 
   if (HOST_SUBCOMMANDS.has(first) && !parsed.host) {

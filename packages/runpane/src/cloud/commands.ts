@@ -221,9 +221,12 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       magicDnsName: '',
       pairingPath: deps.store.pairingPath(hostname),
       paneSource,
-      ...(args.repo ? { repo: { url: args.repo, ...(args.ref ? { ref: args.ref } : {}) } } : {}),
     },
   };
+  if (args.repo) {
+    record.meta.repo = { url: args.repo };
+    if (args.ref) record.meta.repo.ref = args.ref;
+  }
   await deps.store.writeHost(record);
 
   try {
@@ -252,11 +255,12 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       ...record.profile,
       baseUrl: pairing.baseUrl,
       token: pairing.token,
-      ...(pairing.tunnel?.kind === 'tailscale'
-        ? { tunnel: { kind: 'tailscale', selected: true, ...(pairing.tunnel.note ? { note: pairing.tunnel.note } : {}) } }
-        : {}),
       cloud: { ...record.profile.cloud, nodeId: outcome.nodeId },
     };
+    if (pairing.tunnel?.kind === 'tailscale') {
+      record.profile.tunnel = { kind: 'tailscale', selected: true };
+      if (pairing.tunnel.note) record.profile.tunnel.note = pairing.tunnel.note;
+    }
     record.meta.magicDnsName = outcome.magicDnsName;
     if (outcome.daemonVersion) record.meta.daemonVersion = outcome.daemonVersion;
     if (coordinatorEnabled) record.meta.coordinatorPairingPath = deps.store.coordinatorPairingPath(hostname);
@@ -399,13 +403,13 @@ async function hostStatus(record: CloudHostRecord, provider: CloudProvider, tail
     const result = record.profile.baseUrl
       ? await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: STATUS_HEALTH_TIMEOUT_MS, intervalMs: 1_000 })
       : { ok: false, elapsedMs: 0 };
-    health = { ok: result.ok, ...(result.status ? { status: result.status } : {}), ...(result.version ? { version: result.version } : {}) };
+    health = { ok: result.ok, status: result.status, version: result.version };
     status = result.ok ? 'awake' : 'daemon-down';
   }
   return {
     host: hostSummary(record),
     status,
-    sandbox: { state: sandbox.state, providerState: sandbox.providerState, ...(sandbox.size ? { size: sandbox.size } : {}) },
+    sandbox: { state: sandbox.state, providerState: sandbox.providerState, size: sandbox.size },
     tailnet: { devices, sameNode },
     health,
   };
@@ -625,7 +629,12 @@ function hostSummary(record: CloudHostRecord) {
   };
 }
 
-function report(args: CloudArgs, deps: CloudDeps, json: object, text: string): void {
+/** A command's `--json` result; every one carries `ok`. */
+interface CloudJsonResult {
+  ok: boolean;
+}
+
+function report<Result extends CloudJsonResult>(args: CloudArgs, deps: CloudDeps, json: Result, text: string): void {
   deps.stdout(args.json ? JSON.stringify(json, null, 2) : text);
 }
 

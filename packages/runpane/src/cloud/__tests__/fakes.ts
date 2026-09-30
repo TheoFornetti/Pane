@@ -137,7 +137,7 @@ export function createFakeBootstrap(world: FakeWorld): BootstrapPort {
       const host = new URL(baseUrl).hostname.split('.')[0];
       const sandbox = [...world.sandboxes.values()].find((candidate) => candidate.name === host);
       const ok = world.healthy.has(host) && sandbox?.state === 'running';
-      return { ok, elapsedMs: 1, ...(ok ? { status: 200, version: '2.4.141' } : {}) };
+      return ok ? { ok, elapsedMs: 1, status: 200, version: '2.4.141' } : { ok, elapsedMs: 1 };
     },
     async provision(sandbox: SandboxHandle, request: ProvisionRequest) {
       world.calls.push(`provision ${sandbox.id} ${request.hostname}`);

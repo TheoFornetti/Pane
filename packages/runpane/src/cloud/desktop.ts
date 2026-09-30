@@ -2,8 +2,8 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { isNotFound } from './store';
-import type { CloudHostProfile } from './store';
+import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../boundaryDecoder';
+import { isNotFound, type CloudHostProfile } from './store';
 
 /**
  * Puts cloud host profiles into the desktop Pane's saved remote hosts, so the host switcher (#853)
@@ -29,7 +29,25 @@ export interface DesktopImportResult {
   removed: string[];
 }
 
-type JsonRecord = Record<string, unknown>;
+/** The parts of a saved profile this module matches on; everything else is carried through as-is. */
+const profileKeysSchema = boundary.object({
+  id: boundary.optional(boundary.string),
+  baseUrl: boundary.optional(boundary.string),
+  cloud: boundary.optional(boundary.object({ sessionId: boundary.optional(boundary.string) })),
+});
+
+const clientSchema = boundary.object({
+  profiles: boundary.optional(boundary.array(boundary.json)),
+  activeProfileId: boundary.optional(boundary.nullable(boundary.string)),
+  mode: boundary.optional(boundary.string),
+});
+
+interface SavedProfile {
+  raw: JsonObject;
+  id?: string;
+  baseUrl?: string;
+  sessionId?: string;
+}
 
 export async function syncDesktopProfiles(options: {
   desktopDir: string;
@@ -39,30 +57,28 @@ export async function syncDesktopProfiles(options: {
 }): Promise<DesktopImportResult> {
   const configPath = path.join(options.desktopDir, 'config.json');
   const result: DesktopImportResult = { configPath, added: [], updated: [], removed: [] };
-  let config: JsonRecord = {};
+  let config: JsonObject = {};
   let mode = 0o600;
   try {
-    const text = await fs.readFile(configPath, 'utf8');
-    const parsed: unknown = JSON.parse(text);
-    if (!isRecord(parsed)) throw new Error(`${configPath} is not a JSON object.`);
-    config = parsed;
+    config = decodeBoundary(JSON.parse(await fs.readFile(configPath, 'utf8')), boundary.jsonObject);
     mode = (await fs.stat(configPath)).mode & 0o777;
   } catch (error) {
-    if (!isNotFound(error)) throw error;
+    if (!isNotFound(error)) throw new Error(`Could not read ${configPath}: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const remoteDaemon = isRecord(config.remoteDaemon) ? { ...config.remoteDaemon } : {};
-  const client = isRecord(remoteDaemon.client) ? { ...remoteDaemon.client } : {};
-  let profiles: JsonRecord[] = Array.isArray(client.profiles) ? client.profiles.filter(isRecord) : [];
-  let activeProfileId = typeof client.activeProfileId === 'string' ? client.activeProfileId : null;
+  const remoteDaemon = asObject(config.remoteDaemon);
+  const clientRaw = asObject(remoteDaemon.client);
+  const client = decodeBoundary(clientRaw, clientSchema);
+  let profiles = (client.profiles ?? []).flatMap(toSavedProfile);
+  let activeProfileId = client.activeProfileId ?? null;
   let clientMode = client.mode === 'remote' ? 'remote' : 'local';
 
   for (const sessionId of options.removeSessionIds ?? []) {
-    const before = profiles.length;
-    const removedIds = profiles.filter((profile) => cloudSessionId(profile) === sessionId).map((profile) => profile.id);
-    profiles = profiles.filter((profile) => cloudSessionId(profile) !== sessionId);
-    if (profiles.length !== before) result.removed.push(sessionId);
-    if (activeProfileId && removedIds.includes(activeProfileId)) {
+    const removed = profiles.filter((profile) => profile.sessionId === sessionId);
+    if (removed.length === 0) continue;
+    profiles = profiles.filter((profile) => profile.sessionId !== sessionId);
+    result.removed.push(sessionId);
+    if (activeProfileId && removed.some((profile) => profile.id === activeProfileId)) {
       activeProfileId = null;
       clientMode = 'local';
     }
@@ -70,23 +86,25 @@ export async function syncDesktopProfiles(options: {
 
   for (const profile of options.upsert ?? []) {
     const index = profiles.findIndex((existing) =>
-      cloudSessionId(existing) === profile.cloud.sessionId || existing.baseUrl === profile.baseUrl);
+      existing.sessionId === profile.cloud.sessionId || existing.baseUrl === profile.baseUrl);
     if (index === -1) {
-      profiles.push({ ...profile });
+      profiles.push({ raw: profileJson(profile, profile.id), id: profile.id, baseUrl: profile.baseUrl, sessionId: profile.cloud.sessionId });
       result.added.push(profile.cloud.hostname);
     } else {
       // Keep the desktop's profile id so an active connection and any references survive.
-      const existingId = typeof profiles[index].id === 'string' ? profiles[index].id : profile.id;
-      profiles[index] = { ...profile, id: existingId };
+      const id = profiles[index].id ?? profile.id;
+      profiles[index] = { raw: profileJson(profile, id), id, baseUrl: profile.baseUrl, sessionId: profile.cloud.sessionId };
       result.updated.push(profile.cloud.hostname);
     }
   }
 
-  client.profiles = profiles;
-  client.activeProfileId = activeProfileId;
-  client.mode = activeProfileId ? clientMode : 'local';
-  remoteDaemon.client = client;
-  const next = { ...config, remoteDaemon };
+  const nextClient: JsonObject = {
+    ...clientRaw,
+    profiles: profiles.map((profile) => profile.raw),
+    activeProfileId,
+    mode: activeProfileId ? clientMode : 'local',
+  };
+  const next: JsonObject = { ...config, remoteDaemon: { ...remoteDaemon, client: nextClient } };
 
   await fs.mkdir(options.desktopDir, { recursive: true, mode: 0o700 });
   const tmp = `${configPath}.runpane-cloud.${randomBytes(4).toString('hex')}.tmp`;
@@ -96,11 +114,45 @@ export async function syncDesktopProfiles(options: {
   return result;
 }
 
-function cloudSessionId(profile: JsonRecord): string | undefined {
-  const cloud = profile.cloud;
-  return isRecord(cloud) && typeof cloud.sessionId === 'string' ? cloud.sessionId : undefined;
+function toSavedProfile(raw: JsonValue): SavedProfile[] {
+  if (raw === null || Array.isArray(raw) || !isJsonObject(raw)) return [];
+  try {
+    const keys = decodeBoundary(raw, profileKeysSchema);
+    return [{ raw, id: keys.id, baseUrl: keys.baseUrl, sessionId: keys.cloud?.sessionId }];
+  } catch {
+    // A profile this module cannot read is still the desktop's; keep it untouched.
+    return [{ raw }];
+  }
 }
 
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+function profileJson(profile: CloudHostProfile, id: string): JsonObject {
+  const json: JsonObject = {
+    id,
+    label: profile.label,
+    baseUrl: profile.baseUrl,
+    token: profile.token,
+    transport: profile.transport,
+    cloud: {
+      provider: profile.cloud.provider,
+      sandboxId: profile.cloud.sandboxId,
+      sessionId: profile.cloud.sessionId,
+      nodeId: profile.cloud.nodeId,
+      hostname: profile.cloud.hostname,
+      version: profile.cloud.version,
+    },
+  };
+  if (profile.tunnel) {
+    const tunnel: JsonObject = { kind: profile.tunnel.kind, selected: profile.tunnel.selected };
+    if (profile.tunnel.note) tunnel.note = profile.tunnel.note;
+    json.tunnel = tunnel;
+  }
+  return json;
+}
+
+function asObject(value: JsonValue | undefined): JsonObject {
+  return value !== undefined && isJsonObject(value) ? value : {};
+}
+
+function isJsonObject(value: JsonValue): value is JsonObject {
+  return value !== null && !Array.isArray(value) && value instanceof Object;
 }

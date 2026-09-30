@@ -10,10 +10,25 @@ async function run(harness: TestHarness, argv: string[]): Promise<number> {
   return runCloudCommand(parseCloudArgs(argv), harness.deps);
 }
 
-function lastJson(harness: TestHarness): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(harness.out[harness.out.length - 1]);
-  assert.ok(parsed && typeof parsed === 'object' && !Array.isArray(parsed));
-  return Object.fromEntries(Object.entries(parsed));
+/** The `--json` shapes these tests read; a field the CLI renames breaks the test on purpose. */
+interface CloudJson {
+  ok: boolean;
+  status?: string;
+  flushed?: boolean;
+  resumed?: boolean;
+  alreadyStopped?: boolean;
+  sameTailnetNode?: boolean;
+  baseUrl?: string;
+  sandbox?: string;
+  deletedNodeIds?: string[];
+  checks?: Record<string, string>;
+  host?: { hostname: string };
+  hosts?: { hostname: string; state: string }[];
+  unmanaged?: { sandboxId: string }[];
+}
+
+function lastJson(harness: TestHarness): CloudJson {
+  return JSON.parse(harness.out[harness.out.length - 1]);
 }
 
 async function newHost(harness: TestHarness, extra: string[] = []): Promise<string> {
@@ -21,7 +36,7 @@ async function newHost(harness: TestHarness, extra: string[] = []): Promise<stri
   const code = await run(harness, ['new', '--label', 'Checkout', '--name-prefix', 'rp-test', '--desktop-dir', harness.desktopDir, '--yes', '--json', ...extra]);
   assert.equal(code, 0);
   const host = lastJson(harness).host;
-  assert.ok(host && typeof host === 'object' && 'hostname' in host && typeof host.hostname === 'string');
+  assert.ok(host);
   return host.hostname;
 }
 
@@ -200,11 +215,10 @@ test('list merges local hosts with provider state and flags unmanaged look-alike
 
   assert.equal(await run(harness, ['list', '--json']), 0);
   const listed = lastJson(harness);
-  assert.ok(Array.isArray(listed.hosts) && Array.isArray(listed.unmanaged));
-  assert.equal(listed.hosts.length, 1);
-  assert.equal(listed.hosts[0].hostname, hostname);
-  assert.equal(listed.hosts[0].state, 'running');
-  assert.deepEqual(listed.unmanaged.map((entry: { sandboxId: string }) => entry.sandboxId), ['bx_stray001']);
+  assert.equal(listed.hosts?.length, 1);
+  assert.equal(listed.hosts?.[0].hostname, hostname);
+  assert.equal(listed.hosts?.[0].state, 'running');
+  assert.deepEqual(listed.unmanaged?.map((entry) => entry.sandboxId), ['bx_stray001']);
   assert.doesNotMatch(harness.out.join('\n'), /secret-token-/u);
 });
 

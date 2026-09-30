@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import { boundary, decodeBoundary, type BoundarySchema } from '../boundaryDecoder';
 import {
+  CLOUD_SIZES,
   CloudProviderError,
   type CloudProvider,
   type CloudSandbox,
@@ -31,12 +33,25 @@ export interface BoatProviderOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-type JsonRecord = Record<string, unknown>;
+interface CreateBody {
+  type: CloudSize;
+  ttlSeconds: null;
+  noEnv: true;
+  from?: string;
+}
+
+type BoatRequestBody =
+  | CreateBody
+  | { name: string }
+  | { path: string; content: string; encoding: 'base64' }
+  | { command: string; timeoutSeconds: number }
+  | { type?: CloudSize }
+  | Record<string, never>;
 
 interface BoatRequest {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   path: string;
-  body?: JsonRecord;
+  body?: BoatRequestBody;
   headers?: Record<string, string>;
   /** Safe to resend: reads, and creates carrying an Idempotency-Key. */
   retry?: boolean;
@@ -44,8 +59,45 @@ interface BoatRequest {
 
 interface BoatResponse {
   status: number;
-  body: JsonRecord;
+  body: unknown;
 }
+
+const optionalText = boundary.optional(boundary.nullable(boundary.string));
+
+const sandboxSchema = boundary.object({
+  id: boundary.nonEmptyString,
+  name: boundary.optional(boundary.string),
+  state: boundary.optional(boundary.string),
+  type: boundary.optional(boundary.string),
+  error: optionalText,
+  createdAt: optionalText,
+});
+type BoatSandbox = ReturnType<typeof sandboxSchema.decode>;
+
+const sandboxEnvelopeSchema = boundary.object({ sandbox: boundary.optional(sandboxSchema) });
+
+const sandboxListSchema = boundary.object({
+  sandboxes: boundary.optional(boundary.array(sandboxSchema)),
+  nextCursor: optionalText,
+});
+
+const commandResultSchema = boundary.object({
+  exitCode: boundary.optional(boundary.nullable(boundary.number)),
+  stdout: boundary.optional(boundary.string),
+  stderr: boundary.optional(boundary.string),
+  timedOut: boundary.optional(boundary.boolean),
+});
+const commandEnvelopeSchema = boundary.object({ result: boundary.optional(commandResultSchema) });
+
+const accountFields = {
+  email: optionalText,
+  username: optionalText,
+  id: optionalText,
+};
+const meSchema = boundary.object({ ...accountFields, user: boundary.optional(boundary.object(accountFields)) });
+
+const errorFields = { code: boundary.optional(boundary.string), message: boundary.optional(boundary.string) };
+const errorSchema = boundary.object({ ...errorFields, error: boundary.optional(boundary.object(errorFields)) });
 
 export function createBoatProvider(options: BoatProviderOptions): CloudProvider {
   const baseUrl = (options.baseUrl ?? BOAT_API_BASE_URL).replace(/\/+$/u, '');
@@ -54,47 +106,63 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
 
   async function send(request: BoatRequest): Promise<BoatResponse> {
     const attempts = request.retry ? RETRY_DELAYS_MS.length + 1 : 1;
-    let lastError: unknown;
+    let lastError: Error | undefined;
     for (let attempt = 0; attempt < attempts; attempt++) {
       if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt - 1] ?? 4_000);
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${options.apiKey}`,
+        Accept: 'application/json',
+        ...request.headers,
+      };
+      if (request.body) headers['Content-Type'] = 'application/json';
       try {
         const response = await fetchImpl(`${baseUrl}${request.path}`, {
           method: request.method,
-          headers: {
-            Authorization: `Bearer ${options.apiKey}`,
-            Accept: 'application/json',
-            ...(request.body ? { 'Content-Type': 'application/json' } : {}),
-            ...request.headers,
-          },
+          headers,
           body: request.body ? JSON.stringify(request.body) : undefined,
         });
-        const text = await response.text();
-        const body = parseJsonRecord(text);
+        const body = parseJson(await response.text());
         if (response.status >= 500 && attempt < attempts - 1) {
           lastError = boatError(request, response.status, body);
           continue;
         }
         return { status: response.status, body };
       } catch (error) {
-        lastError = error;
-        if (attempt === attempts - 1) break;
+        lastError = error instanceof Error ? error : new Error(String(error));
       }
     }
-    if (lastError instanceof Error) throw lastError;
-    throw new Error(`boat ${request.method} ${request.path} failed`);
+    throw lastError ?? new Error(`boat ${request.method} ${request.path} failed`);
   }
 
-  async function call(request: BoatRequest, okStatuses: readonly number[] = [200, 201, 202]): Promise<JsonRecord> {
+  async function call(request: BoatRequest, okStatuses: readonly number[] = [200, 201, 202]): Promise<unknown> {
     const response = await send(request);
     if (!okStatuses.includes(response.status)) throw boatError(request, response.status, response.body);
     return response.body;
   }
 
+  function decode<Value>(body: unknown, schema: BoundarySchema<Value>, request: Pick<BoatRequest, 'method' | 'path'>): Value {
+    try {
+      return decodeBoundary(body, schema);
+    } catch (error) {
+      throw new CloudProviderError(
+        `boat ${request.method} ${request.path.split('?')[0]} returned an unexpected body: ${error instanceof Error ? error.message : 'unknown'}`,
+        0,
+      );
+    }
+  }
+
+  /** boat wraps a sandbox as `{ sandbox }` on most calls, and returns it bare on some. */
+  function decodeSandbox(body: unknown, request: Pick<BoatRequest, 'method' | 'path'>): CloudSandbox {
+    const envelope = decode(body, sandboxEnvelopeSchema, request);
+    return toCloudSandbox(envelope.sandbox ?? decode(body, sandboxSchema, request));
+  }
+
   async function getSandbox(sandboxId: string): Promise<CloudSandbox> {
-    const response = await send({ method: 'GET', path: `/sandboxes/${encodeId(sandboxId)}`, retry: true });
+    const request: BoatRequest = { method: 'GET', path: `/sandboxes/${encodeId(sandboxId)}`, retry: true };
+    const response = await send(request);
     if (response.status === 404) return goneSandbox(sandboxId);
-    if (response.status !== 200) throw boatError({ method: 'GET', path: `/sandboxes/${sandboxId}` }, response.status, response.body);
-    return toCloudSandbox(sandboxRecord(response.body));
+    if (response.status !== 200) throw boatError(request, response.status, response.body);
+    return decodeSandbox(response.body, request);
   }
 
   function handle(sandboxId: string): SandboxHandle {
@@ -115,16 +183,17 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
         );
         const file = `${SCRIPT_DIR}/run-${randomBytes(6).toString('hex')}.sh`;
         await writeFile(file, script);
-        const body = await call({
+        const request: BoatRequest = {
           method: 'POST',
           path: `/sandboxes/${encodeId(sandboxId)}/commands`,
           body: { command: `bash ${file}; rc=$?; rm -f ${file}; exit $rc`, timeoutSeconds },
-        });
-        const result = isRecord(body.result) ? body.result : body;
+        };
+        const body = await call(request);
+        const result = decode(body, commandEnvelopeSchema, request).result ?? decode(body, commandResultSchema, request);
         return {
-          exitCode: typeof result.exitCode === 'number' ? result.exitCode : null,
-          stdout: typeof result.stdout === 'string' ? result.stdout : '',
-          stderr: typeof result.stderr === 'string' ? result.stderr : '',
+          exitCode: result.exitCode ?? null,
+          stdout: result.stdout ?? '',
+          stderr: result.stderr ?? '',
           timedOut: result.timedOut === true,
         };
       },
@@ -134,22 +203,22 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
   return {
     name: 'boat',
     async verifyCredentials() {
-      const body = await call({ method: 'GET', path: '/me', retry: true });
-      const user = isRecord(body.user) ? body.user : body;
-      const account = [user.email, user.username, user.id].find((value): value is string => typeof value === 'string');
-      return { account: account ?? 'boat account' };
+      const request: BoatRequest = { method: 'GET', path: '/me', retry: true };
+      const me = decode(await call(request), meSchema, request);
+      const user = me.user ?? me;
+      return { account: user.email ?? user.username ?? user.id ?? 'boat account' };
     },
     async create(request: CreateSandboxRequest) {
-      const body: JsonRecord = { type: request.size, ttlSeconds: null, noEnv: true };
+      const body: CreateBody = { type: request.size, ttlSeconds: null, noEnv: true };
       if (request.fromSnapshot) body.from = request.fromSnapshot;
-      const created = await call({
+      const createRequest: BoatRequest = {
         method: 'POST',
         path: '/sandboxes',
         body,
         headers: { 'Idempotency-Key': request.idempotencyKey },
         retry: true,
-      });
-      const sandbox = toCloudSandbox(sandboxRecord(created));
+      };
+      const sandbox = decodeSandbox(await call(createRequest), createRequest);
       if (sandbox.name !== request.name) {
         await call({ method: 'PATCH', path: `/sandboxes/${encodeId(sandbox.id)}`, body: { name: request.name } });
       }
@@ -161,14 +230,12 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
       let cursor: string | undefined;
       for (let page = 0; page < 50; page++) {
         const query = cursor ? `?limit=100&cursor=${encodeURIComponent(cursor)}` : '?limit=100';
-        const body = await call({ method: 'GET', path: `/sandboxes${query}`, retry: true });
-        const items = Array.isArray(body.sandboxes) ? body.sandboxes : [];
-        for (const item of items) {
-          if (isRecord(item)) sandboxes.push(toCloudSandbox(item));
-        }
-        const next = body.nextCursor ?? body.cursor;
-        if (typeof next !== 'string' || next.length === 0 || items.length === 0) break;
-        cursor = next;
+        const request: BoatRequest = { method: 'GET', path: `/sandboxes${query}`, retry: true };
+        const listed = decode(await call(request), sandboxListSchema, request);
+        const items = listed.sandboxes ?? [];
+        sandboxes.push(...items.map(toCloudSandbox));
+        if (!listed.nextCursor || items.length === 0) break;
+        cursor = listed.nextCursor;
       }
       return sandboxes;
     },
@@ -179,7 +246,7 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
       await call({ method: 'POST', path: `/sandboxes/${encodeId(sandboxId)}/stop`, body: {} });
     },
     async resume(sandboxId, resumeOptions) {
-      const body: JsonRecord = {};
+      const body: { type?: CloudSize } = {};
       if (resumeOptions?.size) body.type = resumeOptions.size;
       await call({ method: 'POST', path: `/sandboxes/${encodeId(sandboxId)}/resume`, body });
     },
@@ -197,33 +264,36 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
   };
 }
 
-const STATE_MAP: Record<string, CloudSandboxState> = {
-  init: 'starting',
-  provisioning: 'starting',
-  provisioned: 'starting',
-  cloning: 'starting',
-  ready: 'running',
-  idle: 'running',
-  running: 'running',
-  archiving: 'stopping',
-  archived: 'stopped',
-  error: 'error',
-  cancelled: 'error',
-};
+function toCloudState(providerState: string): CloudSandboxState {
+  switch (providerState) {
+    case 'init':
+    case 'provisioning':
+    case 'provisioned':
+    case 'cloning':
+      return 'starting';
+    case 'ready':
+    case 'idle':
+    case 'running':
+      return 'running';
+    case 'archiving':
+      return 'stopping';
+    case 'archived':
+      return 'stopped';
+    default:
+      return 'error';
+  }
+}
 
-export function toCloudSandbox(record: JsonRecord): CloudSandbox {
-  const id = typeof record.id === 'string' ? record.id : '';
-  if (!id) throw new Error('boat returned a sandbox without an id');
-  const providerState = typeof record.state === 'string' ? record.state : 'unknown';
-  const size = record.type === 'small' || record.type === 'default' || record.type === 'large' ? record.type : undefined;
+function toCloudSandbox(record: BoatSandbox): CloudSandbox {
+  const providerState = record.state ?? 'unknown';
   return {
-    id,
-    name: typeof record.name === 'string' ? record.name : '',
-    state: STATE_MAP[providerState] ?? 'error',
+    id: record.id,
+    name: record.name ?? '',
+    state: toCloudState(providerState),
     providerState,
-    size: size satisfies CloudSize | undefined,
-    error: typeof record.error === 'string' ? record.error : null,
-    createdAt: typeof record.createdAt === 'string' ? record.createdAt : null,
+    size: CLOUD_SIZES.find((size) => size === record.type),
+    error: record.error ?? null,
+    createdAt: record.createdAt ?? null,
   };
 }
 
@@ -231,34 +301,30 @@ function goneSandbox(sandboxId: string): CloudSandbox {
   return { id: sandboxId, name: '', state: 'gone', providerState: 'not_found' };
 }
 
-function sandboxRecord(body: JsonRecord): JsonRecord {
-  return isRecord(body.sandbox) ? body.sandbox : body;
-}
-
-function boatError(request: Pick<BoatRequest, 'method' | 'path'>, status: number, body: JsonRecord): CloudProviderError {
-  const nested = isRecord(body.error) ? body.error : {};
-  const code = typeof body.code === 'string' ? body.code : typeof nested.code === 'string' ? nested.code : undefined;
-  const message = typeof body.message === 'string' ? body.message : typeof nested.message === 'string' ? nested.message : '';
-  const pathOnly = request.path.split('?')[0];
+function boatError(request: Pick<BoatRequest, 'method' | 'path'>, status: number, body: unknown): CloudProviderError {
+  let code: string | undefined;
+  let message = '';
+  try {
+    const decoded = decodeBoundary(body, errorSchema);
+    code = decoded.code ?? decoded.error?.code;
+    message = decoded.message ?? decoded.error?.message ?? '';
+  } catch {
+    // Error bodies are informational only.
+  }
   return new CloudProviderError(
-    `boat ${request.method} ${pathOnly} failed with HTTP ${status}${code ? ` (${code})` : ''}${message ? `: ${message}` : ''}`,
+    `boat ${request.method} ${request.path.split('?')[0]} failed with HTTP ${status}${code ? ` (${code})` : ''}${message ? `: ${message}` : ''}`,
     status,
     code,
   );
 }
 
-function parseJsonRecord(text: string): JsonRecord {
-  if (!text.trim()) return {};
+function parseJson(text: string): unknown {
+  if (!text.trim()) return undefined;
   try {
-    const parsed: unknown = JSON.parse(text);
-    return isRecord(parsed) ? parsed : {};
+    return JSON.parse(text);
   } catch {
-    return {};
+    return undefined;
   }
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function encodeId(sandboxId: string): string {

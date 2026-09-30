@@ -41,11 +41,11 @@ export interface CloudArgs {
 }
 
 type ValueFlag = Exclude<{
-  [Key in keyof CloudArgs]: CloudArgs[Key] extends string | number | undefined ? Key : never
+  [Key in keyof CloudArgs]-?: CloudArgs[Key] extends string | number | undefined ? Key : never
 }[keyof CloudArgs], 'host' | 'subcommand'>;
 
 type BooleanFlag = {
-  [Key in keyof CloudArgs]: CloudArgs[Key] extends boolean ? Key : never
+  [Key in keyof CloudArgs]-?: CloudArgs[Key] extends boolean ? Key : never
 }[keyof CloudArgs];
 
 const VALUE_FLAGS: Record<string, ValueFlag> = {

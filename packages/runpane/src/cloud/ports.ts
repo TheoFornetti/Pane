@@ -18,7 +18,8 @@ export interface TailnetDevice {
 
 export interface TailnetPort {
   findDevicesByHostname(hostname: string): Promise<TailnetDevice[]>;
-  deleteDevice(nodeId: string): Promise<void>;
+  /** Resolves false (or nothing) when the device was already gone. */
+  deleteDevice(nodeId: string): Promise<boolean | void>;
 }
 
 export interface ProvisionRequest {

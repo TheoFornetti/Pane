@@ -98,6 +98,8 @@ def boat_headers() -> dict[str, str]:
 def boat(method: str, path: str, body: Any = None, extra: Optional[dict[str, str]] = None,
          timeout: float = 90.0) -> tuple[int, Any]:
     headers = boat_headers()
+    if os.environ.get("CLOUDLAB_BOAT_ORG"):  # bill/scope every call to this boat org (wallet) explicitly
+        headers["X-Boat-Org"] = os.environ["CLOUDLAB_BOAT_ORG"]
     if extra:
         headers.update(extra)
     # boat caps sandbox starts (create/fork/resume) per account: 12/min, 60/h, 200/day. Wait instead of failing.

@@ -18,7 +18,7 @@ export E2E_PREFIX="${E2E_PREFIX_OVERRIDE:-rp-loop-p3e2e}"
 export E2E_EVIDENCE_ROOT="${E2E_EVIDENCE_ROOT_OVERRIDE:-$HOME/rc-loop/evidence/p3-e2e}"
 export E2E_DAEMON_DEB_URL="${E2E_DAEMON_DEB_URL-$(dist_url deb)}"
 export E2E_RUNPANE_TGZ_URL="${E2E_RUNPANE_TGZ_URL-$(dist_url tgz)}"
-BOAT_ORG="${E2E_BOAT_ORG:-test}"
+BOAT_ORG="${E2E_BOAT_ORG:-test}"; export CLOUDLAB_BOAT_ORG="$BOAT_ORG"   # every raw boat call of the harness names the wallet
 e2e_init P3-broker
 wait_start_budget 2
 cli_resolve || { rec cli BLOCKED "runpane CLI under test not installable"; exit 1; }

@@ -28,7 +28,7 @@ export interface CloudHostReport {
   detail: string;
 }
 
-export type WakeFailureCode =
+type WakeFailureCode =
   | 'unknown-host'
   | 'directory-unreadable'
   | 'runaway-guard'

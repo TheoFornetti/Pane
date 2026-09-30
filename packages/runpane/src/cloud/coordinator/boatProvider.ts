@@ -154,13 +154,13 @@ export class BoatCoordinatorProvider implements CoordinatorProvider {
 }
 
 // boat errors come as `{error: "code"}` or `{error: {code}}`.
-const errorShapes = [
+const boatErrorCodeReaders = [
   (value: JsonValue) => decodeBoundary(value, boundary.object({ error: boundary.string })).error,
   (value: JsonValue) => decodeBoundary(value, boundary.object({ error: boundary.object({ code: boundary.string }) })).error.code,
 ];
 
 function readErrorCode(parsed: JsonValue): string | null {
-  for (const read of errorShapes) {
+  for (const read of boatErrorCodeReaders) {
     try {
       return read(parsed);
     } catch {

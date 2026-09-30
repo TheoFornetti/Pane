@@ -17,7 +17,14 @@ import { boundary, decodeOptionalBoundary } from '../../../shared/validation/bou
  */
 const SIDE_BY_SIDE_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
-export function parseSideBySideName(packageJson: unknown): string | null {
+/** Reads the side-by-side name from the text of a packaged package.json. */
+export function parseSideBySideName(packageJsonText: string): string | null {
+  let packageJson: unknown;
+  try {
+    packageJson = JSON.parse(packageJsonText);
+  } catch {
+    return null;
+  }
   const decoded = decodeOptionalBoundary(packageJson, boundary.object({ paneSideBySide: boundary.string }));
   if (!decoded || !SIDE_BY_SIDE_NAME.test(decoded.paneSideBySide)) return null;
   return decoded.paneSideBySide;
@@ -35,7 +42,7 @@ function getPackagedApp(): PackagedAppLike | null {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const electronModule: unknown = require('electron');
     // Plain Node resolves `electron` to the binary path string.
-    if (typeof electronModule === 'string') return null;
+    if (decodeOptionalBoundary(electronModule, boundary.string) !== undefined) return null;
     // SAFETY: the Electron runtime module exposes `app`; the plain-Node string case was excluded above.
     const electronApp = (electronModule as { app?: PackagedAppLike }).app;
     return electronApp?.isPackaged ? electronApp : null;
@@ -51,7 +58,7 @@ export function getSideBySideName(): string | null {
   cachedName = null;
   if (electronApp) {
     try {
-      cachedName = parseSideBySideName(JSON.parse(readFileSync(join(electronApp.getAppPath(), 'package.json'), 'utf8')));
+      cachedName = parseSideBySideName(readFileSync(join(electronApp.getAppPath(), 'package.json'), 'utf8'));
     } catch {
       cachedName = null;
     }

@@ -4,17 +4,17 @@ import { parseSideBySideName, sideBySideDataDir, sideBySideUserDataDir } from '.
 
 describe('side-by-side builds', () => {
   it('reads the name electron-builder extraMetadata writes into the packaged package.json', () => {
-    expect(parseSideBySideName({ name: 'Pane', version: '2.4.141-rc.1.gabc', paneSideBySide: 'cloudtest' })).toBe('cloudtest');
+    expect(parseSideBySideName(JSON.stringify({ name: 'Pane', version: '2.4.141-rc.1.gabc', paneSideBySide: 'cloudtest' }))).toBe('cloudtest');
   });
 
   it('treats a package.json without the field as a normal build', () => {
-    expect(parseSideBySideName({ name: 'Pane', version: '2.4.141' })).toBeNull();
-    expect(parseSideBySideName(null)).toBeNull();
+    expect(parseSideBySideName(JSON.stringify({ name: 'Pane', version: '2.4.141' }))).toBeNull();
+    expect(parseSideBySideName('not json')).toBeNull();
   });
 
   it('rejects names that would escape the home directory or be empty', () => {
     for (const name of ['', '../pane', 'a/b', 'Cloud Test', '.pane', 'x'.repeat(33)]) {
-      expect(parseSideBySideName({ paneSideBySide: name })).toBeNull();
+      expect(parseSideBySideName(JSON.stringify({ paneSideBySide: name }))).toBeNull();
     }
   });
 

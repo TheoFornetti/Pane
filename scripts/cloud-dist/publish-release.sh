@@ -36,8 +36,12 @@ read_remote() { # path -> utf8 contents on stdout
 
 if [ "$SKIP_BUILD" = 0 ]; then
   log "building $REF on $DEVBOX"
+  # Upload this checkout's build script so any ref builds (e.g. rc/integration before cloud-dist merged into it).
+  python3 -c 'import json,sys,base64;print(json.dumps({"path":"rcl-cloud-dist/build-artifacts.sh","content":base64.b64encode(open(sys.argv[1],"rb").read()).decode(),"encoding":"base64"}))' \
+    "$(dirname "$0")/build-artifacts.sh" |
+    curl -sS -f -o /dev/null -X PUT -H @"$BOAT_HDR" -H 'Content-Type: application/json' --data-binary @- "$BOAT/sandboxes/$DEVBOX/files"
   "$RC_BIN/devbox.sh" bg "$DEVBOX" "$REF" \
-    "rm -f $REMOTE_LOG; bash scripts/cloud-dist/build-artifacts.sh $REMOTE_OUT > $REMOTE_LOG 2>&1; echo CLOUD_DIST_EXIT=\$? >> $REMOTE_LOG" >/dev/null
+    "rm -f $REMOTE_LOG; bash /home/user/rcl-cloud-dist/build-artifacts.sh $REMOTE_OUT > $REMOTE_LOG 2>&1; echo CLOUD_DIST_EXIT=\$? >> $REMOTE_LOG" >/dev/null
   sleep 20
   for _ in $(seq 1 120); do
     tail_txt=$(read_remote "$REMOTE_LOG" | tail -5)

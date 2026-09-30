@@ -55,9 +55,22 @@ TAG="rc-$SHA8"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 printf '%s' "$INFO" > "$WORK/build-info.json"
+remote_cmd() { # single-line shell command on the devbox -> stdout
+  python3 -c 'import json,sys;print(json.dumps({"command":sys.argv[1],"timeoutSeconds":300}))' "$1" |
+    curl -sS -X POST -H @"$BOAT_HDR" -H 'Content-Type: application/json' --data-binary @- "$BOAT/sandboxes/$DEVBOX/commands" |
+    python3 -c 'import json,sys;d=json.load(sys.stdin);r=d.get("result",d);sys.stdout.write(r.get("stdout",""));sys.exit(r.get("exitCode",1))'
+}
+fetch() { # remote path -> local file. GET /artifacts caps a download at 50 MiB, so big files come in 45 MiB parts.
+  local src=$1 dst=$2 parts
+  parts=$(remote_cmd "set -e; rm -rf $REMOTE_OUT/.parts; mkdir $REMOTE_OUT/.parts; split -b 45M -d -a 3 $src $REMOTE_OUT/.parts/p.; ls $REMOTE_OUT/.parts")
+  : > "$dst"
+  for part in $parts; do
+    curl -sS -f -H @"$BOAT_HDR" --get --data-urlencode "path=$REMOTE_OUT/.parts/$part" "$BOAT/sandboxes/$DEVBOX/artifacts" >> "$dst"
+  done
+}
 for f in "pane_${VERSION}_amd64.deb" "runpane-${VERSION}.tgz" SHA256SUMS.txt; do
   log "downloading $f"
-  curl -sS -f -H @"$BOAT_HDR" --get --data-urlencode "path=$REMOTE_OUT/$f" "$BOAT/sandboxes/$DEVBOX/artifacts" -o "$WORK/$f"
+  fetch "$REMOTE_OUT/$f" "$WORK/$f"
 done
 (cd "$WORK" && sha256sum -c SHA256SUMS.txt >&2)
 

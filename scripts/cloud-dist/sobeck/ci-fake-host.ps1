@@ -2,6 +2,12 @@
 # tailnet. It pairs and starts a real headless Pane daemon from the test build on loopback, registers two
 # git repos (Hello-World, montlakev2) and a "morning" Session with the fork's runpane CLI, and writes the
 # daemon's pane-remote:// code to -PairingFile the way the relay does on SOBECK. The code is never printed.
+#
+# Session ports: the daemon's ports service reads Tailscale through the `tailscale` CLI. A fake
+# tailscale.exe, on the PATH of this daemon only, reports a running node named "localhost" whose Serve
+# config holds one web entry, tailnet :$PortsPort -> http://127.0.0.1:$PortsPort; ports.json names it
+# "taste" (plain http: no certificate on a runner), and a small HTTP server answers behind it. The desktop
+# then shows a real "taste" chip whose URL is http://localhost:$PortsPort/.
 param(
   [Parameter(Mandatory = $true)][string]$Exe,
   [Parameter(Mandatory = $true)][string]$PairingFile,
@@ -9,10 +15,46 @@ param(
   [string]$HostDir = 'C:\rc-fake-host',
   [string]$ReposDir = 'C:\rc-fake-repos',
   [string]$Label = 'Scratch',
-  [int]$Port = 42199
+  [int]$Port = 42199,
+  [int]$PortsPort = 8443
 )
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path $HostDir, $ReposDir | Out-Null
+
+$fakeBin = Join-Path $HostDir 'fake-tailscale'
+New-Item -ItemType Directory -Force -Path $fakeBin | Out-Null
+$fakeSource = @'
+using System;
+using System.IO;
+class FakeTailscale {
+  static int Main(string[] args) {
+    string dir = AppDomain.CurrentDomain.BaseDirectory;
+    string joined = string.Join(" ", args);
+    File.AppendAllText(Path.Combine(dir, "calls.log"), joined + Environment.NewLine);
+    if (joined == "status --json") { Console.Write(File.ReadAllText(Path.Combine(dir, "status.json"))); return 0; }
+    if (joined == "serve status --json") { Console.Write(File.ReadAllText(Path.Combine(dir, "serve.json"))); return 0; }
+    return 0;
+  }
+}
+'@
+Set-Content -Path (Join-Path $fakeBin 'FakeTailscale.cs') -Value $fakeSource
+& "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" -nologo -out:(Join-Path $fakeBin 'tailscale.exe') (Join-Path $fakeBin 'FakeTailscale.cs') | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'could not compile the fake tailscale.exe' }
+Set-Content -Path (Join-Path $fakeBin 'status.json') -Value '{"BackendState":"Running","Self":{"DNSName":"localhost."}}'
+Set-Content -Path (Join-Path $fakeBin 'serve.json') -Value (@{
+    TCP = @{ "$PortsPort" = @{ HTTP = $true } }
+    Web = @{ "localhost:$PortsPort" = @{ Handlers = @{ '/' = @{ Proxy = "http://127.0.0.1:$PortsPort" } } } }
+  } | ConvertTo-Json -Depth 6 -Compress)
+$portsDir = Join-Path $env:USERPROFILE '.runpane-cloud'
+New-Item -ItemType Directory -Force -Path $portsDir | Out-Null
+Set-Content -Path (Join-Path $portsDir 'ports.json') -Value (@{
+    version = 1; autoOpen = $false; dismissed = @()
+    ports = @(@{ name = 'taste'; port = $PortsPort; httpsPort = $PortsPort; scheme = 'http'; path = '/'; source = 'user'; createdAt = (Get-Date).ToUniversalTime().ToString('o') })
+  } | ConvertTo-Json -Depth 6)
+$server = Join-Path $HostDir 'taste-stand-in.cjs'
+Set-Content -Path $server -Value "require('node:http').createServer((q, r) => r.end('taste stand-in')).listen($PortsPort);"
+Start-Process -FilePath node -ArgumentList "`"$server`"" -WindowStyle Hidden | Out-Null
+Write-Host "Session ports stand-in: fake tailscale.exe, ports.json taste -> http://localhost:$PortsPort/"
 
 $setupOut = Join-Path $HostDir 'setup.out.txt'
 $setup = Start-Process -FilePath $Exe -Wait -NoNewWindow -PassThru -RedirectStandardOutput $setupOut -RedirectStandardError (Join-Path $HostDir 'setup.err.txt') `
@@ -36,18 +78,30 @@ if ($LASTEXITCODE -ne 0) { throw 'could not rewrite the pairing code' }
 Remove-Item $setupOut
 Write-Host "Wrote the fake host's pairing code to $PairingFile (not shown)"
 
-# No output redirection: PowerShell would pump it, and the daemon dies of a broken pipe once this
-# script's PowerShell exits. The daemon writes its own log under $HostDir\logs.
-Start-Process -FilePath $Exe -ArgumentList "--daemon-headless --pane-dir `"$HostDir`"" | Out-Null
+$hostConfig = (Get-Content -Raw (Join-Path $HostDir 'config.json') | ConvertFrom-Json).remoteDaemon.host.config
+Write-Host "fake host config: enabled=$($hostConfig.enabled) listen=$($hostConfig.listenHost):$($hostConfig.listenPort)"
+
+# cmd owns the output files, so the daemon never writes into a pipe that dies with this PowerShell.
+# The fake tailscale.exe is on this daemon's PATH only (a child keeps the PATH it started with).
+$daemonCmd = "`"$Exe`" --daemon-headless --pane-dir `"$HostDir`" > `"$HostDir\daemon.out.txt`" 2> `"$HostDir\daemon.err.txt`""
+$pathBefore = $env:PATH
+$env:PATH = "$fakeBin;$pathBefore"
+try { Start-Process -FilePath cmd.exe -ArgumentList '/d', '/c', $daemonCmd -WindowStyle Hidden | Out-Null } finally { $env:PATH = $pathBefore }
 $deadline = (Get-Date).AddSeconds(120)
 $healthy = $false
 while (-not $healthy -and (Get-Date) -lt $deadline) {
   try { $healthy = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$Port/health" -TimeoutSec 3).StatusCode -eq 200 } catch { Start-Sleep -Seconds 2 }
 }
 if (-not $healthy) {
-  $hostConfig = (Get-Content -Raw (Join-Path $HostDir 'config.json') | ConvertFrom-Json).remoteDaemon.host.config
-  Write-Host "host config: enabled=$($hostConfig.enabled) listen=$($hostConfig.listenHost):$($hostConfig.listenPort)"
-  Get-ChildItem (Join-Path $HostDir 'logs') -File -ErrorAction SilentlyContinue | Get-Content -Tail 40; throw 'fake host daemon never answered /health' }
+  Write-Host '--- daemon processes'
+  Get-CimInstance Win32_Process -Filter "Name = 'Pane.exe'" | Where-Object { $_.CommandLine -like '*daemon-headless*' } | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }
+  Write-Host '--- listeners'
+  netstat -ano -p tcp | Select-String 'LISTENING' | Select-Object -First 40
+  foreach ($file in 'daemon.out.txt', 'daemon.err.txt') { Write-Host "--- $file"; Get-Content (Join-Path $HostDir $file) -Tail 60 -ErrorAction SilentlyContinue }
+  Write-Host '--- daemon log'
+  Get-ChildItem (Join-Path $HostDir 'logs') -File -ErrorAction SilentlyContinue | Get-Content -Tail 60
+  throw 'fake host daemon never answered /health'
+}
 Write-Host "Fake host daemon healthy on 127.0.0.1:$Port"
 
 foreach ($name in 'Hello-World', 'montlakev2') {

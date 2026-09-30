@@ -1,7 +1,8 @@
 // Drives the side-by-side Pane desktop test build against a cloud host already saved in its data dir
-// (seed-profile.cjs) and records what a user would see: the host switcher connects to the cloud host, a
-// terminal in a Pane on that host prints the cloud machine's hostname, the Claude "morning" Session
-// answers a prompt, and the montlakev2 repo is listed. Adapted from ../desktop-switcher-proof.mjs.
+// (seed-profile.cjs) and records what a user would see: the host switcher lists and connects to the cloud
+// host, a terminal in a Pane on that host prints the cloud machine's hostname, the Session's Ports row has
+// the named port's tailnet URL and clicking it opens that URL, the Claude "morning" Session answers a
+// prompt, and the montlakev2 repo is listed. Adapted from ../desktop-switcher-proof.mjs.
 //
 // Privacy: screenshots are of the app window only (page.screenshot, never the screen); Settings is never
 // opened; no Playwright trace is recorded; nothing from config.json but the host label is read or logged.
@@ -20,6 +21,10 @@
 //   SESSION          the Claude Session to prompt (default morning)
 //   CLAUDE_REPLY     1 (default) waits for Claude's answer; 0 only opens the Session and submits (CI, no Claude)
 //   OPTIONAL_REPO    repo that is only checked when present (default montlakev2): absent = SKIP
+//   PORT_NAME        Session port whose chip must be in the Ports row (default taste; empty = SKIP)
+//   PORT_URL         the URL that chip must carry (default: any https:// URL)
+//   OPEN_IN_BROWSER  1 = the chip click also opens the default browser; otherwise the app's open is only
+//                    recorded (no stray browser window), and the URL is fetched here instead
 import { _electron as electron } from 'playwright-core';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -52,6 +57,17 @@ const hostnamePrefix = (env.HOSTNAME_PREFIX || 'box-node-').toLowerCase();
 const sessionName = env.SESSION || 'morning';
 const waitForReply = env.CLAUDE_REPLY !== '0';
 const optionalRepo = env.OPTIONAL_REPO || 'montlakev2';
+const portName = env.PORT_NAME ?? 'taste';
+const portUrl = env.PORT_URL || '';
+const openInBrowser = env.OPEN_IN_BROWSER === '1';
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const sameUrl = (a, b) => {
+  try {
+    return new URL(a).href === new URL(b).href;
+  } catch {
+    return false;
+  }
+};
 
 const started = Date.now();
 const checks = [];
@@ -172,18 +188,19 @@ try {
   await collectTerminalStream();
   await shot('launched');
 
-  // 1. Host switcher: pick the cloud host, expect it connected.
+  // 1. Host switcher: it lists the cloud host; pick it unless it is already the active host (an upgrade
+  // keeps the host that was active).
   const switcherChip = page.getByRole('button', { name: /Switch host$/ }).first();
   await switcherChip.waitFor({ timeout: 60_000 });
   const connectedChip = page.getByRole('button', { name: `Agents run on ${hostLabel}. Switch host` });
-  if (!await connectedChip.isVisible().catch(() => false)) {
-    await switcherChip.click();
-    await page.waitForTimeout(500);
-    await shot('switcher-open');
-    const hostItem = page.getByRole('menuitemradio', { name: new RegExp(hostLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) });
-    pass('switcher-lists-cloud-host', await hostItem.isVisible(), hostLabel);
-    await hostItem.click();
-  }
+  const alreadyActive = await connectedChip.isVisible().catch(() => false);
+  await switcherChip.click();
+  await page.waitForTimeout(500);
+  await shot('switcher-open');
+  const hostItem = page.getByRole('menuitemradio', { name: new RegExp(escapeRegExp(hostLabel)) });
+  pass('switcher-lists-cloud-host', await hostItem.isVisible(), `${hostLabel}${alreadyActive ? ' (already the active host)' : ''}`);
+  if (alreadyActive) await page.keyboard.press('Escape');
+  else await hostItem.click();
   const pickedAt = Date.now();
   const connected = await connectedChip.waitFor({ timeout: 60_000 }).then(() => true, () => false);
   const repoButton = page.getByRole('button', { name: `New pane in ${repo}` });
@@ -225,7 +242,43 @@ try {
   pass('terminal-hostname', printed, `${after} (expected "${hostnamePrefix}…"; this machine is ${os.hostname()})`);
   await shot('terminal-hostname');
 
-  // 4. The Claude Session answers.
+  // 4. The Session's Ports row (tailnet HTTPS links): the port's chip carries its URL, and a click opens it.
+  if (portName) {
+    const row = page.getByRole('region', { name: 'Session ports' }).first();
+    const chip = row.getByRole('button', { name: new RegExp(`^Open ${escapeRegExp(portName)} \\(`) });
+    const shown = await chip.waitFor({ timeout: 45_000 }).then(() => true, () => false);
+    const url = shown ? (await chip.getAttribute('title')) ?? '' : '';
+    const chips = await row.getByTestId('session-port-chip').allTextContents().catch(() => []);
+    const urlOk = shown && (portUrl ? sameUrl(url, portUrl) : url.startsWith('https://'));
+    pass('ports-chip', urlOk, shown
+      ? `${portName} -> ${url} (expected ${portUrl || 'an https:// URL'}); row: ${JSON.stringify(chips)}`
+      : `no "${portName}" chip in the Session's Ports row within 45 s (row: ${JSON.stringify(chips)}); is ${hostLabel}'s daemon on a release with Session ports, and is the port open (runpane port list)?`);
+    await shot('ports');
+    if (shown) {
+      // Record what the app asks the OS to open (and only pass it on with OPEN_IN_BROWSER=1).
+      await app.evaluate(({ shell }, passThrough) => {
+        globalThis.__proofOpened = [];
+        globalThis.__proofOpenExternal ??= shell.openExternal.bind(shell);
+        shell.openExternal = async (target, options) => {
+          globalThis.__proofOpened.push(target);
+          if (passThrough) await globalThis.__proofOpenExternal(target, options);
+        };
+      }, openInBrowser);
+      await chip.click();
+      await page.waitForTimeout(1500);
+      const opened = await app.evaluate(() => globalThis.__proofOpened ?? []);
+      const fetchedAt = Date.now();
+      const status = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(20_000) })
+        .then((response) => String(response.status), (error) => `error ${error?.cause?.code ?? error?.message ?? error}`);
+      const answered = /^[23]\d\d$/.test(status);
+      pass('ports-chip-opens', opened.length === 1 && opened[0] === url && answered,
+        `click opened ${JSON.stringify(opened)}${openInBrowser ? ' in the default browser' : ' (recorded, browser not opened)'}; GET ${url} -> ${status} in ${Date.now() - fetchedAt} ms`);
+    }
+  } else {
+    check('ports-chip', 'SKIP', 'PORT_NAME empty');
+  }
+
+  // 5. The Claude Session answers.
   const sessionButton = page.getByRole('button', { name: `Open Session ${sessionName}` });
   let sessionListed = await sessionButton.waitFor({ timeout: 10_000 }).then(() => true, () => false);
   if (!sessionListed) {

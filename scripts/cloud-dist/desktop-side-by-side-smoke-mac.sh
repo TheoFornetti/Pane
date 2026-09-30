@@ -45,6 +45,8 @@ ditto -x -k "$INSTALLED_ZIP" /Applications
 open /Applications/Pane.app
 wait_for 180 has_files "$installed_dir"
 check installed-running "$(ok pgrep -f '/Applications/Pane.app/Contents/MacOS/Pane')" "files in $installed_dir"
+# The installed Pane writes openrouter-prices.json itself some seconds after startup: list after it.
+wait_for 90 test -e "$installed_dir/openrouter-prices.json" || true
 sleep 15
 installed_before=$(ls -A "$installed_dir" | sort)
 

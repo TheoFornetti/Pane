@@ -142,6 +142,8 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
   const deletedStaleNodeIds: string[] = [];
   const tailnet = await step('tailscale-join', async () => {
     if (alreadyJoined) {
+      // tailscale-up installs the tailscaled.state guard; a retry past the join installs it here.
+      await runner.run('ts-guard', [], envelopeSchema, { timeoutSeconds: 120 });
       return parseIdentity(current);
     }
     // M0: a device left under this hostname would push the new node to "<hostname>-1".

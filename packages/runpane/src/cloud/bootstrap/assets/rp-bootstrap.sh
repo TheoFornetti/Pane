@@ -120,6 +120,99 @@ print(json.dumps({"ok":sys.argv[1]=="0","failed":[l[5:] for l in lines if l.star
 
 # tailscale-up <authKeyFile> <hostname>: join with a single-use tagged key. Never --ssh.
 # The key file is shredded whether or not the join works.
+# Tailscale state guard. After a boat stop/resume, /var/lib/tailscale/tailscaled.state sometimes comes
+# back as 2 bytes (seen 2 of 5 cycles, w2-glue-ux) and the node is logged out; a coordinator or peer wake
+# can't repair that. tailscaled writes the state with temp-file-then-rename; files written in place survive
+# boat's snapshots. So: keep an in-place copy (cp, never rename) in /var/lib/rp-ts-backup, refreshed every
+# 60 s, whenever the state changes, and by the daemon's safe-to-stop flush; restore it before tailscaled
+# starts when the state is missing, tiny or not JSON.
+install_ts_state_guard() {
+  sudo tee /usr/local/sbin/rp-tailscale-state >/dev/null <<'GUARD'
+#!/bin/sh
+# rp-tailscale-state backup|restore|forget : keep tailscaled.state recoverable across boat stop/resume.
+STATE="${RP_TS_STATE:-/var/lib/tailscale/tailscaled.state}"
+DIR="${RP_TS_BACKUP_DIR:-/var/lib/rp-ts-backup}"
+BACKUP="$DIR/tailscaled.state"
+valid() { [ -f "$1" ] && [ "$(stat -c %s "$1")" -ge 100 ] && python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$1" 2>/dev/null; }
+case "${1:-}" in
+  backup)
+    valid "$STATE" || { echo "rp-tailscale-state: state missing or invalid; backup left as is"; exit 0; }
+    [ -f "$BACKUP" ] && cmp -s "$STATE" "$BACKUP" && exit 0
+    mkdir -p "$DIR" && chmod 700 "$DIR"
+    # cp into the existing file writes it in place: no temp file, no rename.
+    [ -f "$BACKUP" ] || { : > "$BACKUP" && chmod 600 "$BACKUP"; }
+    cp "$STATE" "$BACKUP" && chmod 600 "$BACKUP" && sync "$BACKUP" 2>/dev/null
+    echo "rp-tailscale-state: backed up ($(stat -c %s "$BACKUP") bytes)" ;;
+  restore)
+    valid "$STATE" && exit 0
+    valid "$BACKUP" || { echo "rp-tailscale-state: state invalid and no valid backup"; exit 0; }
+    mkdir -p "$(dirname "$STATE")"
+    cp "$BACKUP" "$STATE" && chmod 600 "$STATE" && sync "$STATE" 2>/dev/null
+    echo "rp-tailscale-state: RESTORED tailscaled.state from backup ($(stat -c %s "$STATE") bytes)" ;;
+  forget) rm -f "$BACKUP"; echo "rp-tailscale-state: backup removed" ;;
+  *) echo "usage: rp-tailscale-state backup|restore|forget" >&2; exit 2 ;;
+esac
+GUARD
+  sudo chmod 755 /usr/local/sbin/rp-tailscale-state
+  sudo tee /etc/systemd/system/rp-tailscale-state-restore.service >/dev/null <<'UNIT'
+[Unit]
+Description=Runpane Cloud: restore tailscaled.state from its backup when a resume lost it
+DefaultDependencies=no
+After=local-fs.target rp-firstboot-identity.service
+Before=tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/rp-tailscale-state restore
+
+[Install]
+WantedBy=tailscaled.service multi-user.target
+UNIT
+  sudo tee /etc/systemd/system/rp-tailscale-state-backup.service >/dev/null <<'UNIT'
+[Unit]
+Description=Runpane Cloud: copy tailscaled.state in place to /var/lib/rp-ts-backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/rp-tailscale-state backup
+UNIT
+  sudo tee /etc/systemd/system/rp-tailscale-state-backup.timer >/dev/null <<'UNIT'
+[Unit]
+Description=Runpane Cloud: back up tailscaled.state every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
+UNIT
+  sudo tee /etc/systemd/system/rp-tailscale-state-backup.path >/dev/null <<'UNIT'
+[Unit]
+Description=Runpane Cloud: back up tailscaled.state when it changes
+
+[Path]
+PathChanged=/var/lib/tailscale/tailscaled.state
+Unit=rp-tailscale-state-backup.service
+
+[Install]
+WantedBy=paths.target
+UNIT
+  sudo systemctl daemon-reload
+  sudo systemctl enable rp-tailscale-state-restore.service >/dev/null 2>&1 || fail "could not enable rp-tailscale-state-restore.service"
+  sudo systemctl enable --now rp-tailscale-state-backup.timer rp-tailscale-state-backup.path >/dev/null 2>&1 \
+    || fail "could not enable the tailscaled.state backup units"
+  sudo /usr/local/sbin/rp-tailscale-state backup >/dev/null
+}
+
+# ts-guard: (re)install the tailscaled.state guard on a node that is already joined (idempotent).
+step_ts_guard() {
+  install_ts_state_guard
+  sudo test -s /var/lib/rp-ts-backup/tailscaled.state || fail "no tailscaled.state backup after installing the guard"
+  result '{"ok":true}'
+}
+
 step_tailscale_up() {
   local keyfile="$1" hostname="$2" state
   RP_KEYFILE="$keyfile"
@@ -129,6 +222,7 @@ step_tailscale_up() {
   if [ "$state" = Running ]; then fail "tailscale is already joined; use the re-enrol repair path"; fi
   sudo tailscale up --auth-key="file:$keyfile" --hostname="$hostname" --ssh=false >"$RP_STATE/tailscale-up.log" 2>&1 \
     || fail "tailscale up failed: $(tail -3 "$RP_STATE/tailscale-up.log" | tr '\n' ' ')"
+  install_ts_state_guard
   result "$(tailnet_identity_json)"
 }
 
@@ -142,6 +236,8 @@ step_tailnet_identity() {
 step_tailscale_reset() {
   sudo systemctl stop tailscaled
   sudo rm -f /var/lib/tailscale/tailscaled.state
+  # The backup holds the identity being thrown away: a restore at the next boot must not bring it back.
+  sudo rm -f /var/lib/rp-ts-backup/tailscaled.state
   sudo systemctl start tailscaled
   local state
   state="$(wait_for_tailscaled)" || fail "tailscaled did not restart"
@@ -350,5 +446,6 @@ case "$step" in
   health-local) step_health_local ;;
   clone) step_clone "$@" ;;
   firewall) step_firewall "$@" ;;
+  ts-guard) step_ts_guard ;;
   *) fail "unknown step '$step'" ;;
 esac

@@ -12,8 +12,16 @@ export interface DurableFlushDependencies {
   paneDirectory: string;
   /** Flushes the whole filesystem holding `directory` (worktrees, agent transcripts). */
   syncFilesystem?(directory: string): Promise<boolean>;
+  /**
+   * Refreshes the in-place copy of tailscaled.state that cloud bootstrap keeps (rp-tailscale-state):
+   * a resume can lose the state file itself, and a logged-out node can't be reached to repair it.
+   */
+  backupTailnetState?(): Promise<boolean>;
   now?: () => number;
 }
+
+/** Installed by runpane cloud bootstrap on cloud sandboxes; absent anywhere else. */
+const TAILNET_STATE_GUARD = '/usr/local/sbin/rp-tailscale-state';
 
 /**
  * Makes everything the daemon has written durable on disk: checkpoint the WAL, fsync every
@@ -31,6 +39,8 @@ export async function flushDurableState(dependencies: DurableFlushDependencies):
     if (fsyncPath(entry)) fsynced.push(entry);
   }
   if (fsyncPath(dependencies.paneDirectory)) fsynced.push(dependencies.paneDirectory);
+
+  await (dependencies.backupTailnetState ?? backupTailnetStateWithGuard)();
 
   const syncFilesystem = dependencies.syncFilesystem ?? syncFilesystemWithCoreutils;
   const syncedFilesystem = await syncFilesystem(dependencies.paneDirectory);
@@ -61,6 +71,14 @@ function fsyncPath(target: string): boolean {
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
   }
+}
+
+/** Best effort: the guard is root-owned, so it runs through passwordless sudo, as upgrades do. */
+function backupTailnetStateWithGuard(): Promise<boolean> {
+  if (process.platform !== 'linux' || !fs.existsSync(TAILNET_STATE_GUARD)) return Promise.resolve(false);
+  return new Promise(resolve => {
+    execFile('sudo', ['-n', TAILNET_STATE_GUARD, 'backup'], { timeout: SYNC_TIMEOUT_MS }, error => resolve(!error));
+  });
 }
 
 /** `sync -f` syncs the one filesystem (syncfs); older coreutils fall back to a full `sync`. */

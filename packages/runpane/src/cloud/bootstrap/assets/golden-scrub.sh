@@ -45,6 +45,8 @@ rmx /var/lib/systemd/random-seed /var/lib/systemd/credential.secret
 # 4. tailscale node identity (machine key, node key, prefs, login profile)
 rmx /var/lib/tailscale/tailscaled.state /var/lib/tailscale/files /var/lib/tailscale/derpmap.cached.json \
     /var/lib/tailscale/tailscaled.log*.txt /var/lib/tailscale/.config
+# ...and bootstrap's in-place backup of it, or rp-tailscale-state-restore would bring the old node back
+rmx /var/lib/rp-ts-backup/tailscaled.state
 # keep tailscaled enabled; with no state it comes up NeedsLogin and generates a fresh machine key
 
 # 5. logs and histories that may echo identifiers / tokens

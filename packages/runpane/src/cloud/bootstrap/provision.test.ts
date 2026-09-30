@@ -73,6 +73,7 @@ class FakeSandbox implements SandboxHandle {
   private reply(step: string, args: string[]) {
     switch (step) {
       case 'identity': return { ok: true, reset: true, machineId: 'abc' };
+      case 'ts-guard': return { ok: true };
       case 'firewall': return { ok: true, allowedTcp: args[0].split(',').map(Number) };
       case 'tailscale-install': return { ok: true, installed: false, backendState: 'NeedsLogin' };
       case 'tailnet-identity': return JSON.parse(this.identity());
@@ -236,6 +237,7 @@ test('provisionSandbox skips the join when the sandbox is already on the tailnet
   assert.equal(tailscale.minted.length, 0);
   assert.ok(!sandbox.steps.some((step) => step[0] === 'check' || step[0] === 'tailscale-up'));
   assert.ok(sandbox.steps.some((step) => step[0] === 'firewall'), 'the firewall is (re)applied on a retry too');
+  assert.ok(sandbox.steps.some((step) => step[0] === 'ts-guard'), 'the tailscaled.state guard is installed on a retry too');
 });
 
 test('provisionSandbox refuses a failed strip-list check, Tailscale SSH, and a suffixed name', async () => {

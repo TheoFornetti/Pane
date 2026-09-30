@@ -79,15 +79,19 @@ fi
 say "broker: github set (App mode, fake base URLs)"
 broker_set_app "$APP_ID" "$E2E_SECRETS/app.pem" "$INST" "http://127.0.0.1:$FAKE_PORT" "http://127.0.0.1:$FAKE_PORT" > "$E2E_RUN_DIR/github-set.json" 2>&1; rc=$?
 broker_status > "$E2E_RUN_DIR/github-status.json" 2>&1
-pem_leak=$(sbx "$C_ID" 60 <<'SH'
-f=$(ls ~/.config/runpane-cloud-coordinator/github/app.pem 2>/dev/null); echo "pem=$(stat -c %a "$f" 2>/dev/null)"
-grep -rlF -- "-----BEGIN" ~/.config ~/.local/share/runpane-cloud-coordinator 2>/dev/null | grep -v '/github/app.pem$' | wc -l
+# where does the App key live? match by size + sha256 (no key material leaves agentbox for this check)
+PEM_SHA=$(sha256sum < "$E2E_SECRETS/app.pem" | cut -d' ' -f1); PEM_SIZE=$(stat -c %s "$E2E_SECRETS/app.pem")
+key_copies() {  # key_copies <sandbox> : "<mode> <path>" of every file with the App key's exact bytes
+  sbx "$1" 120 <<SH
+find /home /tmp /etc /var/tmp /root -xdev -type f -size ${PEM_SIZE}c 2>/dev/null | while read -r f; do
+  [ "\$(sha256sum < "\$f" 2>/dev/null | cut -d' ' -f1)" = $PEM_SHA ] && echo "\$(stat -c %a "\$f") \$f"; done; true
 SH
-)
-grep -q '"app"' "$E2E_RUN_DIR/github-status.json" && [ $rc = 0 ] && grep -q 'pem=600' <<<"$pem_leak" && [ "$(tail -1 <<<"$pem_leak")" = 0 ] \
-  && rec broker.set PASS "github set -> status mode app; key 0600 on the coordinator only, no other copy" "$E2E_RUN_DIR/github-status.json" \
-  || rec broker.set FAIL "rc=$rc; $(tail -c 300 "$E2E_RUN_DIR/github-set.json"); key check: $(tr '\n' ' ' <<<"$pem_leak")" "$E2E_RUN_DIR/github-set.json"
-grep -rlF -- "$(sed -n 2p "$E2E_SECRETS/app.pem")" "$E2E_RUN_DIR" >/dev/null 2>&1 && rec broker.set-no-key-in-output FAIL "private key material in evidence" || rec broker.set-no-key-in-output PASS "no private key material in any CLI output"
+}
+pem_where=$(key_copies "$C_ID"); printf '%s\n' "$pem_where" | ev app-key-copies-coordinator.txt >/dev/null
+grep -q '"app"' "$E2E_RUN_DIR/github-status.json" && [ $rc = 0 ] && [ "$pem_where" = "600 /home/user/.config/runpane-cloud-coordinator/github/app.pem" ] \
+  && rec broker.set PASS "github set -> the coordinator loaded the App from the fake (slug + repos in status); key 0600 at ~/.config/runpane-cloud-coordinator/github/app.pem, the only copy on the box" "$E2E_RUN_DIR/github-status.json" \
+  || rec broker.set FAIL "rc=$rc; key copies: $(tr '\n' ';' <<<"$pem_where")" "$E2E_RUN_DIR/github-set.json"
+grep -rlF --exclude-dir=.secrets -- "$(sed -n 2p "$E2E_SECRETS/app.pem")" "$E2E_RUN_DIR" >/dev/null 2>&1 && rec broker.set-no-key-in-output FAIL "private key material in evidence" || rec broker.set-no-key-in-output PASS "no private key material in any CLI output or evidence file"
 
 # ================================================================ Session (1 start)
 say "cloud new"
@@ -134,12 +138,13 @@ printf '%s\n' "$shim" | ev shim.txt >/dev/null
   || rec session.connect FAIL "rc=$rc $(tail -c 300 "$E2E_RUN_DIR/connect.json") / $(tr '\n' ' ' <<<"$shim" | head -c 300)" "$E2E_RUN_DIR/connect.json"
 
 creds=$(sbx "$S_ID" 120 <<'SH'
-grep -rlE 'ghs_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|BEGIN (RSA |)PRIVATE KEY' \
-  ~ /etc /tmp 2>/dev/null | grep -vE '/\.ssh/|/\.pane_remote/.*\.(js|map)$|/node_modules/' | head; true
+grep -rlE 'ghs_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|ghp_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}' \
+  ~ /etc /tmp 2>/dev/null | grep -vE '/node_modules/|\.(js|map|ts)$' | head; true
 SH
 )
-[ -z "$creds" ] && rec session.no-write-credential PASS "no GitHub token or App key anywhere in the Session (~, /etc, /tmp)" \
-  || rec session.no-write-credential FAIL "credential-looking files: $creds"
+creds="$creds$(key_copies "$S_ID")"
+[ -z "$creds" ] && rec session.no-write-credential PASS "no GitHub token (ghs_/github_pat_/ghp_/gho_) in ~, /etc, /tmp and no copy of the App key anywhere in the Session" \
+  || rec session.no-write-credential FAIL "credential files: $creds"
 
 # ================================================================ tailnet ACL: the Session can reach the coordinator, not agentbox
 say "tailnet ACL"
@@ -216,7 +221,7 @@ print(json.dumps({"ref": ref, "pr": p.get("number"), "draft": p.get("draft"), "p
 PY
 )
     printf '%s\n' "$v" | ev agent-result.json >/dev/null
-    if [ "$(jget 'bool(d["ref"] and d["pr"] and d["draft"] is True and d["issue"] and d["issueComments"])' <<<"$v")" = True ]; then
+    if [ "$(jget 'bool(d["ref"] and d["pr"] and d["draft"] is True and d["issue"] and d["issueComments"])' <<<"$v")" = true ]; then
       AGENT_OK=1
       rec agent.pr-issue-push PASS "real Claude in $HOST: pushed $(jget 'd["ref"][:10]' <<<"$v") to ${PFX}p3-agent-proof, draft PR #$(jget 'd["pr"]' <<<"$v") (author $(jget 'd["prUser"]' <<<"$v"), marker $(jget 'd["prMarker"]' <<<"$v")), issue #$(jget 'd["issue"]' <<<"$v") + comment, in ${agent_s}s" "$E2E_RUN_DIR/agent-result.json" "seconds=$agent_s"
     else

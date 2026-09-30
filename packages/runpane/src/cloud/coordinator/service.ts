@@ -38,6 +38,7 @@ export function buildCoordinator(
   const provider = overrides.provider ?? new BoatCoordinatorProvider({
     apiBase: config.provider.apiBase,
     apiKey: readSecretFile(config.provider.apiKeyFile),
+    org: config.provider.org,
   });
   const probe = overrides.probe ?? new HttpDaemonProbe();
   const alerts = overrides.alerts ?? new JsonlAlertSink({

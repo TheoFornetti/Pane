@@ -142,7 +142,7 @@ export class Reconciler {
         report.stopped.push(sandbox.id);
         continue;
       }
-      const outcome = await this.deps.activity.exclusive(sandbox.id, () => this.deps.provider.stop(sandbox.id))
+      const outcome = await this.deps.activity.exclusive(sandbox.id, () => this.deps.provider.stop(sandbox.id, sandbox.org))
         .catch((cause: unknown) => ({ ran: true as const, error: describeError(cause) }));
       if (!outcome.ran) {
         report.skipped.push({ sandboxId: sandbox.id, reason: 'busy' });

@@ -4,6 +4,7 @@ import { createCallerSecret, mintCallerToken } from './coordinator/callerAuth';
 import { pushDirectory } from './coordinatorSync';
 import { CloudProviderError, type CloudProvider, type CloudSize } from './provider';
 import { refreshPeersFiles } from './peers';
+import { resolveBoatOrg } from './wallet';
 import {
   DEFAULT_NAME_PREFIX,
   type CloudCredentials,
@@ -57,10 +58,11 @@ interface CoordinatorArgs {
   pin?: Partial<PinnedPane>;
   noPin: boolean;
   keyTtl: string;
+  boatOrg?: string;
 }
 
 export const COORDINATOR_LIFECYCLE_USAGE = `On this machine (create and manage the coordinator sandbox):
-  runpane cloud coordinator deploy --yes [--name <host>] [--size small|default|large] [--from <snapshot>|--no-golden]
+  runpane cloud coordinator deploy --yes [--name <host>] [--size small|default|large] [--from <snapshot>|--no-golden] [--boat-org <org|personal>]
         [--no-reconcile|--reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>]
         [--pin-version <v> --pin-deb-url <url> --pin-deb-sha256 <hex> | --no-pin] [--key-ttl <90d>] [--json]
   runpane cloud coordinator status [--json]
@@ -111,6 +113,7 @@ export function parseCoordinatorArgs(argv: readonly string[]): CoordinatorArgs {
       case '--pin-deb-sha256': deployOnly(); args.pin = { ...args.pin, sha256: value(index++, flag) }; break;
       case '--no-pin': deployOnly(); args.noPin = true; break;
       case '--key-ttl': deployOnly(); args.keyTtl = value(index++, flag); break;
+      case '--boat-org': deployOnly(); args.boatOrg = value(index++, flag); break;
       default: throw new Error(`Unknown option for runpane cloud coordinator ${sub}: ${flag}\n\n${COORDINATOR_LIFECYCLE_USAGE}`);
     }
   }
@@ -144,10 +147,14 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
   if (!args.yes) {
     throw new Error('runpane cloud coordinator deploy creates (or updates) a billed always-on sandbox. Rerun with --yes to confirm.');
   }
-  const { credentials, provider } = await loadProvider(deps);
+  const settings = await deps.store.readSettings();
+  const loaded = await loadProvider(deps);
+  const { credentials } = loaded;
   const tailscale = credentials.tailscale;
   if (!tailscale) throw new Error('No Tailscale OAuth client saved. Run: runpane cloud setup --tailscale-client-id <id> --tailscale-secret-file <path|->');
-  const settings = await deps.store.readSettings();
+  // A new coordinator sandbox bills --boat-org, else the saved wallet; an existing one keeps its own.
+  const wantedOrg = args.boatOrg ? await resolveBoatOrg(loaded.provider, args.boatOrg) : settings.boatOrg;
+  let provider = settings.coordinator?.deployment ? loaded.provider : deps.createProvider(credentials, wantedOrg?.id);
   const progress = (line: string) => (args.json ? deps.stderr(line) : deps.stdout(line));
   const started = deps.now();
   const timings: Record<string, number> = {};
@@ -162,6 +169,9 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
       deployment = undefined;
     } else if (sandbox.state !== 'running') {
       throw new Error(`The coordinator ${deployment.hostname} is ${sandbox.providerState}. Run runpane cloud coordinator start first, then redeploy.`);
+    } else if (sandbox.org && sandbox.org.id !== deployment.boatOrg?.id) {
+      // Deployed before wallets were recorded: its wallet is whatever boat billed at create.
+      deployment = { ...deployment, boatOrg: sandbox.org };
     }
   }
 
@@ -172,15 +182,18 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     const fromSnapshot = args.noGolden ? undefined : args.fromSnapshot ?? settings.goldenSnapshot;
     const size = args.size ?? 'small';
     progress(`runpane cloud: creating ${size} coordinator sandbox ${hostname}${fromSnapshot ? ` from ${fromSnapshot}` : ''}...`);
+    provider = deps.createProvider(credentials, wantedOrg?.id);
     const sandbox = await provider.create({
       name: hostname,
       size,
       fromSnapshot,
+      org: wantedOrg?.id,
       idempotencyKey: `runpane-cloud-coordinator-${randomBytes(6).toString('hex')}`,
     });
     created = true;
     try {
-      await waitForState(provider, sandbox.id, 'running', READY_TIMEOUT_MS, deps);
+      const ready = await waitForState(provider, sandbox.id, 'running', READY_TIMEOUT_MS, deps);
+      const billedOrg = ready.org ?? sandbox.org ?? wantedOrg;
       timings.readyMs = deps.now() - started;
       progress(`runpane cloud: ${sandbox.id} is up; joining the tailnet as ${hostname}...`);
       const joined = await deps.bootstrap.joinTailnet(provider.handle(sandbox.id), {
@@ -205,6 +218,7 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
         deployedAt: new Date(started).toISOString(),
         appVersion: '',
       };
+      if (billedOrg) deployment.boatOrg = billedOrg;
       // Saved before the install, so `coordinator destroy` can clean up a half-finished deploy.
       await saveDeployment(deps, deployment);
     } catch (error) {
@@ -258,7 +272,7 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
   const coordinator = await pushDirectory(deps);
   const records = await deps.store.listHosts();
   const withoutClient = records.filter((record) => !record.meta.coordinatorPairingPath).map((record) => record.profile.cloud.hostname);
-  const peers = await refreshPeersFiles(records, deps, provider);
+  const peers = await refreshPeersFiles(records, deps);
   timings.totalMs = deps.now() - started;
 
   const summary = {
@@ -330,7 +344,12 @@ async function installCoordinator(provider: CloudProvider, deployment: Coordinat
     stateDir: `${COORDINATOR_HOME}/state`,
     directoryFile: `${COORDINATOR_HOME}/directory.json`,
     secretFile: `${COORDINATOR_HOME}/caller-secret`,
-    provider: { kind: 'boat', apiKeyFile: `${COORDINATOR_HOME}/boat-scoped-key` },
+    provider: {
+      kind: 'boat',
+      apiKeyFile: `${COORDINATOR_HOME}/boat-scoped-key`,
+      // The wallet its calls default to; each Session's calls use the wallet the directory names for it.
+      org: deployment.boatOrg?.id ?? null,
+    },
     managedNamePrefix: deployment.managedPrefix,
     selfSandboxId: deployment.sandboxId,
     pinnedVersion: deployment.pin?.version ?? null,
@@ -523,10 +542,11 @@ async function createScopedKey(provider: CloudProvider, name: string, ttl: strin
   throw new Error('The provider refused every scoped key lifetime down to 1 day; the account key is about to expire. Create a new account key and rerun runpane cloud setup.');
 }
 
+/** Credentials and a provider scoped to the deployed coordinator's wallet (or boat's active one, before a deploy). */
 async function loadProvider(deps: CloudDeps): Promise<{ credentials: CloudCredentials; provider: CloudProvider }> {
   const credentials = await deps.store.readCredentials();
   if (!credentials.boat) throw new Error('No boat API key saved. Run: runpane cloud setup --boat-key-file <path|->');
-  return { credentials, provider: deps.createProvider(credentials) };
+  return { credentials, provider: deps.createProvider(credentials, (await deps.store.readSettings()).coordinator?.deployment?.boatOrg?.id) };
 }
 
 async function requireDeployment(deps: CloudDeps): Promise<CoordinatorDeployment> {

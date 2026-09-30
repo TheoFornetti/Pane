@@ -18,6 +18,7 @@ const directoryFileSchema = boundary.object({
     nodeId: boundary.optional(boundary.nullable(boundary.string)),
     pinnedVersion: boundary.optional(boundary.nullable(boundary.string)),
     coordinatorToken: boundary.optional(boundary.nullable(boundary.string)),
+    org: boundary.optional(boundary.nullable(boundary.string)),
   })),
 });
 
@@ -41,6 +42,7 @@ export function parseDirectory(value: JsonValue): ParsedDirectory {
       nodeId: session.nodeId ?? null,
       pinnedVersion: session.pinnedVersion ?? null,
       coordinatorToken: session.coordinatorToken ?? null,
+      org: session.org ?? null,
     };
   });
   return { generatedAt: decoded.generatedAt ?? null, entries };

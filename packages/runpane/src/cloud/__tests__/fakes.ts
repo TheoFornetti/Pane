@@ -58,6 +58,11 @@ interface FakeWorld {
   binaryFiles: Map<string, Buffer>;
   /** The repository URL each provision was asked to clone. */
   provisionRepos: string[];
+  /** boat wallets: the account's active one bills a create that names none. */
+  orgs: { id: string; name: string }[];
+  activeOrg: string;
+  /** Provider calls with the wallet the provider was scoped to (`-`: none, boat's active wallet). */
+  orgCalls: string[];
 }
 
 /** GitHub as the laptop's credential sees it, plus what the sandbox's git steps report. */
@@ -85,10 +90,19 @@ function createFakeWorld(): FakeWorld {
     binaryFiles: new Map(),
     provisionRepos: [],
     github: { repos: new Map(), keys: [], nextKeyId: 100, pushes: [], tokenSources: [] },
+    orgs: [{ id: 'personal', name: 'Personal' }, { id: 'team_test1', name: 'test' }],
+    activeOrg: 'personal',
+    orgCalls: [],
   };
 }
 
-function createFakeProvider(world: FakeWorld): CloudProvider {
+function createFakeProvider(world: FakeWorld, org?: string): CloudProvider {
+  const scoped = (what: string) => world.orgCalls.push(`${what} ${org ?? '-'}`);
+  const walletOf = (wanted: string): { id: string; name: string } => {
+    const found = world.orgs.find((candidate) => candidate.id === wanted || candidate.name.toLowerCase() === wanted.toLowerCase());
+    if (!found) throw new CloudProviderError('boat POST /sandboxes failed with HTTP 403 (not_org_member)', 403, 'not_org_member');
+    return found;
+  };
   const createdByKey = world.createdByKey;
   const need = (id: string): FakeSandbox => {
     const sandbox = world.sandboxes.get(id);
@@ -101,10 +115,12 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
     state: sandbox.state,
     providerState: sandbox.state,
     size: sandbox.size,
+    org: sandbox.org,
   });
   const handle = (id: string): SandboxHandle => ({
     id,
     async runScript(script) {
+      scoped(`exec ${id}`);
       world.calls.push(`script ${id}`);
       world.scripts.push({ sandboxId: id, script });
       if (script.includes('tailscale ip -4')) return { exitCode: 0, stdout: '100.64.0.9\n', stderr: '' };
@@ -124,7 +140,12 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
     async verifyCredentials() {
       return { account: 'fake@example.test' };
     },
+    async listOrgs() {
+      scoped('orgs');
+      return world.orgs.map((candidate) => ({ ...candidate, active: candidate.id === world.activeOrg }));
+    },
     async create(request: CreateSandboxRequest) {
+      scoped(`create(org=${request.org ?? '-'})`);
       world.calls.push(`create ${request.name} ${request.size} ${request.fromSnapshot ?? '-'}`);
       const existing = createdByKey.get(request.idempotencyKey);
       if (existing) return snapshot(need(existing));
@@ -136,6 +157,8 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
         providerState: 'provisioning',
         size: request.size,
         pending: ['starting'],
+        // Like boat: the body's org, else the request scope, else the account's active wallet.
+        org: walletOf(request.org ?? org ?? world.activeOrg),
       };
       world.sandboxes.set(sandbox.id, sandbox);
       createdByKey.set(request.idempotencyKey, sandbox.id);
@@ -158,6 +181,7 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       need(id).name = name;
     },
     async stop(id) {
+      scoped(`stop ${id}`);
       world.calls.push(`stop ${id}`);
       const sandbox = need(id);
       sandbox.state = 'stopping';
@@ -165,6 +189,7 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       for (const device of world.devices) if (device.hostname === sandbox.name) device.online = false;
     },
     async resume(id, options?: { size?: CloudSize }) {
+      scoped(`resume ${id}`);
       world.calls.push(`resume ${id}${options?.size ? ` ${options.size}` : ''}`);
       const sandbox = need(id);
       if (sandbox.state !== 'stopped') throw new Error('fake: resume of a sandbox that is not stopped');
@@ -174,6 +199,7 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       for (const device of world.devices) if (device.hostname === sandbox.name) device.online = true;
     },
     async destroy(id) {
+      scoped(`destroy ${id}`);
       world.calls.push(`destroy ${id}`);
       world.sandboxes.delete(id);
     },
@@ -400,7 +426,7 @@ export async function createTestHarness(): Promise<TestHarness> {
   const deps: CloudDeps = {
     store,
     github: createFakeGitHub(world),
-    createProvider: () => createFakeProvider(world),
+    createProvider: (_credentials, org) => createFakeProvider(world, org),
     bootstrap: createFakeBootstrap(world),
     readSecretFile: (file) => fs.readFile(file, 'utf8'),
     stdout: (line) => out.push(line),

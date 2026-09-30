@@ -32,6 +32,8 @@ test('new pushes a directory the coordinator accepts, with the new host in it', 
     nodeId: record.profile.cloud.nodeId,
     pinnedVersion: null,
     coordinatorToken: null,
+    // The wallet boat billed at create (the fake account's active wallet is personal).
+    org: 'personal',
   });
   assert.match(harness.out.join('\n'), /coordinator: directory updated \(1 cloud Session\)/u);
 });

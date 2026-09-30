@@ -98,7 +98,7 @@ export class WakeService {
     const resolved = await this.resolve(host);
     if (!resolved.ok) return resolved;
     try {
-      const sandbox = await this.deps.provider.get(resolved.entry.sandboxId);
+      const sandbox = await this.deps.provider.get(resolved.entry.sandboxId, resolved.entry.org);
       return await this.classify(resolved.entry, sandbox);
     } catch (error) {
       return { ok: false, code: 'provider-error', message: describeError(error) };
@@ -134,7 +134,7 @@ export class WakeService {
     const deadline = this.deps.clock.now() + timeoutMs;
     let sandbox: ProviderSandbox;
     try {
-      sandbox = await this.deps.provider.get(entry.sandboxId);
+      sandbox = await this.deps.provider.get(entry.sandboxId, entry.org);
       if (sandbox.state === 'stopping') sandbox = await this.waitWhileStopping(entry.sandboxId);
     } catch (error) {
       return { ok: false, code: 'provider-error', message: describeError(error) };
@@ -159,7 +159,7 @@ export class WakeService {
     while (this.deps.clock.now() < deadline) {
       let current: ProviderSandbox;
       try {
-        current = await this.deps.provider.get(entry.sandboxId);
+        current = await this.deps.provider.get(entry.sandboxId, entry.org);
       } catch (error) {
         return { ok: false, code: 'provider-error', message: describeError(error) };
       }
@@ -208,7 +208,7 @@ export class WakeService {
     for (;;) {
       // Idle-stop may hold the sandbox for a few seconds; wait for it rather than racing its stop call.
       const outcome = await this.deps.activity.exclusive(entry.sandboxId, async () => {
-        await this.deps.provider.resume(entry.sandboxId);
+        await this.deps.provider.resume(entry.sandboxId, entry.org);
       }).catch((cause: unknown) => ({ ran: true as const, error: cause }));
       if (!outcome.ran) {
         busyWaits += 1;

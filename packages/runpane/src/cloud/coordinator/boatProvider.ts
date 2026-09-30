@@ -11,6 +11,7 @@ const sandboxSchema = boundary.object({
   state: boundary.string,
   createdAt: boundary.optional(boundary.nullable(boundary.string)),
   updatedAt: boundary.optional(boundary.nullable(boundary.string)),
+  team: boundary.optional(boundary.nullable(boundary.object({ id: boundary.nonEmptyString }))),
 });
 
 const listSchema = boundary.object({
@@ -51,6 +52,7 @@ function toProviderSandbox(raw: {
   state: string;
   createdAt?: string | null;
   updatedAt?: string | null;
+  team?: { id: string } | null;
 }): ProviderSandbox {
   return {
     id: raw.id,
@@ -59,6 +61,7 @@ function toProviderSandbox(raw: {
     rawState: raw.state,
     createdAt: raw.createdAt ?? null,
     updatedAt: raw.updatedAt ?? null,
+    org: raw.team === undefined ? null : raw.team?.id ?? 'personal',
   };
 }
 
@@ -74,6 +77,8 @@ type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 export interface BoatProviderOptions {
   apiBase: string;
   apiKey: string;
+  /** The wallet calls are scoped to (X-Boat-Org) when a call names none; null/undefined: the account's active wallet. */
+  org?: string | null;
   fetchImpl?: FetchLike;
   requestTimeoutMs?: number;
 }
@@ -103,9 +108,9 @@ export class BoatCoordinatorProvider implements CoordinatorProvider {
     throw new BoatProviderError('boat sandbox list did not finish after 50 pages', 0, 'pagination');
   }
 
-  async get(sandboxId: string): Promise<ProviderSandbox> {
+  async get(sandboxId: string, org?: string | null): Promise<ProviderSandbox> {
     try {
-      const body = await this.request('GET', `/sandboxes/${encodeURIComponent(sandboxId)}`);
+      const body = await this.request('GET', `/sandboxes/${encodeURIComponent(sandboxId)}`, org);
       return toProviderSandbox(decodeBoundary(body, infoSchema).sandbox);
     } catch (error) {
       if (error instanceof BoatProviderError && error.status === 404) {
@@ -115,17 +120,19 @@ export class BoatCoordinatorProvider implements CoordinatorProvider {
     }
   }
 
-  async stop(sandboxId: string): Promise<void> {
-    await this.request('POST', `/sandboxes/${encodeURIComponent(sandboxId)}/stop`);
+  async stop(sandboxId: string, org?: string | null): Promise<void> {
+    await this.request('POST', `/sandboxes/${encodeURIComponent(sandboxId)}/stop`, org);
   }
 
-  async resume(sandboxId: string): Promise<void> {
+  async resume(sandboxId: string, org?: string | null): Promise<void> {
     // boat's resume takes no Idempotency-Key; the wake service single-flights resumes and treats 409 as "already resuming".
-    await this.request('POST', `/sandboxes/${encodeURIComponent(sandboxId)}/resume`);
+    await this.request('POST', `/sandboxes/${encodeURIComponent(sandboxId)}/resume`, org);
   }
 
-  private async request(method: 'GET' | 'POST', pathAndQuery: string): Promise<JsonValue> {
+  private async request(method: 'GET' | 'POST', pathAndQuery: string, org?: string | null): Promise<JsonValue> {
     const headers = new Headers({ Authorization: `Bearer ${this.options.apiKey}`, Accept: 'application/json' });
+    const wallet = org ?? this.options.org;
+    if (wallet) headers.set('X-Boat-Org', wallet);
     if (method === 'POST') headers.set('Content-Type', 'application/json');
     const response = await this.fetchImpl(`${this.options.apiBase}${pathAndQuery}`, {
       method,

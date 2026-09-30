@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { CloudSize } from './provider';
+import type { BoatOrg, CloudSize } from './provider';
 import type { CloudTransport } from './args';
 
 /**
@@ -43,6 +43,8 @@ export interface CloudSettings {
   coordinator?: { enabled: boolean; deployment?: CoordinatorDeployment };
   /** Extra name patterns (`*` wildcards) `cloud secrets set` refuses, on top of the built-in deny-list. */
   secretsDenyList?: string[];
+  /** The boat wallet new sandboxes bill (`setup --boat-org`); unset, boat's active wallet applies. */
+  boatOrg?: BoatOrg;
 }
 
 /** The coordinator sandbox `runpane cloud coordinator deploy` created (final-plan S2). */
@@ -65,6 +67,8 @@ export interface CoordinatorDeployment {
   /** Idle-stop timings, when set by `deploy --idle-check-seconds/--wake-grace-seconds`; kept across redeploys. */
   idleCheckSeconds?: number;
   wakeGraceSeconds?: number;
+  /** The boat wallet the coordinator sandbox bills (fixed at create); its own boat calls default to it. */
+  boatOrg?: BoatOrg;
 }
 
 export interface PinnedPane {
@@ -114,6 +118,8 @@ interface CloudHostMeta {
   repo?: { url: string; ref?: string };
   /** Sessions this one may message (J3): each is a peer record minted on the target host. */
   peers?: PeerGrant[];
+  /** The boat wallet this sandbox bills, fixed at create; every provider call for the host is scoped to it. */
+  boatOrg?: BoatOrg;
   /** GitHub repositories this Session can reach (`runpane cloud github connect`). */
   github?: GitHubGrant[];
 }

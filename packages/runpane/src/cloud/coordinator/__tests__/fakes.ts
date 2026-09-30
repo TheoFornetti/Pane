@@ -48,6 +48,7 @@ export function entry(sessionId: string, sandboxId: string, overrides: Partial<D
     nodeId: null,
     pinnedVersion: null,
     coordinatorToken: `token-${sessionId}`,
+    org: null,
     ...overrides,
   };
 }

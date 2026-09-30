@@ -18,6 +18,25 @@ export interface CloudSandbox {
   size?: CloudSize;
   error?: string | null;
   createdAt?: string | null;
+  /** The wallet this sandbox bills, fixed when it was created; undefined when the provider did not say. */
+  org?: BoatOrg;
+}
+
+/**
+ * A boat billing wallet: an organization (`team_…`) or the account's own personal wallet, whose id is
+ * always the word `personal` here (boat accepts it wherever an org is passed).
+ */
+export interface BoatOrg {
+  id: string;
+  name: string;
+}
+
+export const PERSONAL_ORG: BoatOrg = { id: 'personal', name: 'Personal' };
+
+/** One wallet the account can bill, as boat's GET /orgs lists it. */
+interface ListedBoatOrg extends BoatOrg {
+  /** The account's active wallet: what a request naming no org bills. */
+  active: boolean;
 }
 
 export interface CreateSandboxRequest {
@@ -25,6 +44,8 @@ export interface CreateSandboxRequest {
   size: CloudSize;
   /** Named snapshot (golden image) to start from. */
   fromSnapshot?: string;
+  /** Wallet to bill (org id, name or `personal`); omitted, the provider's own org, then boat's active wallet. */
+  org?: string;
   /**
    * Makes a retried create return the same sandbox instead of a second one.
    * The CLI derives it from the cloud Session id.
@@ -71,6 +92,8 @@ export interface CloudProvider {
   readonly name: 'boat';
   /** Cheap authenticated call, used by `runpane cloud setup` to check the key. */
   verifyCredentials(): Promise<{ account: string }>;
+  /** The wallets this account can bill (boat GET /orgs); the personal one has id `personal`. */
+  listOrgs(): Promise<ListedBoatOrg[]>;
   create(request: CreateSandboxRequest): Promise<CloudSandbox>;
   /** Returns a `gone` sandbox (never throws) when the provider answers 404. */
   get(sandboxId: string): Promise<CloudSandbox>;

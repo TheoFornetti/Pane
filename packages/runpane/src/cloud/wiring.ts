@@ -76,9 +76,9 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
 
   return {
     store,
-    createProvider: (credentials) => {
+    createProvider: (credentials, org) => {
       if (!credentials.boat) throw new Error('No boat API key saved. Run: runpane cloud setup --boat-key-file <path|->');
-      return createBoatProvider({ apiKey: credentials.boat.apiKey });
+      return createBoatProvider({ apiKey: credentials.boat.apiKey, org });
     },
     bootstrap,
     readSecretFile,

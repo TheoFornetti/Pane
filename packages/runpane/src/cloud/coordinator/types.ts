@@ -17,15 +17,18 @@ export interface ProviderSandbox {
   rawState: string;
   createdAt: string | null;
   updatedAt: string | null;
+  /** The boat wallet it bills (org id, or `personal`); null when the provider did not say. */
+  org?: string | null;
 }
 
 export interface CoordinatorProvider {
   readonly kind: string;
   list(): Promise<ProviderSandbox[]>;
   /** Returns state 'missing' when the provider no longer knows the sandbox. */
-  get(sandboxId: string): Promise<ProviderSandbox>;
-  stop(sandboxId: string): Promise<void>;
-  resume(sandboxId: string): Promise<void>;
+  get(sandboxId: string, org?: string | null): Promise<ProviderSandbox>;
+  /** `org`: the wallet the sandbox bills; omitted, the provider's configured wallet. */
+  stop(sandboxId: string, org?: string | null): Promise<void>;
+  resume(sandboxId: string, org?: string | null): Promise<void>;
 }
 
 export interface DirectoryEntry {
@@ -39,6 +42,8 @@ export interface DirectoryEntry {
   pinnedVersion: string | null;
   /** Bearer token of the coordinator's own paired-client record on that daemon. */
   coordinatorToken: string | null;
+  /** The boat wallet the Session's sandbox bills (org id or `personal`); null: the coordinator's own. */
+  org: string | null;
 }
 
 export type DirectoryReadResult =

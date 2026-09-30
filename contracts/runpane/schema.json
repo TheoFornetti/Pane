@@ -530,6 +530,7 @@
         "cloud status",
         "cloud stop",
         "cloud wake",
+        "cloud repair",
         "cloud destroy",
         "cloud pair",
         "cloud sync",
@@ -803,6 +804,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "cloud wake": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud repair": {
           "$ref": "#/$defs/helpLines"
         },
         "cloud destroy": {

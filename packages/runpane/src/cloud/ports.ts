@@ -64,6 +64,17 @@ export interface BootstrapPort {
   joinTailnet(sandbox: SandboxHandle, request: JoinTailnetRequest, tailnet: TailnetCredentials): Promise<JoinedNode>;
   /** Re-enrols the node under the same hostname only if it is logged out (a resume can lose its state). */
   repairTailnet(sandbox: SandboxHandle, request: { hostname: string; oldNodeId?: string; restoreServe?: boolean }, tailnet: TailnetCredentials): Promise<TailnetRepair>;
+  /**
+   * On a running Session: installs the tailscaled.state and Serve guards and re-applies Tailscale Serve
+   * if a resume lost it. Never stops anything.
+   */
+  repairServe(sandbox: SandboxHandle, request: { transport: 'https' | 'http' }): Promise<ServeRepair>;
+}
+
+interface ServeRepair {
+  backendState: string;
+  serveApplied: boolean;
+  detail: string;
 }
 
 type TailnetRepair =

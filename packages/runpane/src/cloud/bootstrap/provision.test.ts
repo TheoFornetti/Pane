@@ -83,6 +83,7 @@ class FakeSandbox implements SandboxHandle {
       case 'identity': return { ok: true, reset: true, machineId: 'abc' };
       case 'ts-guard': return { ok: true };
       case 'cert-status': return { ok: true, rateLimited: this.certRateLimited, detail: this.certRateLimited ? '429 rateLimited: too many certificates (50) already issued' : null };
+      case 'serve-guard': return { ok: true, applied: false, detail: 'rp-serve-restore: serve ok' };
       case 'serve-http': return { ok: true, baseUrl: `http://${this.state.hostname}.tailnet-example.ts.net:42137` };
       case 'firewall': return { ok: true, allowedTcp: args[0].split(',').map(Number) };
       case 'tailscale-install': return { ok: true, installed: false, backendState: 'NeedsLogin' };
@@ -188,8 +189,9 @@ test('provisionSandbox runs every step in order and writes the pairing file 0600
 
   assert.deepEqual(sandbox.steps.map((step) => step[0]), [
     'identity', 'tailscale-install', 'tailnet-identity', 'check', 'firewall', 'tailscale-up',
-    'install-pane', 'pairing-read', 'add-client', 'pairing-read', 'clone',
+    'install-pane', 'pairing-read', 'add-client', 'pairing-read', 'clone', 'serve-guard',
   ]);
+  assert.deepEqual(sandbox.steps.at(-1)?.slice(1), ['https'], 'the Serve guard records the transport it ended on');
   // Only Tailscale Serve (tcp/443) may reach the sandbox over the tailnet, set up before it joins.
   assert.deepEqual(sandbox.steps[4].slice(1), ['443']);
   assert.deepEqual(sandbox.steps[5].slice(2), ['rp-k3j9x0q2']);
@@ -303,6 +305,7 @@ test('auto transport: when Let\'s Encrypt refuses the Serve certificate, it swit
   assert.equal(decodePairingCode(fs.readFileSync(pairingOutputPath, 'utf8')).token, PAIRING_TOKEN);
   assert.equal(decodePairingCode(fs.readFileSync(coordPath, 'utf8')).baseUrl, httpBase);
   assert.equal(invoke.requests[0].url, `${httpBase}/invoke`);
+  assert.deepEqual(sandbox.steps.find((step) => step[0] === 'serve-guard')?.slice(1), ['http']);
 });
 
 test('auto transport switches when HTTPS stays down but the daemon answers on loopback, even without a logged 429', async () => {

@@ -18,6 +18,9 @@ interface CloudJson {
   flushedBy?: string;
   blockers?: { condition: string; message: string }[];
   resumed?: boolean;
+  serveRepaired?: boolean;
+  serveApplied?: boolean;
+  guards?: string;
   alreadyStopped?: boolean;
   sameTailnetNode?: boolean;
   baseUrl?: string;
@@ -204,6 +207,38 @@ test('stop warns about what is still running but stops, and falls back to sync w
   assert.equal(await run(old, ['stop', oldHost, '--yes', '--json']), 0);
   assert.equal(lastJson(old).flushedBy, 'sync');
   assert.ok(old.world.scripts.some((entry) => entry.script.includes('sync')));
+});
+
+test('wake re-applies a Tailscale Serve config that the resume lost (node Running, /health unreachable)', async () => {
+  const harness = await createTestHarness();
+  const hostname = await newHost(harness);
+  await run(harness, ['stop', hostname, '--yes']);
+  harness.world.serveLost.add(hostname);
+  assert.equal(await run(harness, ['wake', hostname, '--json']), 0);
+  const woke = lastJson(harness);
+  assert.equal(woke.status, 'awake');
+  assert.equal(woke.serveRepaired, true);
+  assert.ok(harness.world.calls.some((call) => call.startsWith('repair-serve ') && call.endsWith(' https')));
+});
+
+test('repair fixes an awake Session in place and never starts or stops one', async () => {
+  const harness = await createTestHarness();
+  const hostname = await newHost(harness);
+  harness.world.serveLost.add(hostname);
+  const mutations = () => harness.world.calls.filter((call) => /^(stop|resume) /u.test(call)).length;
+  assert.equal(await run(harness, ['repair', hostname, '--json']), 0);
+  const repaired = lastJson(harness);
+  assert.equal(repaired.serveApplied, true);
+  assert.equal(repaired.guards, 'installed');
+  assert.equal(mutations(), 0);
+
+  assert.equal(await run(harness, ['repair', hostname, '--json']), 0, 'idempotent');
+  assert.equal(lastJson(harness).serveApplied, false);
+
+  await run(harness, ['stop', hostname, '--yes']);
+  const before = mutations();
+  await assert.rejects(run(harness, ['repair', hostname]), /asleep; repair only works on an awake Session/u);
+  assert.equal(mutations(), before, 'repair never wakes a sleeping Session');
 });
 
 test('stop of a stopped host is a no-op', async () => {

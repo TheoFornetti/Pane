@@ -4,11 +4,11 @@ import { CLOUD_SIZES, type CloudSize } from './provider';
 const CLOUD_TRANSPORTS = ['auto', 'https', 'http'] as const;
 export type CloudTransport = (typeof CLOUD_TRANSPORTS)[number];
 
-const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'destroy', 'pair', 'sync', 'coordinator', 'peers'] as const;
+const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'repair', 'destroy', 'pair', 'sync', 'coordinator', 'peers'] as const;
 type CloudSubcommand = typeof CLOUD_SUBCOMMANDS[number];
 
 /** Subcommands that act on one host, named by a positional argument or --host. */
-const HOST_SUBCOMMANDS = new Set<CloudSubcommand>(['status', 'stop', 'wake', 'destroy', 'pair']);
+const HOST_SUBCOMMANDS = new Set<CloudSubcommand>(['status', 'stop', 'wake', 'repair', 'destroy', 'pair']);
 
 export interface CloudArgs {
   subcommand: CloudSubcommand;
@@ -100,6 +100,7 @@ const ALLOWED = {
   status: ['--host'],
   stop: ['--host', '--yes', '-y', '--force', '--no-wait'],
   wake: ['--host', '--size', '--timeout-ms'],
+  repair: ['--host'],
   destroy: ['--host', '--yes', '-y', '--desktop-dir', '--no-import'],
   pair: ['--host'],
   sync: ['--desktop-dir'],

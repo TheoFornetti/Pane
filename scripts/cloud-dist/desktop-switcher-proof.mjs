@@ -16,6 +16,8 @@
 //   SYNC=1                           import with `runpane cloud sync` while the app runs
 //   SETTINGS_WRITE=1                 after the import, change a setting in the app and check the host survives
 //   REPO=Hello-World PANE_NAME=gui   awake: open (or create) this pane and run a command in its terminal
+//   AWAIT_WAKE=1                     asleep: then wait for the host's /health (run `runpane cloud wake` meanwhile)
+//                                    and pick it again
 import { _electron as electron } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -207,6 +209,31 @@ try {
     const hint = [menuText, bodyText, dialogText].some((text) => /runpane cloud wake/.test(text));
     fs.writeFileSync(path.join(out, 'asleep-switcher.txt'), `chip: ${chipLabel}\nmenu: ${menuText}\n`);
     check('asleep-names-wake-command', hint, `chip "${chipLabel}"; switcher "${menuText.replace(/\s+/g, ' ').slice(0, 300)}"${dialogText ? `; dialog "${dialogText.slice(0, 300)}"` : ''}`);
+
+    if (env.AWAIT_WAKE === '1') {
+      // The user runs `runpane cloud wake` elsewhere, then picks the host again.
+      await page.keyboard.press('Escape');
+      const profile = JSON.parse(fs.readFileSync(path.join(deskDir, 'config.json'), 'utf8'))
+        .remoteDaemon.client.profiles.find((entry) => entry.label === hostLabel);
+      log('waiting for the host to wake:', profile.baseUrl);
+      const waitStarted = Date.now();
+      let awake = false;
+      while (!awake && Date.now() - waitStarted < Number(env.AWAIT_WAKE_MS ?? 600_000)) {
+        awake = await fetch(`${profile.baseUrl}/health`, { signal: AbortSignal.timeout(3000) }).then((response) => response.ok, () => false);
+        if (!awake) await page.waitForTimeout(3000);
+      }
+      log('host /health answered:', awake, `after ${Math.round((Date.now() - waitStarted) / 1000)} s`);
+      await switcherChip.first().click();
+      const repickedAt = Date.now();
+      await page.getByRole('menuitemradio', { name: new RegExp(hostLabel) }).click();
+      const back = await page.getByRole('button', { name: `Agents run on ${hostLabel}. Switch host` })
+        .waitFor({ timeout: 30_000 }).then(() => true, () => false);
+      const listed = back && env.REPO
+        ? await page.getByRole('button', { name: `New pane in ${env.REPO}` }).waitFor({ timeout: 30_000 }).then(() => true, () => false)
+        : back;
+      check('reconnects-after-wake', awake && listed, `picked again ${Math.round((repickedAt - waitStarted) / 1000)} s into the wait; connected and listed in ${Date.now() - repickedAt} ms`);
+      await shot('after-wake');
+    }
   }
 } catch (error) {
   check('run-completed', false, error instanceof Error ? error.message.split('\n')[0] : String(error));

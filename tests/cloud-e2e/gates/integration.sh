@@ -17,10 +17,10 @@ cli_resolve || { g M1-cli cli BLOCKED "runpane CLI under test not installable"; 
 
 # ================================================================ M1: setup + new
 GOLDEN="${E2E_GOLDEN:-}"; DEB="${E2E_DAEMON_DEB_URL:-}"
-flags=(); [ -n "$GOLDEN" ] && flags+=(--golden "$GOLDEN") || flags+=(--no-golden); [ -n "$DEB" ] && flags+=(--pane-deb-url "$DEB")
+flags=(); if [ -n "$GOLDEN" ]; then flags+=(--golden "$GOLDEN"); else flags+=(--no-golden); [ -n "$DEB" ] && flags+=(--pane-deb-url "$DEB"); fi   # golden: preinstalled daemon
 out=$(cloud_setup_from_loop_secrets "${flags[@]}" 2>&1); rc=$?; printf '%s\n' "$out" | ev setup.json >/dev/null
 perm=$(stat -c '%a' "$RUNPANE_CLOUD_DIR"); loose=$(find "$RUNPANE_CLOUD_DIR" -type f -perm /077 | wc -l)
-[ $rc = 0 ] && [ "$perm" = 700 ] && [ "$loose" = 0 ] && g M1-cli setup PASS "cloud setup ok; dir 0700; deb=${DEB##*/} golden=${GOLDEN:-none}" "$E2E_RUN_DIR/setup.json" \
+[ $rc = 0 ] && [ "$perm" = 700 ] && [ "$loose" = 0 ] && g M1-cli setup PASS "cloud setup ok; dir 0700; daemon=$([ -n "$GOLDEN" ] && echo "preinstalled in $GOLDEN" || echo "${DEB##*/}")" "$E2E_RUN_DIR/setup.json" \
   || { g M1-cli setup FAIL "rc=$rc dir=$perm loose=$loose" "$E2E_RUN_DIR/setup.json"; exit 1; }
 t0=$(ms_now)
 rpc cloud new --label "e2e-int-$(date -u +%H%M%S)" --repo "$REPO" --size "${E2E_SIZE:-default}" --yes --json > "$E2E_RUN_DIR/new.json" 2> "$E2E_RUN_DIR/new.stderr"; rc=$?

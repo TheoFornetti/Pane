@@ -6,12 +6,13 @@ import { decodeHealth, decodeSafeToStop, HttpDaemonProbe } from '../daemonProbe'
 import { parseDirectory } from '../directory';
 import { renderSystemdUnit } from '../service';
 import type { DaemonHealth } from '../types';
+import type { JsonValue } from '../../../boundaryDecoder';
 
 function readyOf(health: DaemonHealth): boolean {
   return health.reachable && health.ready;
 }
 
-function jsonResponse(status: number, body: unknown): Response {
+function jsonResponse(status: number, body: JsonValue): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 

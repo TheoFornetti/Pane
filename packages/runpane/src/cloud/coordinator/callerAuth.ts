@@ -8,7 +8,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 const PREFIX = 'rpc1';
 const CALLER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/;
 
-export type CallerRole = 'user' | 'peer';
+type CallerRole = 'user' | 'peer';
 
 export interface Caller {
   id: string;
@@ -19,7 +19,7 @@ export function createCallerSecret(): string {
   return randomBytes(32).toString('base64url');
 }
 
-export function callerRole(callerId: string): CallerRole {
+function callerRole(callerId: string): CallerRole {
   return callerId.startsWith('user:') ? 'user' : 'peer';
 }
 

@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import { MemoryAlertSink } from '../alerts';
 import { authenticateCaller, mintCallerToken } from '../callerAuth';
+import { parseDirectory } from '../directory';
 import { createCoordinatorServer } from '../server';
 import type { CoordinatorApi } from '../server';
 import { entry, FakeClock, FakeDirectory } from './fakes';
@@ -39,6 +40,7 @@ describe('caller tokens', () => {
 
 describe('coordinator HTTP server', () => {
   const calls: string[] = [];
+  const replaced: number[] = [];
   const api: CoordinatorApi = {
     status: async (host) => {
       calls.push(`status ${host}`);
@@ -59,6 +61,12 @@ describe('coordinator HTTP server', () => {
   const server = createCoordinatorServer({
     api,
     directory: FakeDirectory.of([entry('s1', 'bx_a')]),
+    directoryWriter: {
+      replace: async (value) => {
+        replaced.push(parseDirectory(value).entries.length);
+        return replaced[replaced.length - 1];
+      },
+    },
     alerts: new MemoryAlertSink(),
     clock: new FakeClock(),
     secret: SECRET,
@@ -70,6 +78,7 @@ describe('coordinator HTTP server', () => {
 
   before(async () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    // SAFETY: a server listening on a TCP host/port reports an AddressInfo, never a pipe path.
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });
   after(async () => {
@@ -109,6 +118,16 @@ describe('coordinator HTTP server', () => {
     assert.equal(reconcile.status, 200);
     assert.equal(reconcile.body.report.aborted, 'directory-empty');
     assert.equal((await request('/cloud/alerts', { caller: 'user:red' })).status, 200);
+  });
+
+  it('lets only user callers replace the directory, and validates it', async () => {
+    const directory = { version: 1, sessions: [{ sessionId: 's1', provider: 'boat', sandboxId: 'bx_a', baseUrl: 'https://a' }] };
+    assert.equal((await request('/cloud/directory', { method: 'PUT', caller: 's1', body: JSON.stringify(directory) })).status, 403);
+    const ok = await request('/cloud/directory', { method: 'PUT', caller: 'user:red', body: JSON.stringify(directory) });
+    assert.deepEqual([ok.status, ok.body.sessions], [200, 1]);
+    const bad = await request('/cloud/directory', { method: 'PUT', caller: 'user:red', body: '{"version":1}' });
+    assert.equal(bad.status, 400);
+    assert.deepEqual(replaced, [1]);
   });
 
   it('rejects malformed wake bodies with 400', async () => {

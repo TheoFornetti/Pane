@@ -4,8 +4,9 @@ import { JsonlAlertSink } from './alerts';
 import { BoatCoordinatorProvider } from './boatProvider';
 import type { CoordinatorConfig } from './config';
 import { readSecretFile } from './config';
-import { HttpDaemonProbe } from './daemonProbe';
+import { describeError, HttpDaemonProbe } from './daemonProbe';
 import { FileSessionDirectory } from './directory';
+import type { DirectoryWriter } from './directory';
 import { RunawayGuard, SandboxActivity } from './guards';
 import { IdleStopper } from './idleStop';
 import { Reconciler } from './reconciler';
@@ -19,6 +20,7 @@ export interface CoordinatorParts {
   config: CoordinatorConfig;
   clock: Clock;
   directory: SessionDirectory;
+  directoryWriter: DirectoryWriter | null;
   provider: CoordinatorProvider;
   probe: DaemonProbe;
   alerts: AlertSink;
@@ -30,7 +32,9 @@ export function buildCoordinator(
   overrides: Partial<Pick<CoordinatorParts, 'clock' | 'directory' | 'provider' | 'probe' | 'alerts'>> = {},
 ): CoordinatorParts {
   const clock = overrides.clock ?? systemClock;
-  const directory = overrides.directory ?? new FileSessionDirectory(config.directoryFile);
+  const fileDirectory = new FileSessionDirectory(config.directoryFile);
+  const directory = overrides.directory ?? fileDirectory;
+  const directoryWriter = overrides.directory ? null : fileDirectory;
   const provider = overrides.provider ?? new BoatCoordinatorProvider({
     apiBase: config.provider.apiBase,
     apiKey: readSecretFile(config.provider.apiKeyFile),
@@ -76,18 +80,18 @@ export function buildCoordinator(
     reconcile: (options) => reconciler.runOnce(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
     idleCheck: (options) => idle.runOnce(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
   };
-  return { config, clock, directory, provider, probe, alerts, api };
+  return { config, clock, directory, directoryWriter, provider, probe, alerts, api };
 }
 
 /** Runs `task` every `intervalMs`, never overlapping itself, until the returned stop function is called. */
-function every(intervalMs: number, firstDelayMs: number, task: () => Promise<unknown>, onError: (error: unknown) => void): () => void {
+function every(intervalMs: number, firstDelayMs: number, task: () => Promise<void>, onError: (cause: unknown) => void): () => void {
   let timer: NodeJS.Timeout | null = null;
   let stopped = false;
   const tick = async (): Promise<void> => {
     try {
       await task();
-    } catch (error) {
-      onError(error);
+    } catch (cause) {
+      onError(cause);
     }
     if (!stopped) timer = setTimeout(() => void tick(), intervalMs);
   };
@@ -112,6 +116,7 @@ export async function startCoordinator(
   const server = createCoordinatorServer({
     api,
     directory: parts.directory,
+    directoryWriter: parts.directoryWriter,
     alerts,
     clock: parts.clock,
     secret: readSecretFile(config.secretFile),
@@ -122,8 +127,8 @@ export async function startCoordinator(
   await listenWithRetry(server, config.listenHost, config.listenPort, options.listenRetryMs ?? 120_000, log);
   log(`[coordinator] listening on http://${config.listenHost}:${config.listenPort}`);
 
-  const onError = (label: string) => (error: unknown) => {
-    alerts.emit({ level: 'error', code: `${label}-crashed`, message: error instanceof Error ? error.message : String(error) });
+  const onError = (label: string) => (cause: unknown) => {
+    alerts.emit({ level: 'error', code: `${label}-crashed`, message: describeError(cause) });
   };
   const stops: Array<() => void> = [];
   if (config.idleStop.enabled) {

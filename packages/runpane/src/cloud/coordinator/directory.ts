@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { boundary, decodeBoundary } from '../../boundaryDecoder';
+import type { JsonValue } from '../../boundaryDecoder';
 import type { DirectoryEntry, DirectoryReadResult, SessionDirectory } from './types';
 
 // The directory is written by `runpane cloud` on the user's machine (the single writer) and pushed here.
@@ -19,7 +21,12 @@ const directoryFileSchema = boundary.object({
   })),
 });
 
-export function parseDirectory(value: unknown): { generatedAt: string | null; entries: DirectoryEntry[] } {
+interface ParsedDirectory {
+  generatedAt: string | null;
+  entries: DirectoryEntry[];
+}
+
+export function parseDirectory(value: JsonValue): ParsedDirectory {
   const decoded = decodeBoundary(value, directoryFileSchema);
   const seen = new Set<string>();
   const entries = decoded.sessions.map((session): DirectoryEntry => {
@@ -39,8 +46,22 @@ export function parseDirectory(value: unknown): { generatedAt: string | null; en
   return { generatedAt: decoded.generatedAt ?? null, entries };
 }
 
-export class FileSessionDirectory implements SessionDirectory {
+export interface DirectoryWriter {
+  /** Validates and atomically replaces the directory; returns the number of Sessions. */
+  replace(value: JsonValue): Promise<number>;
+}
+
+export class FileSessionDirectory implements SessionDirectory, DirectoryWriter {
   constructor(private readonly file: string) {}
+
+  async replace(value: JsonValue): Promise<number> {
+    const parsed = parseDirectory(value);
+    const temp = `${this.file}.${process.pid}.tmp`;
+    await fs.mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
+    await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    await fs.rename(temp, this.file);
+    return parsed.entries.length;
+  }
 
   async read(): Promise<DirectoryReadResult> {
     try {

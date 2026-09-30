@@ -1,14 +1,17 @@
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { boundary, decodeBoundary } from '../../boundaryDecoder';
+import type { JsonValue } from '../../boundaryDecoder';
 import { authenticateCaller } from './callerAuth';
 import type { Caller } from './callerAuth';
+import { describeError } from './daemonProbe';
+import type { DirectoryWriter } from './directory';
 import type { IdleCheckReport } from './idleStop';
 import type { ReconcileReport } from './reconciler';
-import type { AlertSink, Clock, SessionDirectory } from './types';
-import type { WakeFailureCode, WakeResult } from './wake';
+import type { AlertSink, Clock, CoordinatorAlert, SessionDirectory } from './types';
+import type { WakeResult } from './wake';
 
-const MAX_BODY_BYTES = 16 * 1024;
+const MAX_BODY_BYTES = 256 * 1024;
 const PEER_REQUESTS_PER_MINUTE = 60;
 
 const wakeBodySchema = boundary.object({
@@ -29,6 +32,7 @@ export interface CoordinatorApi {
 export interface CoordinatorServerOptions {
   api: CoordinatorApi;
   directory: SessionDirectory;
+  directoryWriter: DirectoryWriter | null;
   alerts: AlertSink;
   clock: Clock;
   secret: string;
@@ -37,13 +41,27 @@ export interface CoordinatorServerOptions {
   log?: (line: string) => void;
 }
 
-const FAILURE_STATUS: Record<WakeFailureCode, number> = {
+interface ErrorBody {
+  ok: false;
+  code: string;
+  message: string;
+}
+
+type ResponseBody =
+  | WakeResult
+  | ErrorBody
+  | { ok: true; service: string; version: string }
+  | { ok: true; alerts: CoordinatorAlert[] }
+  | { ok: true; report: ReconcileReport | IdleCheckReport }
+  | { ok: true; sessions: number };
+
+const FAILURE_STATUS = {
   'unknown-host': 404,
   'directory-unreadable': 503,
   'runaway-guard': 429,
   'wake-rate-limited': 429,
   'provider-error': 502,
-};
+} as const;
 
 class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
@@ -51,6 +69,11 @@ class HttpError extends Error {
   }
 }
 
+/**
+ * The coordinator's HTTP API, served on its tailnet address only.
+ * Peers (cloud Sessions) may call status and wake; `user:*` callers (the laptop CLI) may also run
+ * reconcile / idle-check, read alerts and replace the directory.
+ */
 export function createCoordinatorServer(options: CoordinatorServerOptions): http.Server {
   const peerWindows = new Map<string, number[]>();
   const log = options.log ?? ((line: string) => console.log(line));
@@ -122,20 +145,28 @@ export function createCoordinatorServer(options: CoordinatorServerOptions): http
         writeJson(response, 200, { ok: true, report: await options.api.idleCheck({ dryRun: body.dryRun }) });
         return;
       }
+      case 'PUT /cloud/directory': {
+        requireUser(caller);
+        if (!options.directoryWriter) throw new HttpError(405, 'read-only', 'this coordinator has a read-only directory');
+        const sessions = await options.directoryWriter.replace(await readJson(request));
+        log(`[coordinator] directory replaced by ${caller.id}: ${sessions} Session(s)`);
+        writeJson(response, 200, { ok: true, sessions });
+        return;
+      }
       default:
         throw new HttpError(404, 'not-found', `no endpoint ${route}`);
     }
   };
 
   return http.createServer((request, response) => {
-    handle(request, response).catch((error: unknown) => {
-      if (error instanceof HttpError) {
-        writeJson(response, error.status, { ok: false, code: error.code, message: error.message });
+    handle(request, response).catch((cause: unknown) => {
+      if (cause instanceof HttpError) {
+        writeJson(response, cause.status, { ok: false, code: cause.code, message: cause.message });
         return;
       }
-      const message = error instanceof Error ? error.message : String(error);
-      const badInput = error instanceof SyntaxError || (error instanceof Error && error.name === 'BoundaryDecodeError');
-      writeJson(response, badInput ? 400 : 500, { ok: false, code: badInput ? 'bad-request' : 'internal', message });
+      const badInput = cause instanceof SyntaxError || (cause instanceof Error && cause.name === 'BoundaryDecodeError')
+        || (cause instanceof Error && cause.message.startsWith('duplicate sessionId'));
+      writeJson(response, badInput ? 400 : 500, { ok: false, code: badInput ? 'bad-request' : 'internal', message: describeError(cause) });
     });
   });
 }
@@ -144,14 +175,13 @@ function writeWakeResult(response: ServerResponse, result: WakeResult): void {
   writeJson(response, result.ok ? 200 : FAILURE_STATUS[result.code], result);
 }
 
-function writeJson(response: ServerResponse, status: number, body: object): void {
+function writeJson(response: ServerResponse, status: number, body: ResponseBody): void {
   if (response.headersSent) return;
-  const text = JSON.stringify(body);
   response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-  response.end(text);
+  response.end(JSON.stringify(body));
 }
 
-async function readJson(request: IncomingMessage): Promise<unknown> {
+async function readJson(request: IncomingMessage): Promise<JsonValue> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {

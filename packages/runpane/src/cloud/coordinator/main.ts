@@ -2,31 +2,50 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { JsonValue } from '../../boundaryDecoder';
 import { getWrapperVersion } from '../../version';
 import { createCallerSecret, mintCallerToken } from './callerAuth';
-import { COORDINATOR_UNIT_NAME, defaultCoordinatorHome, loadCoordinatorConfig, readSecretFile } from './config';
+import { callCoordinator, defaultClientConfigPath, readClientConfig } from './client';
+import type { CoordinatorClientConfig } from './client';
+import {
+  COORDINATOR_UNIT_NAME,
+  DEFAULT_COORDINATOR_PORT,
+  defaultCoordinatorHome,
+  loadCoordinatorConfig,
+  readSecretFile,
+} from './config';
+import type { IdleCheckReport } from './idleStop';
+import type { ReconcileReport } from './reconciler';
+import type { WakeResult } from './wake';
 import { buildCoordinator, renderSystemdUnit, startCoordinator } from './service';
 
-const USAGE = `Usage: runpane-cloud-coordinator <command> [--config <file>]
+const USAGE = `Usage: runpane-cloud-coordinator <command> [options]
 
 The always-on part of \`runpane cloud\`: idle-stop, reconcile (stop + alert only), runaway guard, /cloud/wake.
 
-Commands:
+On the coordinator machine:
   init --listen-host <tailnet-ip> --api-key-file <file> --managed-prefix <prefix>
-       [--self-sandbox-id <id>] [--pinned-version <v>] [--directory-file <file>]
+       [--self-sandbox-id <id>] [--pinned-version <v>] [--directory-file <file>] [--listen-port <port>]
                                   Write a config (0600) and a caller secret if missing
   serve                           Run the HTTP API and the idle-stop / reconcile loops
   install-service [--node <path>] [--entry <path>] [--no-start]
                                   Install and start the ${COORDINATOR_UNIT_NAME} systemd user unit
-  mint-token <callerId> --out <file>
-                                  Write a caller token (0600). callerId: a cloud Session id, or user:<name>
-  reconcile [--dry-run]           One reconcile pass now (prints the report)
-  idle-check [--dry-run]          One idle-stop pass now (prints the report)
+  mint-token <callerId> (--out <file> | --client-config <file> --base-url <url>)
+                                  Write a caller token (0600). callerId: a cloud Session id, or user:<name>.
+                                  --client-config writes {baseUrl, token} for the laptop CLI.
+
+Against a running coordinator (uses --client-config, default $RUNPANE_CLOUD_DIR/coordinator.json;
+--local runs in-process on the coordinator machine instead):
   status <host>                   Status of a cloud Session without waking it
   wake <host> [--no-wait] [--timeout-ms <ms>]
                                   Wake a cloud Session and wait for /health readiness
+  reconcile [--dry-run]           One reconcile pass now
+  idle-check [--dry-run]          One idle-stop pass now
+  alerts                          Recent alerts
+  push-directory --file <directory.json>
+                                  Replace the coordinator's directory (the laptop CLI is its single writer)
 
-Default config: ${path.join('~', '.config', 'runpane-cloud-coordinator', 'config.json')}
+Options: --config <file> (default ~/.config/runpane-cloud-coordinator/config.json)
 `;
 
 interface ParsedCoordinatorArgs {
@@ -37,7 +56,8 @@ interface ParsedCoordinatorArgs {
 
 const VALUE_FLAGS = new Set([
   '--config', '--listen-host', '--api-key-file', '--managed-prefix', '--self-sandbox-id', '--pinned-version',
-  '--directory-file', '--node', '--entry', '--out', '--timeout-ms', '--listen-port',
+  '--directory-file', '--node', '--entry', '--out', '--timeout-ms', '--listen-port', '--client-config', '--base-url',
+  '--file',
 ]);
 
 function parseArgs(argv: readonly string[]): ParsedCoordinatorArgs {
@@ -64,7 +84,7 @@ function parseArgs(argv: readonly string[]): ParsedCoordinatorArgs {
 
 function stringFlag(args: ParsedCoordinatorArgs, name: string): string | undefined {
   const value = args.flags.get(name);
-  return typeof value === 'string' ? value : undefined;
+  return value === true ? undefined : value;
 }
 
 function requiredFlag(args: ParsedCoordinatorArgs, name: string): string {
@@ -79,8 +99,68 @@ function writePrivateFile(file: string, content: string): void {
   fs.chmodSync(file, 0o600);
 }
 
-function printJson(value: unknown): void {
+type PrintableResult = JsonValue | WakeResult | ReconcileReport | IdleCheckReport;
+
+function printJson(value: PrintableResult): void {
   console.log(JSON.stringify(value, null, 2));
+}
+
+async function runLocal(args: ParsedCoordinatorArgs, configPath: string): Promise<number> {
+  const parts = buildCoordinator(loadCoordinatorConfig(configPath));
+  const dryRun = args.flags.has('--dry-run') ? true : undefined;
+  const host = args.positionals[0] ?? '';
+  const timeout = stringFlag(args, '--timeout-ms');
+  switch (args.command) {
+    case 'reconcile':
+      printJson(await parts.api.reconcile({ dryRun }));
+      return 0;
+    case 'idle-check':
+      printJson(await parts.api.idleCheck({ dryRun }));
+      return 0;
+    case 'status':
+    case 'wake': {
+      if (!host) throw new Error(`${args.command} needs a host`);
+      const result = args.command === 'status'
+        ? await parts.api.status(host)
+        : await parts.api.wake(host, { wait: !args.flags.has('--no-wait'), timeoutMs: timeout ? Number(timeout) : undefined });
+      printJson(result);
+      return result.ok ? 0 : 1;
+    }
+    default:
+      throw new Error(`${args.command} is not available with --local`);
+  }
+}
+
+async function runRemote(args: ParsedCoordinatorArgs): Promise<number> {
+  const file = path.resolve(stringFlag(args, '--client-config') ?? defaultClientConfigPath());
+  const client: CoordinatorClientConfig | null = readClientConfig(file);
+  if (!client) throw new Error(`no coordinator client config at ${file} (or pass --local on the coordinator machine)`);
+  const dryRun = args.flags.has('--dry-run');
+  const host = args.positionals[0] ?? '';
+  const timeout = Number(stringFlag(args, '--timeout-ms') ?? 90_000);
+  let result;
+  switch (args.command) {
+    case 'status':
+      result = await callCoordinator(client, 'GET', `/cloud/status?host=${encodeURIComponent(host)}`, undefined, 30_000);
+      break;
+    case 'wake':
+      result = await callCoordinator(client, 'POST', '/cloud/wake', { host, wait: !args.flags.has('--no-wait'), timeoutMs: timeout }, timeout + 30_000);
+      break;
+    case 'reconcile':
+    case 'idle-check':
+      result = await callCoordinator(client, 'POST', `/cloud/${args.command}`, { dryRun }, 300_000);
+      break;
+    case 'alerts':
+      result = await callCoordinator(client, 'GET', '/cloud/alerts?limit=100', undefined, 30_000);
+      break;
+    default: {
+      const directoryFile = requiredFlag(args, '--file');
+      const directory: JsonValue = JSON.parse(fs.readFileSync(directoryFile, 'utf8'));
+      result = await callCoordinator(client, 'PUT', '/cloud/directory', directory, 60_000);
+    }
+  }
+  printJson(result.body);
+  return result.status >= 200 && result.status < 300 ? 0 : 1;
 }
 
 export async function runCoordinatorCli(argv: readonly string[]): Promise<number> {
@@ -99,7 +179,7 @@ export async function runCoordinatorCli(argv: readonly string[]): Promise<number
       const config = {
         version: 1,
         listenHost: requiredFlag(args, '--listen-host'),
-        listenPort: Number(stringFlag(args, '--listen-port') ?? 47300),
+        listenPort: Number(stringFlag(args, '--listen-port') ?? DEFAULT_COORDINATOR_PORT),
         stateDir: path.join(home, 'state'),
         directoryFile: path.resolve(stringFlag(args, '--directory-file') ?? path.join(home, 'directory.json')),
         secretFile: path.join(home, 'caller-secret'),
@@ -154,36 +234,30 @@ export async function runCoordinatorCli(argv: readonly string[]): Promise<number
     case 'mint-token': {
       const callerId = args.positionals[0];
       if (!callerId) throw new Error('mint-token needs a caller id');
-      const out = requiredFlag(args, '--out');
       const config = loadCoordinatorConfig(configPath);
-      writePrivateFile(path.resolve(out), `${mintCallerToken(readSecretFile(config.secretFile), callerId)}\n`);
-      console.log(`wrote the token for ${callerId} to ${out} (0600)`);
-      return 0;
-    }
-
-    case 'reconcile':
-    case 'idle-check': {
-      const parts = buildCoordinator(loadCoordinatorConfig(configPath));
-      const dryRun = args.flags.has('--dry-run') ? true : undefined;
-      const report = args.command === 'reconcile'
-        ? await parts.api.reconcile({ dryRun })
-        : await parts.api.idleCheck({ dryRun });
-      printJson(report);
+      const token = mintCallerToken(readSecretFile(config.secretFile), callerId);
+      const out = stringFlag(args, '--out');
+      const clientConfig = stringFlag(args, '--client-config');
+      if (out) {
+        writePrivateFile(path.resolve(out), `${token}\n`);
+        console.log(`wrote the token for ${callerId} to ${out} (0600)`);
+      } else if (clientConfig) {
+        const baseUrl = requiredFlag(args, '--base-url');
+        writePrivateFile(path.resolve(clientConfig), `${JSON.stringify({ baseUrl, token }, null, 2)}\n`);
+        console.log(`wrote {baseUrl, token} for ${callerId} to ${clientConfig} (0600)`);
+      } else {
+        throw new Error('mint-token needs --out <file> or --client-config <file> --base-url <url> (tokens are never printed)');
+      }
       return 0;
     }
 
     case 'status':
-    case 'wake': {
-      const host = args.positionals[0];
-      if (!host) throw new Error(`${args.command} needs a host`);
-      const parts = buildCoordinator(loadCoordinatorConfig(configPath));
-      const timeout = stringFlag(args, '--timeout-ms');
-      const result = args.command === 'status'
-        ? await parts.api.status(host)
-        : await parts.api.wake(host, { wait: !args.flags.has('--no-wait'), timeoutMs: timeout ? Number(timeout) : undefined });
-      printJson(result);
-      return result.ok ? 0 : 1;
-    }
+    case 'wake':
+    case 'reconcile':
+    case 'idle-check':
+    case 'alerts':
+    case 'push-directory':
+      return args.flags.has('--local') ? runLocal(args, configPath) : runRemote(args);
 
     default:
       console.error(`unknown command ${args.command}\n\n${USAGE}`);
@@ -196,8 +270,8 @@ if (require.main === module) {
     (code) => {
       process.exitCode = code;
     },
-    (error: unknown) => {
-      console.error(`runpane-cloud-coordinator: ${error instanceof Error ? error.message : String(error)}`);
+    (cause: unknown) => {
+      console.error(`runpane-cloud-coordinator: ${cause instanceof Error ? cause.message : String(cause)}`);
       process.exitCode = 1;
     },
   );

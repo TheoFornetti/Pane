@@ -3,7 +3,7 @@ import type { RunawayGuard, SandboxActivity } from './guards';
 import { isManagedSandbox } from './guards';
 import type { AlertSink, Clock, CoordinatorProvider, ProviderSandbox, SessionDirectory } from './types';
 
-export type ReconcileAbortReason =
+type ReconcileAbortReason =
   | 'directory-unreadable'
   | 'directory-empty'
   | 'provider-error'
@@ -143,7 +143,7 @@ export class Reconciler {
         continue;
       }
       const outcome = await this.deps.activity.exclusive(sandbox.id, () => this.deps.provider.stop(sandbox.id))
-        .catch((error: unknown) => ({ ran: true as const, error: describeError(error) }));
+        .catch((cause: unknown) => ({ ran: true as const, error: describeError(cause) }));
       if (!outcome.ran) {
         report.skipped.push({ sandboxId: sandbox.id, reason: 'busy' });
       } else if ('error' in outcome) {

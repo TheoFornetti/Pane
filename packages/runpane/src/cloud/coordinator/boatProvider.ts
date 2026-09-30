@@ -1,4 +1,5 @@
 import { boundary, decodeBoundary } from '../../boundaryDecoder';
+import type { JsonValue } from '../../boundaryDecoder';
 import type { CoordinatorProvider, ProviderSandbox, ProviderSandboxState } from './types';
 
 // Minimal boat.dev client for the coordinator. It needs only sandbox.read, sandbox.stop and sandbox.resume,
@@ -115,28 +116,26 @@ export class BoatCoordinatorProvider implements CoordinatorProvider {
   }
 
   async stop(sandboxId: string): Promise<void> {
-    await this.request('POST', `/sandboxes/${encodeURIComponent(sandboxId)}/stop`, {});
+    await this.request('POST', `/sandboxes/${encodeURIComponent(sandboxId)}/stop`);
   }
 
   async resume(sandboxId: string): Promise<void> {
     // boat's resume takes no Idempotency-Key; the wake service single-flights resumes and treats 409 as "already resuming".
-    await this.request('POST', `/sandboxes/${encodeURIComponent(sandboxId)}/resume`, {});
+    await this.request('POST', `/sandboxes/${encodeURIComponent(sandboxId)}/resume`);
   }
 
-  private async request(method: string, pathAndQuery: string, body?: object): Promise<unknown> {
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.options.apiKey}`,
-      Accept: 'application/json',
-    };
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
+  private async request(method: 'GET' | 'POST', pathAndQuery: string): Promise<JsonValue> {
+    const headers = new Headers({ Authorization: `Bearer ${this.options.apiKey}`, Accept: 'application/json' });
+    if (method === 'POST') headers.set('Content-Type', 'application/json');
     const response = await this.fetchImpl(`${this.options.apiBase}${pathAndQuery}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      // boat's stop and resume take optional options; the coordinator always sends none.
+      body: method === 'POST' ? '{}' : undefined,
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     const text = await response.text();
-    let parsed: unknown = null;
+    let parsed: JsonValue = null;
     try {
       parsed = text.length > 0 ? JSON.parse(text) : null;
     } catch {
@@ -154,12 +153,19 @@ export class BoatCoordinatorProvider implements CoordinatorProvider {
   }
 }
 
-function readErrorCode(parsed: unknown): string | null {
-  if (typeof parsed !== 'object' || parsed === null || !('error' in parsed)) return null;
-  const error = parsed.error;
-  if (typeof error === 'string') return error;
-  if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string') {
-    return error.code;
+// boat errors come as `{error: "code"}` or `{error: {code}}`.
+const errorShapes = [
+  (value: JsonValue) => decodeBoundary(value, boundary.object({ error: boundary.string })).error,
+  (value: JsonValue) => decodeBoundary(value, boundary.object({ error: boundary.object({ code: boundary.string }) })).error.code,
+];
+
+function readErrorCode(parsed: JsonValue): string | null {
+  for (const read of errorShapes) {
+    try {
+      return read(parsed);
+    } catch {
+      // Not this shape; try the next one.
+    }
   }
   return null;
 }

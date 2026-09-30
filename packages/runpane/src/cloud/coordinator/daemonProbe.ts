@@ -1,11 +1,12 @@
 import { boundary, decodeBoundary } from '../../boundaryDecoder';
+import type { JsonValue } from '../../boundaryDecoder';
 import type { DaemonHealth, DaemonProbe, SafeToStopAnswer, UpgradeAnswer, UpgradeTarget } from './types';
 
 // Talks to a cloud Session's Pane daemon over the tailnet: GET /health (unauthenticated) and
 // POST /invoke with the coordinator's own paired-client bearer token.
 
-export const SAFE_TO_STOP_CHANNEL = 'runpane:cloud:safe-to-stop';
-export const UPGRADE_CHANNEL = 'runpane:cloud:upgrade';
+const SAFE_TO_STOP_CHANNEL = 'runpane:cloud:safe-to-stop';
+const UPGRADE_CHANNEL = 'runpane:cloud:upgrade';
 
 const healthSchema = boundary.object({
   ok: boundary.optional(boundary.boolean),
@@ -44,7 +45,7 @@ const safeToStopResultSchema = boundary.object({
  * `readiness.state` ("starting" | "ready" | "degraded"; degraded = awake, but some agent panels did
  * not come back). Their `status` stays "ready" for old clients, so it only counts for pre-M2 daemons.
  */
-export function decodeHealth(body: unknown): DaemonHealth {
+export function decodeHealth(body: JsonValue): DaemonHealth {
   const health = decodeBoundary(body, healthSchema);
   const version = health.version ?? null;
   const state = health.readiness?.state;
@@ -59,7 +60,7 @@ export function decodeHealth(body: unknown): DaemonHealth {
   return { reachable: true, ready, version, detail: 'daemon reports no readiness (pre-M2 build)' };
 }
 
-export function decodeSafeToStop(result: unknown): SafeToStopAnswer {
+export function decodeSafeToStop(result: JsonValue): SafeToStopAnswer {
   const decoded = decodeBoundary(result, safeToStopResultSchema);
   if (decoded.safe) return { kind: 'safe', checkpointed: decoded.flush !== undefined && decoded.flush !== null };
   const reasons = (decoded.blockers ?? []).map((blocker) => (
@@ -105,7 +106,7 @@ export class HttpDaemonProbe implements DaemonProbe {
   }
 
   async upgrade(baseUrl: string, token: string, target: UpgradeTarget): Promise<UpgradeAnswer> {
-    const answer = await this.invoke(baseUrl, token, UPGRADE_CHANNEL, [{ ...target }]);
+    const answer = await this.invoke(baseUrl, token, UPGRADE_CHANNEL, [{ version: target.version, url: target.url, sha256: target.sha256 }]);
     return answer.kind === 'ok' ? { kind: 'started' } : answer;
   }
 
@@ -113,8 +114,8 @@ export class HttpDaemonProbe implements DaemonProbe {
     baseUrl: string,
     token: string,
     channel: string,
-    args: unknown[],
-  ): Promise<{ kind: 'ok'; result: unknown } | { kind: 'unsupported' | 'error'; error: string }> {
+    args: JsonValue[],
+  ): Promise<{ kind: 'ok'; result: JsonValue } | { kind: 'unsupported' | 'error'; error: string }> {
     try {
       const response = await this.fetchImpl(`${baseUrl}/invoke`, {
         method: 'POST',
@@ -133,10 +134,10 @@ export class HttpDaemonProbe implements DaemonProbe {
   }
 }
 
-export function describeError(error: unknown): string {
-  if (error instanceof Error) {
-    const cause = error.cause instanceof Error ? ` (${error.cause.message})` : '';
-    return `${error.message}${cause}`;
+export function describeError(cause: unknown): string {
+  if (cause instanceof Error) {
+    const inner = cause.cause instanceof Error ? ` (${cause.cause.message})` : '';
+    return `${cause.message}${inner}`;
   }
-  return String(error);
+  return String(cause);
 }

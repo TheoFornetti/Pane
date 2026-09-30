@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { boundary, decodeBoundary } from '../../boundaryDecoder';
+import type { JsonValue } from '../../boundaryDecoder';
 
 export const COORDINATOR_UNIT_NAME = 'runpane-cloud-coordinator.service';
 export const DEFAULT_COORDINATOR_PORT = 47300;
@@ -117,7 +118,7 @@ function positive(value: number | undefined, fallback: number, name: string): nu
   return value;
 }
 
-export function parseCoordinatorConfig(value: unknown, home = defaultCoordinatorHome()): CoordinatorConfig {
+export function parseCoordinatorConfig(value: JsonValue, home = defaultCoordinatorHome()): CoordinatorConfig {
   const raw = decodeBoundary(value, rawConfigSchema);
   const stateDir = raw.stateDir ?? path.join(home, 'state');
   if (raw.listenHost === '0.0.0.0' || raw.listenHost === '::') {

@@ -172,7 +172,7 @@ export class WakeService {
     for (let attempt = 0; attempt < 120; attempt += 1) {
       const outcome = await this.deps.activity.exclusive(entry.sandboxId, async () => {
         await this.deps.provider.resume(entry.sandboxId);
-      }).catch((error: unknown) => ({ ran: true as const, error }));
+      }).catch((cause: unknown) => ({ ran: true as const, error: cause }));
       if (!outcome.ran) {
         await this.deps.clock.sleep(500);
         continue;

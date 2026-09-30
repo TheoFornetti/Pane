@@ -76,7 +76,7 @@ export interface DaemonProbe {
   upgrade(baseUrl: string, token: string, target: UpgradeTarget): Promise<UpgradeAnswer>;
 }
 
-export type AlertLevel = 'info' | 'warn' | 'error';
+type AlertLevel = 'info' | 'warn' | 'error';
 
 export interface CoordinatorAlert {
   at: string;

@@ -9,7 +9,7 @@ import type {
   SessionDirectory,
 } from './types';
 
-export type IdleDecision =
+type IdleDecision =
   | 'stopped'
   | 'would-stop'
   | 'safe-streak'

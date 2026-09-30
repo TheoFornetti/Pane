@@ -91,6 +91,10 @@ jobs:
       if: ${{ !cancelled() }}
       run: pnpm --filter runpane run check:cloud-assets
 
+    - name: Fake GitHub self-test (broker gate fixture)
+      if: ${{ !cancelled() }}
+      run: bash tests/cloud-e2e/lib/fakegithub-selftest.sh "$RUNNER_TEMP/fakegithub"
+
   # Linux .deb + runpane CLI tarball for boat sandboxes (Ubuntu 24.04), published
   # as a fork prerelease. Only for rc/integration heads that passed the suite; a
   # merge commit containing [no-release] (docs-only merges) skips it.

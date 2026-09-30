@@ -14,7 +14,8 @@
 #   new -> health over the tailnet -> a shell Pane in the cloud Session -> submit a command and read it back
 #   -> stop -> status asleep -> wake -> submit to the SAME panel again -> (optional) desktop check -> destroy.
 # It prints a PASS/FAIL table and keeps evidence (no tokens) in ~/runpane-cloud-smoke/<time>/.
-# Loop-only: --loop runs it on the build loop's machine with an isolated config made from the loop's keys.
+# Loop-only: --loop runs it on the build loop's machine with an isolated config made from the loop's keys
+# (E2E_GOLDEN=<named snapshot> to create from a golden, else E2E_DAEMON_DEB_URL / the dist-current .deb).
 set -o pipefail
 KEEP_HOST=0; LOOP=0; SIZE="${SMOKE_SIZE:-small}"; REPO="${SMOKE_REPO:-https://github.com/octocat/Hello-World.git}"
 for a in "$@"; do case "$a" in --keep) KEEP_HOST=1;; --loop) LOOP=1;; -h|--help) sed -n 2,20p "$0"; exit 0;; esac; done
@@ -32,7 +33,9 @@ wait_start_budget 2
 
 if [ "$LOOP" = 1 ]; then
   cli_resolve || { rec cli FAIL "could not install the runpane build under test"; exit 1; }
-  cloud_setup_from_loop_secrets --no-golden ${E2E_DAEMON_DEB_URL:+--pane-deb-url "$E2E_DAEMON_DEB_URL"} > "$E2E_RUN_DIR/setup.json" 2>&1 \
+  if [ -n "${E2E_GOLDEN:-}" ]; then setup_src=(--golden "$E2E_GOLDEN")   # Red's path: daemon preinstalled in the golden
+  else setup_src=(--no-golden ${E2E_DAEMON_DEB_URL:+--pane-deb-url "$E2E_DAEMON_DEB_URL"}); fi
+  cloud_setup_from_loop_secrets "${setup_src[@]}" > "$E2E_RUN_DIR/setup.json" 2>&1 \
     || { rec setup FAIL "loop setup failed" "$E2E_RUN_DIR/setup.json"; exit 1; }
   NAMEFLAG=(--name-prefix "$E2E_PREFIX")
 else

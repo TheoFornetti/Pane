@@ -461,9 +461,10 @@ export class FakeGitHub {
       state: pull.state,
       draft: pull.draft,
       merged: pull.merged,
+      merged_at: pull.merged ? '2026-09-30T12:00:00Z' : null,
       title: pull.title,
       body: pull.body,
-      head: { ref: pull.head, repo: { full_name: pull.headRepo } },
+      head: { ref: pull.head, sha: this.refs(repo.fullName)[`refs/heads/${pull.head}`] ?? null, repo: { full_name: pull.headRepo } },
       base: { ref: pull.base },
     });
     const issueJson = (issue: IssueRecord) => ({ number: issue.number, html_url: html('issues', issue.number), state: issue.state, title: issue.title, body: issue.body, labels: issue.labels.map((name) => ({ name })) });

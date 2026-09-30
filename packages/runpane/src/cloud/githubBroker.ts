@@ -113,24 +113,36 @@ chmod 755 ${GIT_CREDENTIAL_HELPER_PATH}` : ''}${helperConfig}
 python3 - <<'PY'
 import os, re
 home = ${JSON.stringify(SANDBOX_HOME)}
-def replace_block(path, start, end, block, create):
+def replace_block(path, start, end, block, create, top=False):
     if not os.path.exists(path) and not create:
         return
     os.makedirs(os.path.dirname(path), exist_ok=True)
     text = open(path).read() if os.path.exists(path) else ''
     pattern = re.compile(re.escape(start) + r'.*?' + re.escape(end) + r'\\n?', re.S)
     text = pattern.sub('', text)
-    if block:
+    if block and top:
+        text = block + '\\n' + text
+    elif block:
         text = (text.rstrip('\\n') + '\\n\\n' if text.strip() else '') + block + '\\n'
     open(path, 'w').write(text)
 notes = ${JSON.stringify(agentNotes(grant.repos))}
 for path in ${JSON.stringify(NOTES_FILES)}:
     replace_block(path, ${JSON.stringify(NOTES_START)}, ${JSON.stringify(NOTES_END)}, notes, True)
-# ~/.local/bin first, so the shim wins over any real gh on the image.
+# ~/.local/bin first, so the shim wins over any real gh on the image. At the TOP of the file: Ubuntu's
+# .bashrc returns early for non-interactive shells, and Pane's own PATH probe sources it non-interactively.
 guard = ${JSON.stringify(`${PATH_START}\nexport PATH="$HOME/.local/bin:$PATH"\n${PATH_END}`)}
 for name in ('.bashrc', '.profile', '.zshrc'):
-    replace_block(os.path.join(home, name), ${JSON.stringify(PATH_START)}, ${JSON.stringify(PATH_END)}, guard, name != '.zshrc')
+    replace_block(os.path.join(home, name), ${JSON.stringify(PATH_START)}, ${JSON.stringify(PATH_END)}, guard, name != '.zshrc', True)
 PY
+# Pane's daemon runs gh with the PATH it probed once at start (/etc/environment's, /usr/local/bin before
+# /usr/bin): link the shim there too, unless something else already owns that name.
+sysbin="\${RP_SYSTEM_BIN:-/usr/local/bin}"
+as_root() { if [ -w "$sysbin" ]; then "$@"; else sudo -n "$@"; fi; }
+if [ ! -e "$sysbin/gh" ] && [ ! -L "$sysbin/gh" ] || [ "$(readlink "$sysbin/gh" 2>/dev/null)" = ${GH_SHIM_PATH} ]; then
+  if as_root ln -sfn ${GH_SHIM_PATH} "$sysbin/gh" 2>/dev/null; then echo "RP_SYSGH linked"; else echo "RP_SYSGH no-sudo"; fi
+else
+  echo "RP_SYSGH occupied"
+fi
 # The shim needs a Pane whose bundled runpane has \`cloud agent\` (older builds answer "Unknown cloud command").
 if "${GH_SHIM_PATH}" --version 2>/dev/null | grep -q runpane-cloud-shim; then
   echo "RP_SHIM ready"
@@ -144,6 +156,10 @@ echo RP_OK broker-tools
 /** Removes everything installBrokerToolsScript wrote; idempotent. */
 export function removeBrokerToolsScript(): string {
   return `set -eu
+sysbin="\${RP_SYSTEM_BIN:-/usr/local/bin}"
+if [ "$(readlink "$sysbin/gh" 2>/dev/null)" = ${GH_SHIM_PATH} ]; then
+  if [ -w "$sysbin" ]; then rm -f "$sysbin/gh"; else sudo -n rm -f "$sysbin/gh" || true; fi
+fi
 rm -f ${GH_SHIM_PATH} ${GIT_CREDENTIAL_HELPER_PATH}
 if [ "$(git config --global --get-all ${shq(`credential.${GITHUB_URL}.helper`)} 2>/dev/null | tail -1)" = ${GIT_CREDENTIAL_HELPER_PATH} ]; then
   git config --global --remove-section ${shq(`credential.${GITHUB_URL}`)} 2>/dev/null || true

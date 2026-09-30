@@ -154,7 +154,7 @@ test('github connect --broker explains an off broker, an unreached repo, a missi
 
 async function runInFakeHome(script: string, home: string): Promise<void> {
   execFileSync('bash', ['-c', script.split(SANDBOX_HOME).join(home)], {
-    env: { ...process.env, HOME: home, GIT_CONFIG_GLOBAL: path.join(home, '.gitconfig'), GIT_CONFIG_NOSYSTEM: '1' },
+    env: { ...process.env, HOME: home, GIT_CONFIG_GLOBAL: path.join(home, '.gitconfig'), GIT_CONFIG_NOSYSTEM: '1', RP_SYSTEM_BIN: path.join(home, 'usr-local-bin') },
     stdio: 'pipe',
   });
 }
@@ -162,7 +162,9 @@ async function runInFakeHome(script: string, home: string): Promise<void> {
 test('the install script writes a working gh launcher, the helper config, the PATH guard and the notes; remove undoes only its own parts', async () => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'runpane-broker-home-'));
   try {
-    await fs.writeFile(path.join(home, '.bashrc'), '# mine\nalias ll="ls -l"\n');
+    // Like Ubuntu's: non-interactive shells (Pane's PATH probe) stop at the top.
+    await fs.writeFile(path.join(home, '.bashrc'), '# mine\ncase $- in *i*) ;; *) return;; esac\nalias ll="ls -l"\n');
+    await fs.mkdir(path.join(home, 'usr-local-bin'));
     await fs.mkdir(path.join(home, '.claude'));
     await fs.writeFile(path.join(home, '.claude', 'CLAUDE.md'), '# My notes\nKeep tests green.\n');
     const grant = { repos: [REPO], mode: 'app' as const };
@@ -181,7 +183,11 @@ test('the install script writes a working gh launcher, the helper config, the PA
     assert.equal(execFileSync('git', ['config', '--global', 'credential.https://github.com.useHttpPath'], { env: gitEnv, encoding: 'utf8' }).trim(), 'true');
 
     const bashrc = await fs.readFile(path.join(home, '.bashrc'), 'utf8');
-    assert.match(bashrc, /^# mine\nalias ll="ls -l"\n\n# runpane-cloud-github:start\nexport PATH="\$HOME\/\.local\/bin:\$PATH"\n# runpane-cloud-github:end\n$/u);
+    assert.equal(bashrc, '# runpane-cloud-github:start\nexport PATH="$HOME/.local/bin:$PATH"\n# runpane-cloud-github:end\n# mine\ncase $- in *i*) ;; *) return;; esac\nalias ll="ls -l"\n');
+    // Pane's packaged PATH probe: bash -c 'source /etc/profile; source ~/.bashrc; echo $PATH' from /etc/environment's PATH.
+    const probed = execFileSync('bash', ['-c', 'source ~/.bashrc 2>/dev/null || true; echo $PATH'], { env: { HOME: home, PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' }, encoding: 'utf8' }).trim();
+    assert.ok(probed.startsWith(`${home}/.local/bin:`), probed);
+    assert.equal(await fs.readlink(path.join(home, 'usr-local-bin', 'gh')), `${home}/.local/bin/gh`, 'the daemon\'s PATH finds the shim via the system bin dir');
     const claude = await fs.readFile(path.join(home, '.claude', 'CLAUDE.md'), 'utf8');
     assert.equal(claude, `# My notes\nKeep tests green.\n\n${agentNotes([REPO])}\n`);
     assert.match(claude, /always \*\*drafts\*\*/u);
@@ -191,7 +197,8 @@ test('the install script writes a working gh launcher, the helper config, the PA
     await runInFakeHome(removeBrokerToolsScript(), home);
     await assert.rejects(fs.access(path.join(home, '.local/bin/gh')));
     await assert.rejects(fs.access(path.join(home, '.local/bin/git-credential-runpane')));
-    assert.equal(await fs.readFile(path.join(home, '.bashrc'), 'utf8'), '# mine\nalias ll="ls -l"\n\n');
+    assert.equal(await fs.readFile(path.join(home, '.bashrc'), 'utf8'), '# mine\ncase $- in *i*) ;; *) return;; esac\nalias ll="ls -l"\n');
+    await assert.rejects(fs.lstat(path.join(home, 'usr-local-bin', 'gh')));
     assert.equal(await fs.readFile(path.join(home, '.claude', 'CLAUDE.md'), 'utf8'), '# My notes\nKeep tests green.\n\n');
     assert.throws(() => execFileSync('git', ['config', '--global', '--get-all', 'credential.https://github.com.helper'], { env: gitEnv, stdio: 'pipe' }));
   } finally {

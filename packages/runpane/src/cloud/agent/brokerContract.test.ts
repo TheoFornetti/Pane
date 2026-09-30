@@ -198,3 +198,28 @@ test('git-credential-runpane hands git a token that reads the repository and can
   await assert.rejects(execFileAsync('git', ['-c', `http.extraHeader=${auth}`, 'push', '-q', `${fakeBase}/${REPO}.git`, 'HEAD:refs/heads/cloud/rp-one/sneaky'], { cwd: target, env }));
   assert.equal(fake.refs(REPO)['refs/heads/cloud/rp-one/sneaky'], undefined);
 });
+
+test('Pane\'s own gh calls (PR badge, PR monitor, archive) answer through the real broker', async () => {
+  const dir = await checkout('pane-callsites');
+  git(['checkout', '-q', '-b', 'badge'], dir);
+  const head = await commit(dir, 'badge.txt', 'x\n');
+  assert.equal(await runCloudAgent(['gh', 'pr', 'create', '--title', 'Badge', '--body', 'b'], run(dir).deps), 0);
+  const number = repoState().pulls.at(-1)?.number;
+
+  const badge = run(dir);
+  assert.equal(await runCloudAgent(['gh', 'pr', 'list', '--head', 'badge', '--state', 'all', '--json', 'number,url,title,state,isDraft,body', '--limit', '1'], badge.deps), 0, badge.err.join('\n'));
+  const [listed] = JSON.parse(badge.out[0]);
+  assert.deepEqual([listed.number, listed.state, listed.isDraft, listed.title], [number, 'OPEN', true, 'Badge']);
+
+  const monitor = run(dir);
+  assert.equal(await runCloudAgent(['gh', 'pr', 'view', String(number), '--json', 'number,url,state,mergeable,statusCheckRollup,headRefOid'], monitor.deps), 0, monitor.err.join('\n'));
+  const viewed = JSON.parse(monitor.out[0]);
+  assert.deepEqual([viewed.number, viewed.state, viewed.headRefOid, viewed.mergeable], [number, 'OPEN', head, 'UNKNOWN']);
+  // Design §6's App has no Checks/Statuses read: the broker says so, and the rollup is empty rather than an error.
+  assert.deepEqual(viewed.statusCheckRollup, []);
+  assert.match(monitor.err.join('\n'), /check runs unavailable through the broker/u);
+
+  const archive = run(dir);
+  assert.equal(await runCloudAgent(['gh', 'pr', 'list', '--head', 'badge', '--state', 'merged', '--json', 'number,headRefOid', '--limit', '20'], archive.deps), 0);
+  assert.equal(archive.out[0], '[]', 'not merged yet');
+});

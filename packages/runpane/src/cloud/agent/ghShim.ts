@@ -1,5 +1,9 @@
-import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../../boundaryDecoder';
+import { decodeBoundary, type JsonObject } from '../../boundaryDecoder';
 import { BrokerError } from './brokerClient';
+import {
+  commentsSchema, decodeItem, ghFields, ghState, labelNames, listItems, localBranchName, pickFields, printChecks, pullDiff, pullJson, pullsForHead,
+  shownState, statusCheckRollup, type RestItem,
+} from './ghRest';
 import { lastValue, parseAgentFlags, parseItemNumber, UnsupportedFlagError, type FlagSpec, type ParsedFlags } from './flags';
 import { currentBranch, lastCommitMessage, repoRoot } from './localGit';
 import { pushBranch, readBody, resolveRepo, sessionBroker, type AgentDeps } from './session';
@@ -12,7 +16,7 @@ import { pushBranch, readBody, resolveRepo, sessionBroker, type AgentDeps } from
 
 const REFUSED = 'not available in a runpane cloud Session (broker allowlist)';
 const SUPPORTED = [
-  'gh pr create|view|list|comment|close|edit',
+  'gh pr create|view|list|comment|close|edit|checks|diff',
   'gh issue create|view|list|comment|close',
   'gh auth status',
 ];
@@ -39,7 +43,12 @@ export async function runGhShim(argv: readonly string[], deps: AgentDeps): Promi
       return group === undefined ? 2 : 0;
     }
     if (group === 'auth' && action === 'status') return await authStatus(args.slice(2), deps);
-    if (group === 'pr' && action && ['create', 'view', 'list', 'comment', 'close', 'edit'].includes(action)) return await pr(action, args.slice(2), deps);
+    if (group === 'pr' && action && ['create', 'view', 'list', 'comment', 'close', 'edit', 'checks', 'diff'].includes(action)) return await pr(action, args.slice(2), deps);
+    if (group === 'api' && action === 'graphql') {
+      deps.stderr('gh api graphql: GitHub\'s GraphQL API is not available in a runpane cloud Session: the broker only proxies an allowlist of '
+        + 'read-only REST paths and the pr/issue writes. Use gh pr view|list|checks|diff and gh issue view|list instead.');
+      return 2;
+    }
     if (group === 'issue' && action && ['create', 'view', 'list', 'comment', 'close'].includes(action)) return await issue(action, args.slice(2), deps);
     throw new Refused(`gh ${[group, action].filter(Boolean).join(' ')}`);
   } catch (error) {
@@ -68,115 +77,18 @@ async function repoOf(deps: AgentDeps, parsed: ParsedFlags): Promise<string> {
   return resolveRepo(deps, lastValue(parsed, '--repo'), deps.cwd);
 }
 
-/** `cloud/<host>/<branch>` or `owner:branch` as given to --head: the Session-local branch name. */
-function localBranchName(head: string): string {
-  const withoutOwner = head.includes(':') ? head.slice(head.indexOf(':') + 1) : head;
-  const parts = withoutOwner.split('/');
-  return parts[0] === 'cloud' && parts.length >= 3 ? parts.slice(2).join('/') : withoutOwner;
-}
-
-const optionalText = boundary.optional(boundary.nullable(boundary.string));
-const branchRefSchema = boundary.optional(boundary.nullable(boundary.object({ ref: optionalText, sha: optionalText })));
-
-/** A GitHub REST pull request or issue, as the broker's read passthrough returns it (only what gh shows). */
-const restItemSchema = boundary.object({
-  number: boundary.number,
-  title: optionalText,
-  body: optionalText,
-  state: optionalText,
-  html_url: optionalText,
-  user: boundary.optional(boundary.nullable(boundary.object({ login: optionalText }))),
-  labels: boundary.optional(boundary.nullable(boundary.array(boundary.object({ name: optionalText })))),
-  created_at: optionalText,
-  updated_at: optionalText,
-  closed_at: optionalText,
-  merged_at: optionalText,
-  node_id: optionalText,
-  draft: boundary.optional(boundary.nullable(boundary.boolean)),
-  head: branchRefSchema,
-  base: branchRefSchema,
-  pull_request: boundary.optional(boundary.nullable(boundary.json)),
-});
-
-const commentsSchema = boundary.array(boundary.object({
-  body: optionalText,
-  user: boundary.optional(boundary.nullable(boundary.object({ login: optionalText }))),
-}));
-
-function decodeItem(value: JsonValue) {
-  return decodeBoundary(value, restItemSchema);
-}
-
-type RestItem = ReturnType<typeof decodeItem>;
-
-function ghState(item: RestItem): 'OPEN' | 'CLOSED' | 'MERGED' {
-  if (item.state?.toLowerCase() !== 'closed') return 'OPEN';
-  return item.merged_at ? 'MERGED' : 'CLOSED';
-}
-
-function labelNames(item: RestItem): string[] {
-  return (item.labels ?? []).map((label) => label.name ?? '');
-}
-
-/** A REST pull request or issue as gh's --json fields. */
-function ghFields(item: RestItem, kind: 'pr' | 'issue'): JsonObject {
-  const fields: JsonObject = {
-    number: item.number,
-    title: item.title ?? '',
-    body: item.body ?? '',
-    state: ghState(item),
-    url: item.html_url ?? '',
-    author: { login: item.user?.login ?? '' },
-    labels: labelNames(item).map((name) => ({ name })),
-    createdAt: item.created_at ?? '',
-    updatedAt: item.updated_at ?? '',
-    closedAt: item.closed_at ?? null,
-    id: item.node_id ?? '',
-  };
-  if (kind === 'pr') {
-    fields.isDraft = item.draft === true;
-    fields.headRefName = item.head?.ref ?? '';
-    fields.headRefOid = item.head?.sha ?? '';
-    fields.baseRefName = item.base?.ref ?? '';
-    fields.mergedAt = item.merged_at ?? null;
-  }
-  return fields;
-}
-
-/** gh's state column: a draft pull request shows as DRAFT. */
-function shownState(item: RestItem): string {
-  const state = ghState(item);
-  return item.draft === true && state === 'OPEN' ? 'DRAFT' : state;
-}
-
-function pickFields(fields: JsonObject, wanted: string): JsonObject {
-  const names = wanted.split(',').map((name) => name.trim()).filter(Boolean);
-  const unknown = names.filter((name) => !(name in fields));
-  if (unknown.length > 0) throw new Error(`Unknown JSON field: ${unknown.join(', ')}\nAvailable fields:\n  ${Object.keys(fields).sort().join('\n  ')}`);
-  return Object.fromEntries(names.map((name) => [name, fields[name]]));
-}
-
 function refuseOutputFlags(parsed: ParsedFlags): void {
   if (parsed.values.has('--jq')) throw new UnsupportedFlagError('--jq');
   if (parsed.values.has('--template')) throw new UnsupportedFlagError('--template');
 }
 
-/** The open pull request whose head is this Session's copy of `branch`. */
-async function pullForBranch(deps: AgentDeps, repo: string, branch: string): Promise<RestItem> {
-  const status = await sessionBroker(deps).status().catch(() => null);
-  const prefix = status?.caller?.branchPrefix ?? null;
-  const match = (await listItems(deps, repo, 'pulls?state=open&per_page=100')).find((pull) => {
-    const ref = pull.head?.ref ?? '';
-    return prefix ? ref === `${prefix}${branch}` : ref.startsWith('cloud/') && ref.endsWith(`/${branch}`);
-  });
-  if (!match) throw new Error(`no open pull requests found for branch "${branch}"`);
-  return match;
-}
-
+/** A PR number, URL or branch as gh takes it; no selector means the current branch's open PR. */
 async function prNumber(deps: AgentDeps, repo: string, selector: string | undefined): Promise<number> {
   if (selector !== undefined && /^(?:#)?\d+$|\/pull\/\d+\/?$/u.test(selector)) return parseItemNumber(selector, 'pull request');
-  const branch = selector !== undefined ? localBranchName(selector) : await currentBranch(deps.git, await repoRoot(deps.git, deps.cwd));
-  return (await pullForBranch(deps, repo, branch)).number;
+  const branch = selector ?? await currentBranch(deps.git, await repoRoot(deps.git, deps.cwd));
+  const [match] = await pullsForHead(deps, repo, branch, 'open', 1);
+  if (!match) throw new Error(`no open pull requests found for branch "${localBranchName(branch)}"`);
+  return match.number;
 }
 
 // ---------------------------------------------------------------- gh auth status
@@ -197,6 +109,9 @@ async function authStatus(argv: readonly string[], deps: AgentDeps): Promise<num
     `  - Repositories: ${repos.join(', ') || 'none'}`,
     `  - Branches: ${status.caller?.branchPrefix ?? 'cloud/<host>/'}<branch> only; pull requests are drafts`,
     '  - Token: none in this Session (the coordinator holds the credential)',
+    // Pane's onboarding reads "Token scopes:" when `gh api /user` is unavailable (it is here) and wants
+    // `user`; the broker answers what these Sessions need, so the shim reports it as ready.
+    "  - Token scopes: 'repo', 'user'",
   ].join('\n'));
   return 0;
 }
@@ -240,7 +155,7 @@ async function pr(action: string, argv: readonly string[], deps: AgentDeps): Pro
       const item = decodeItem(await broker().read(repo, `pulls/${number}`));
       const wanted = lastValue(parsed, '--json');
       if (wanted !== undefined) {
-        deps.stdout(JSON.stringify(pickFields(ghFields(item, 'pr'), wanted), null, 2));
+        deps.stdout(JSON.stringify(await pullJson(deps, repo, item, wanted), null, 2));
         return 0;
       }
       deps.stdout([
@@ -265,13 +180,30 @@ async function pr(action: string, argv: readonly string[], deps: AgentDeps): Pro
       const state = (lastValue(parsed, '--state') ?? 'open').toLowerCase();
       if (!['open', 'closed', 'merged', 'all'].includes(state)) throw new Error(`invalid argument "${state}" for "--state" flag: valid values are {open|closed|merged|all}`);
       const limit = Math.max(1, Math.min(100, Number(lastValue(parsed, '--limit') ?? '30') || 30));
-      const query = new URLSearchParams({ state: state === 'merged' ? 'closed' : state, per_page: String(limit) });
+      const restState = state === 'merged' ? 'closed' : state === 'all' ? 'all' : state === 'closed' ? 'closed' : 'open';
       const base = lastValue(parsed, '--base');
-      if (base) query.set('base', base);
       const head = lastValue(parsed, '--head');
-      const pulls = (await listItems(deps, repo, `pulls?${query.toString()}`))
+      let pulls: RestItem[];
+      if (head) {
+        pulls = await pullsForHead(deps, repo, head, restState, limit);
+      } else {
+        const query = new URLSearchParams({ state: restState, per_page: String(limit) });
+        if (base) query.set('base', base);
+        pulls = await listItems(deps, repo, `pulls?${query.toString()}`);
+      }
+      pulls = pulls
+        .filter((pull) => !base || pull.base?.ref === base)
         .filter((pull) => state !== 'merged' || ghState(pull) === 'MERGED')
-        .filter((pull) => !head || pull.head?.ref === head || (pull.head?.ref ?? '').endsWith(`/${localBranchName(head)}`));
+        // gh's closed means closed without merging.
+        .filter((pull) => state !== 'closed' || ghState(pull) === 'CLOSED')
+        .slice(0, limit);
+      const wanted = lastValue(parsed, '--json');
+      if (wanted !== undefined) {
+        const rows: JsonObject[] = [];
+        for (const pull of pulls) rows.push(await pullJson(deps, repo, pull, wanted));
+        deps.stdout(JSON.stringify(rows, null, 2));
+        return 0;
+      }
       return printList(deps, parsed, pulls, 'pr', (pull) => [String(pull.number), pull.title ?? '', pull.head?.ref ?? '', shownState(pull), pull.created_at ?? '']);
     }
     case 'comment': {
@@ -307,9 +239,38 @@ async function pr(action: string, argv: readonly string[], deps: AgentDeps): Pro
       deps.stdout(item.url || `https://github.com/${repo}/pull/${number}`);
       return 0;
     }
+    case 'checks': {
+      const parsed = flags(argv, [['--interval', '-i']], [['--watch'], ['--fail-fast'], ['--required'], ['--web', '-w']]);
+      for (const refused of ['--web', '--required']) if (parsed.booleans.has(refused)) throw new UnsupportedFlagError(refused);
+      const repo = await repoOf(deps, parsed);
+      const number = await prNumber(deps, repo, parsed.positionals[0]);
+      return watchChecks(deps, repo, number, parsed.booleans.has('--watch'), Math.max(1, Number(lastValue(parsed, '--interval') ?? '10') || 10) * 1000);
+    }
+    case 'diff': {
+      const parsed = flags(argv, [['--color']], [['--name-only'], ['--patch'], ['--web', '-w']]);
+      for (const refused of ['--web', '--patch']) if (parsed.booleans.has(refused)) throw new UnsupportedFlagError(refused);
+      const repo = await repoOf(deps, parsed);
+      const number = await prNumber(deps, repo, parsed.positionals[0]);
+      deps.stdout(await pullDiff(deps, repo, number, parsed.booleans.has('--name-only')));
+      return 0;
+    }
     default:
       throw new Refused(`gh pr ${action}`);
   }
+}
+
+/** `gh pr checks [--watch]`: prints the checks; with --watch, again every interval until none is pending. */
+async function watchChecks(deps: AgentDeps, repo: string, number: number, watch: boolean, intervalMs: number): Promise<number> {
+  const broker = sessionBroker(deps);
+  let code = 8;
+  while (code === 8) {
+    const item = decodeItem(await broker.read(repo, `pulls/${number}`));
+    const rollup = item.head?.sha ? await statusCheckRollup(deps, repo, item.head.sha) : [];
+    code = printChecks(deps, rollup, item.head?.ref ?? String(number));
+    if (!watch || code !== 8) break;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return code;
 }
 
 // ---------------------------------------------------------------- gh issue
@@ -392,10 +353,6 @@ async function issue(action: string, argv: readonly string[], deps: AgentDeps): 
     default:
       throw new Refused(`gh issue ${action}`);
   }
-}
-
-async function listItems(deps: AgentDeps, repo: string, path: string): Promise<RestItem[]> {
-  return decodeBoundary(await sessionBroker(deps).read(repo, path), boundary.array(restItemSchema));
 }
 
 function printList(deps: AgentDeps, parsed: ParsedFlags, items: RestItem[], kind: 'pr' | 'issue', row: (item: RestItem) => string[]): number {

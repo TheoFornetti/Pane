@@ -1642,7 +1642,7 @@
     },
     {
       "name": "cloud agent gh",
-      "summary": "The gh compatibility shim a cloud Session runs as ~/.local/bin/gh: pr create|view|list|comment|close|edit, issue create|view|list|comment|close and auth status, through the coordinator's broker. Everything else exits 2.",
+      "summary": "The gh compatibility shim a cloud Session runs as ~/.local/bin/gh (and /usr/local/bin/gh, for Pane's own PR lookups): pr create|view|list|comment|close|edit|checks|diff, issue create|view|list|comment|close and auth status, through the coordinator's broker. Everything else exits 2.",
       "usage": [
         "runpane cloud agent gh <pr|issue|auth> <verb> [gh flags]"
       ],
@@ -3779,7 +3779,7 @@
         "Usage:",
         "  runpane cloud agent gh <pr|issue|auth> <verb> [gh flags]",
         "",
-        "The gh compatibility shim a cloud Session runs as ~/.local/bin/gh: pr create|view|list|comment|close|edit, issue create|view|list|comment|close and auth status, through the coordinator's broker. Everything else exits 2.",
+        "The gh compatibility shim a cloud Session runs as ~/.local/bin/gh (and /usr/local/bin/gh, for Pane's own PR lookups): pr create|view|list|comment|close|edit|checks|diff, issue create|view|list|comment|close and auth status, through the coordinator's broker. Everything else exits 2.",
         "",
         "Installed as ~/.local/bin/gh by runpane cloud new --github or runpane cloud github connect --broker when the coordinator's broker is on."
       ],
@@ -15868,7 +15868,7 @@
       },
       "cloud agent gh": {
         "name": "cloud agent gh",
-        "summary": "The gh compatibility shim a cloud Session runs as ~/.local/bin/gh: pr create|view|list|comment|close|edit, issue create|view|list|comment|close and auth status, through the coordinator's broker. Everything else exits 2.",
+        "summary": "The gh compatibility shim a cloud Session runs as ~/.local/bin/gh (and /usr/local/bin/gh, for Pane's own PR lookups): pr create|view|list|comment|close|edit|checks|diff, issue create|view|list|comment|close and auth status, through the coordinator's broker. Everything else exits 2.",
         "details": "Maps the common gh verbs onto the coordinator's GitHub broker. gh pr create pushes the branch through the broker first and always opens a draft. gh api, merges, reviews, releases, --jq and --web exit 2.",
         "requiresPaneDaemon": false,
         "mutates": true,

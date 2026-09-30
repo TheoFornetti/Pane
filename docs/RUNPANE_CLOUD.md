@@ -405,10 +405,17 @@ runpane cloud github connect "api work" --repo <owner>/<repo> --broker        # 
 Both add the repository to the Session's entry in the coordinator's directory (`github.repos`, its
 per-Session allowlist) and install, in the Session:
 
-- **`~/.local/bin/gh`**, a `gh` look-alike: `gh pr create|view|list|comment|close|edit`,
-  `gh issue create|view|list|comment|close` and `gh auth status`, mapped onto the broker. Every other gh
-  command (`gh api`, `gh pr merge`, reviews, releases, ...) exits 2 with "not available in a runpane cloud
-  Session (broker allowlist)". `~/.local/bin` is put first on `PATH`, ahead of any real `gh`.
+- **`~/.local/bin/gh`**, a `gh` look-alike: `gh pr create|view|list|comment|close|edit|checks|diff`,
+  `gh issue create|view|list|comment|close` and `gh auth status`, mapped onto the broker. `--json` prints gh's
+  field names and values (`state` OPEN/CLOSED/MERGED, `isDraft`, `headRefOid`, `mergeable`,
+  `statusCheckRollup`), and `gh pr list --head <branch>` finds the PR of `cloud/<host>/<branch>` as well as of
+  `<branch>` itself. So Pane's own `gh` calls inside the Session work too: the PR badge, the Session PR
+  monitor, archive's merged-PR check and the dashboard. `gh pr diff` is rebuilt from the PR's files;
+  `gh pr checks` needs the App's Checks and Commit statuses **read** permissions (without them it reports no
+  checks). Every other gh command (`gh api`, including `gh api graphql`, `gh pr merge`, reviews, releases, ...)
+  exits 2 with "not available in a runpane cloud Session (broker allowlist)". `~/.local/bin` is put first on
+  `PATH` (at the top of `~/.bashrc`), ahead of any real `gh`, and `/usr/local/bin/gh` links to the shim
+  unless that name is taken, because Pane's daemon finds `gh` through the system PATH.
 - **`runpane cloud agent github ...`**, the same through runpane (all take `--json`):
 
   ```bash

@@ -423,6 +423,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 it.update(pull=True, draft=True, head={"ref": data["head"], "sha": c}, base={"ref": base, "sha": base_sha}, merged=False)
                 save_state(d, st)
             return self._send(201, {"number": it["number"], "head": data["head"]})
+        if method == "POST" and u.path == "/_fake/seed/check":
+            with LOCK:
+                st = load_state(d)
+                run = {"id": now(), "name": data.get("name", "ci"), "head_sha": data["sha"], "status": data.get("status", "completed"),
+                       "conclusion": data.get("conclusion", "success"), "started_at": iso(now()), "completed_at": iso(now()),
+                       "html_url": f"https://github.com/{data['repo']}/runs/1"}
+                st.setdefault("checks", {}).setdefault(data["repo"], []).append(run)
+                save_state(d, st)
+            return self._send(201, run)
         if method == "POST" and u.path == "/_fake/seed/issue":
             with LOCK:
                 st = load_state(d)
@@ -494,8 +503,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         j = {"number": it["number"], "title": it["title"], "body": it["body"], "state": it["state"],
              "user": {"login": it["user"]}, "labels": [{"name": n} for n in it["labels"]], "comments": len(it["comments"]),
              "html_url": f"{base}/{'pull' if it['pull'] else 'issues'}/{it['number']}", "created_at": it["created"]}
+        j.update(updated_at=it.get("updated", it["created"]), closed_at=it.get("closed"))
         if it["pull"]:
-            j.update(draft=it["draft"], merged=it.get("merged", False), head=it["head"], base=it["base"],
+            j.update(draft=it["draft"], merged=it.get("merged", False), merged_at=it.get("merged_at"),
+                     mergeable=None if it.get("merged") else True, head=it["head"], base=it["base"],
                      pull_request={"url": f"{base}/pull/{it['number']}"})
         return j
 
@@ -615,8 +626,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     "files": [{"filename": f} for f in files]})
         ms = re.match(r"^/commits/([^/]+)/(status|statuses|check-runs)$", rest)
         if ms and method == "GET":
+            runs = [c for c in st.get("checks", {}).get(full, []) if c["head_sha"] in (ms.group(1),
+                    git(rp, "rev-parse", "--verify", "-q", ms.group(1), check=False))]
             if ms.group(2) == "check-runs":
-                return self._send(200, {"total_count": 0, "check_runs": []})
+                return self._send(200, {"total_count": len(runs), "check_runs": runs})
             return self._send(200, {"state": "pending", "statuses": [], "total_count": 0} if ms.group(2) == "status" else [])
         if rest.startswith("/actions/runs") and method == "GET":
             return self._send(200, {"total_count": 0, "workflow_runs": []})
@@ -667,7 +680,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if sub == "/merge":
                     self.entry["merge"] = True  # a gate asserts this never happens
                     if method == "PUT":
-                        it.update(state="closed", merged=True); save_state(d, st)
+                        it.update(state="closed", merged=True, merged_at=iso(now()), closed=iso(now())); save_state(d, st)
                         return self._send(200, {"merged": True, "message": "Pull Request successfully merged"})
                     return self._send(204 if it.get("merged") else 404, b"")
                 if sub == "/files" and method == "GET":
@@ -684,6 +697,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     for k in ("title", "body", "state"):
                         if k in data:
                             it[k] = data[k]
+                    it["updated"] = iso(now()); it["closed"] = iso(now()) if it["state"] == "closed" else None
                     if "base" in data:
                         it["base"] = {"ref": data["base"], "sha": git(rp, "rev-parse", f"refs/heads/{data['base']}")}
                     save_state(d, st)

@@ -235,6 +235,49 @@ PY
   else rec agent.pr-issue-push FAIL "agent pane not created" "$E2E_RUN_DIR/agent-pane.json"; fi
 else rec agent.pr-issue-push SKIP "E2E_CLAUDE=0"; fi
 
+# ================================================================ gh-compat: Pane's own gh call sites, run as the daemon runs gh
+if [ -n "$AGENT_OK" ]; then
+  say "gh-compat call sites"
+  PR_N=$(jget 'd["pr"]' < "$E2E_RUN_DIR/agent-result.json"); HEAD_SHA=$(jget 'd["ref"]' < "$E2E_RUN_DIR/agent-result.json")
+  fake_admin "$C_ID" POST /_fake/seed/check "{\"repo\":\"$REPO\",\"sha\":\"$HEAD_SHA\",\"name\":\"rp-e2e-ci\",\"conclusion\":\"success\"}" | ev seed-check.json >/dev/null
+  gc=$(sbx "$S_ID" 180 <<SH
+cd /home/user/app
+export PATH=/usr/local/bin:/home/user/.local/bin:/usr/bin:/bin   # non-interactive, minimal PATH (like the daemon's gh spawns)
+echo "gh=\$(command -v gh) usr-local-link=\$(readlink /usr/local/bin/gh 2>/dev/null)"
+gh pr list --head p3-agent-proof --state all --json number,url,title,state,isDraft,body --limit 1 > /home/user/rcl/gh-list.json 2>/home/user/rcl/gh-list.err; echo "list exit=\$?"
+gh pr view $PR_N --json number,url,state,mergeable,statusCheckRollup,headRefOid > /home/user/rcl/gh-view.json 2>/home/user/rcl/gh-view.err; echo "view exit=\$?"
+cat /home/user/rcl/gh-list.err /home/user/rcl/gh-view.err
+SH
+)
+  printf '%s\n' "$gc" | ev gh-compat.txt >/dev/null
+  cl boat fetch "$S_ID" /home/user/rcl/gh-list.json "$E2E_RUN_DIR/gh-pr-list.json" >/dev/null
+  cl boat fetch "$S_ID" /home/user/rcl/gh-view.json "$E2E_RUN_DIR/gh-pr-view.json" >/dev/null
+  v=$(python3 - "$E2E_RUN_DIR/gh-pr-list.json" "$PR_N" <<'PY'
+import json, sys
+try: d = json.load(open(sys.argv[1]))
+except Exception as e: print(f"unparsable: {e}"); sys.exit(1)
+it = d[0] if isinstance(d, list) and len(d) == 1 else None
+ok = bool(it) and it["number"] == int(sys.argv[2]) and it["isDraft"] is True and it["state"] == "OPEN" \
+     and it["url"].endswith(f"/pull/{sys.argv[2]}") and it["title"].startswith("[runpane-cloud test]") and "runpane-cloud:" in it["body"]
+print(json.dumps({k: it.get(k) for k in ("number", "state", "isDraft", "url", "title")}) if it else json.dumps(d)[:300]); sys.exit(0 if ok else 1)
+PY
+) && rec gh-compat.pr-list PASS "gh pr list --head p3-agent-proof --state all --json ... --limit 1 -> $v" "$E2E_RUN_DIR/gh-pr-list.json" \
+    || rec gh-compat.pr-list FAIL "$v / $(tr '\n' ' ' <<<"$gc" | head -c 300)" "$E2E_RUN_DIR/gh-compat.txt"
+  v=$(python3 - "$E2E_RUN_DIR/gh-pr-view.json" "$PR_N" "$HEAD_SHA" <<'PY'
+import json, sys
+try: d = json.load(open(sys.argv[1]))
+except Exception as e: print(f"unparsable: {e}"); sys.exit(1)
+roll = d.get("statusCheckRollup") or []
+check = [c for c in roll if (c.get("name") or c.get("context")) == "rp-e2e-ci" and str(c.get("conclusion") or c.get("state")).upper() == "SUCCESS"]
+ok = d.get("number") == int(sys.argv[2]) and d.get("state") == "OPEN" and d.get("headRefOid") == sys.argv[3] \
+     and d.get("mergeable") == "MERGEABLE" and bool(check) and d.get("url", "").endswith(f"/pull/{sys.argv[2]}")
+print(json.dumps({"number": d.get("number"), "state": d.get("state"), "mergeable": d.get("mergeable"),
+                  "headRefOid": (d.get("headRefOid") or "")[:10], "statusCheckRollup": roll})[:400]); sys.exit(0 if ok else 1)
+PY
+) && rec gh-compat.pr-view PASS "gh pr view $PR_N --json number,url,state,mergeable,statusCheckRollup,headRefOid -> $v" "$E2E_RUN_DIR/gh-pr-view.json" \
+    || rec gh-compat.pr-view FAIL "$v / $(tr '\n' ' ' <<<"$gc" | head -c 300)" "$E2E_RUN_DIR/gh-compat.txt"
+else rec gh-compat SKIP "no agent PR to look at"; fi
+
 # ================================================================ refusals, probed live from inside the Session
 say "refusals"
 bcall_install "$S_ID" | ev bcall-install.txt >/dev/null

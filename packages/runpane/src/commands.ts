@@ -116,6 +116,8 @@ export interface ParsedArgs {
   note?: string;
   /** `runpane cloud <subcommand> ...`: the arguments after `cloud`, parsed by cloud/args.ts. */
   cloudArgv?: string[];
+  /** `runpane port <open|list|close|auto-open> ...`: the arguments after `port`, parsed by sessionPorts.ts. */
+  portArgv?: string[];
   remoteSetupArgs: string[];
 }
 
@@ -188,6 +190,10 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   // `cloud safe-to-stop` runs inside the sandbox against the local daemon, so it takes the shared flags.
   if (first === 'cloud' && args[1] !== 'safe-to-stop') {
     return parseCloudEntry(args);
+  }
+
+  if (first === 'port') {
+    return parsePortEntry(args);
   }
 
   const groupHelpTopic = matchCommandGroupHelp(args);
@@ -285,6 +291,37 @@ function parseCloudEntry(args: string[]): ParsedArgs {
     cloudArgv: [...matched.tokens.slice(1), ...rest],
     remoteSetupArgs: [],
   };
+}
+
+/**
+ * `runpane port ...` parses its own arguments (sessionPorts.ts); only the daemon target flags
+ * (--host, --thread, --pane-dir) are taken out here, so `runpane --host <Session> port list` works too.
+ */
+function parsePortEntry(args: string[]): ParsedArgs {
+  const matched = matchCommand(args);
+  const wantsHelp = (arg: string | undefined) => arg === '-h' || arg === '--help';
+  if (!matched || args.slice(2).some(wantsHelp)) {
+    return { command: 'help', helpTopic: matched?.name ?? 'port', ...DEFAULTS };
+  }
+  const parsed: ParsedArgs = { command: decodeBoundary(matched.name, commandSchema), ...DEFAULTS, remoteSetupArgs: [] };
+  const rest = args.slice(matched.tokens.length);
+  const portArgv = [matched.tokens[1] ?? ''];
+  for (let index = 0; index < rest.length; index++) {
+    const arg = rest[index] ?? '';
+    const flag = arg.startsWith('--') && arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg;
+    if (flag !== '--host' && flag !== '--thread' && flag !== '--pane-dir') {
+      portArgv.push(arg);
+      continue;
+    }
+    const value = flag === arg ? rest[++index] : arg.slice(flag.length + 1);
+    if (!value) throw new Error(`${flag} requires a value.`);
+    if (flag === '--host') parsed.host = value;
+    else if (flag === '--thread') parsed.thread = value;
+    else parsed.paneDir = value;
+  }
+  parsed.portArgv = portArgv;
+  parsed.json = portArgv.includes('--json');
+  return parsed;
 }
 
 function validateReportArgs(parsed: ParsedArgs): void {
@@ -931,6 +968,7 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'lock release'
     || command === 'lock list'
     || command === 'cloud safe-to-stop'
+    || command.startsWith('port ')
     || command === 'panels create'
     || command === 'panels open'
     || command === 'panels list'

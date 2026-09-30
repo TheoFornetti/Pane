@@ -15,6 +15,7 @@ import type { GitHubPort } from './githubApi';
 import { decodePairingCode } from './pairing';
 import { pushPeersFile, runPeersCommand } from './peers';
 import { runSecretsCommand } from './secrets';
+import { runCloudPortCommand } from './sessionPorts';
 import { describeOrg, hostProvider, resolveBoatOrg } from './wallet';
 import type { BootstrapPort, TailnetDevice, TailnetPort } from './ports';
 import type { CloudProvider, CloudSandbox, CloudSize } from './provider';
@@ -145,6 +146,7 @@ export async function runCloudCommand(args: CloudArgs, deps: CloudDeps): Promise
       return deps.runCoordinator(args.passthrough);
     case 'peers': return runPeersCommand(args.passthrough, deps);
     case 'secrets': return runSecretsCommand(args.passthrough, deps);
+    case 'port': return runCloudPortCommand(args.passthrough, deps);
     case 'github': return runGitHubCommand(args.passthrough, deps);
     case 'git': return runGitCommand(args.passthrough, deps);
   }

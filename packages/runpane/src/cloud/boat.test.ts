@@ -69,6 +69,17 @@ test('create sends the Idempotency-Key, never sends env, then names the sandbox'
   assert.deepEqual(fetch.calls[1].body, { name: 'rp-abc12345' });
 });
 
+test('create retries naming the sandbox and returns it unnamed rather than losing it', async () => {
+  const { fetch, boat } = provider([
+    { status: 202, body: { ok: true, type: 'sandbox.created', sandbox: sandbox() } },
+    ...Array.from({ length: 4 }, () => ({ status: 503, body: { code: 'unavailable', message: 'busy' } })),
+  ]);
+  const created = await boat.create({ name: 'rp-abc12345', size: 'large', idempotencyKey: 'k1' });
+  assert.equal(created.id, 'bx_abcdefgh');
+  assert.equal(created.name, '');
+  assert.equal(fetch.calls.filter((call) => call.method === 'PATCH').length, 4);
+});
+
 test('create retries a 5xx with the same Idempotency-Key', async () => {
   const { fetch, boat } = provider([
     { status: 503, body: { code: 'no_ready_machine', message: 'busy' } },

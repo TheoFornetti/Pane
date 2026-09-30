@@ -239,6 +239,9 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   await deps.store.writeHost(record);
 
   try {
+    // The provider could not name it at create time: the record above already holds its id, so a
+    // failure here still goes through the cleanup below instead of leaking an unnamed sandbox.
+    if (sandbox.name !== hostname) await provider.rename(sandbox.id, hostname);
     await waitForSandbox(provider, sandbox.id, 'running', SANDBOX_READY_TIMEOUT_MS, deps);
     timings.readyMs = deps.now() - started;
     progress(`runpane cloud: sandbox ${sandbox.id} is up; joining the tailnet and installing the Pane daemon...`);

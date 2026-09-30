@@ -218,7 +218,13 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
       };
       const sandbox = decodeSandbox(await call(createRequest), createRequest);
       if (sandbox.name !== request.name) {
-        await call({ method: 'PATCH', path: `/sandboxes/${encodeId(sandbox.id)}`, body: { name: request.name } });
+        try {
+          await call({ method: 'PATCH', path: `/sandboxes/${encodeId(sandbox.id)}`, body: { name: request.name }, retry: true });
+        } catch {
+          // boat's create takes no name. Throwing here would lose a billed sandbox that no prefix match
+          // finds again; return it under its real (empty) name so the caller records it by id first.
+          return sandbox;
+        }
       }
       return { ...sandbox, name: request.name };
     },
@@ -238,7 +244,7 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
       return sandboxes;
     },
     async rename(sandboxId, name) {
-      await call({ method: 'PATCH', path: `/sandboxes/${encodeId(sandboxId)}`, body: { name } });
+      await call({ method: 'PATCH', path: `/sandboxes/${encodeId(sandboxId)}`, body: { name }, retry: true });
     },
     async stop(sandboxId) {
       await call({ method: 'POST', path: `/sandboxes/${encodeId(sandboxId)}/stop`, body: {} });

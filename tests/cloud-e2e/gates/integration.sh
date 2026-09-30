@@ -50,6 +50,10 @@ VERSION=$(jget 'd["body"].get("version") if isinstance(d["body"],dict) else None
   || { g M1-cli health FAIL "no /health over the tailnet" "$E2E_RUN_DIR/health.json"; exit 1; }
 [ -n "$VERSION" ] && [ "$VERSION" != null ] && g M2-resume health-version PASS "/health version=$VERSION" "$E2E_RUN_DIR/health.json" || g M2-resume health-version FAIL "/health has no version"
 [ "$(cl remote invoke "$PAIR" runpane:repos:list '[{}]' | jget 'd["http"]')" = 200 ] && g M1-cli paired-client PASS "paired client /invoke 200" || g M1-cli paired-client FAIL "paired client /invoke failed"
+rn=$(cl remote invoke "$PAIR" runpane:repos:list '[{}]' | jget '[r.get("name") for r in (d["body"]["result"].get("repositories") or d["body"]["result"].get("repos") or [])]' 2>/dev/null)
+want=$(basename "${REPO%.git}")
+grep -q "\"$want\"" <<<"$rn" && g M1-cli repo-registered PASS "cloud new --repo registered '$want' with the cloud daemon (repos: $rn)" \
+  || g M1-cli repo-registered FAIL "cloud new --repo cloned but did not register '$want' with the cloud daemon (repos: $rn)"
 desk="$RUNPANE_CLOUD_DESKTOP_DIR/config.json"
 python3 - "$desk" "$HOST" <<'PY' && g M1-cli desktop-profile PASS "desktop profile store has the cloud profile for $HOST" || g M1-cli desktop-profile FAIL "no cloud profile for $HOST in $desk"
 import json,sys

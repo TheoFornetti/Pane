@@ -70,6 +70,10 @@ ver=$(jget 'd["body"].get("version") if isinstance(d["body"],dict) else None' <<
 inv=$(cl remote invoke "$PAIR" runpane:repos:list '[{}]'); printf '%s\n' "$inv" | ev invoke.json >/dev/null
 [ "$(jget 'd["http"]' <<<"$inv")" = 200 ] && rec paired-client PASS "paired client /invoke runpane:repos:list 200 (repos: $(jget '[r.get("name") for r in (d["body"]["result"].get("repositories") or d["body"]["result"].get("repos") or [])] if isinstance(d["body"].get("result"),dict) else d["body"].get("result")' <<<"$inv"))" "$E2E_RUN_DIR/invoke.json" \
   || rec paired-client FAIL "invoke failed: $(head -c 300 <<<"$inv")" "$E2E_RUN_DIR/invoke.json"
+rn=$(cl remote invoke "$PAIR" runpane:repos:list '[{}]' | jget '[r.get("name") for r in (d["body"]["result"].get("repositories") or d["body"]["result"].get("repos") or [])]' 2>/dev/null)
+want=$(basename "${REPO%.git}")
+grep -q "\"$want\"" <<<"$rn" && rec repo-registered PASS "cloud new --repo registered '$want' with the cloud daemon (repos: $rn)" \
+  || rec repo-registered FAIL "cloud new --repo cloned but did not register '$want' with the cloud daemon (repos: $rn)"
 desk="$RUNPANE_CLOUD_DESKTOP_DIR/config.json"
 if [ -f "$desk" ] && python3 - "$desk" "$HOST" <<'PY'
 import json,sys

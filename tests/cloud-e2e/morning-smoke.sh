@@ -74,7 +74,14 @@ h=$(cl remote wait-health "$PAIR" --timeout 90); printf '%s\n' "$h" > "$E2E_RUN_
 use_host=0; rpc --host "$PAIR" repos list --json > "$E2E_RUN_DIR/host-repos.json" 2>&1 && use_host=1
 inv() { cl remote invoke "$PAIR" "$@"; }
 REPO_NAME=$(jget '([r.get("name") for r in (d["body"]["result"].get("repositories") or d["body"]["result"].get("repos") or [])] or [""])[0]' <<<"$(inv runpane:repos:list '[{}]')" 2>/dev/null)
-if [ -z "$REPO_NAME" ]; then rec pane FAIL "the cloud Session has no saved repository (cloud new --repo should add it)"; exit 1; fi
+if [ -z "$REPO_NAME" ]; then
+  rec repo-registered FAIL "cloud new --repo cloned the repo but did not register it with the cloud daemon (repos list is empty)"
+  RDIR="/home/user/$(basename "${REPO%.git}")"
+  inv runpane:repos:add "[{\"path\":\"$RDIR\",\"name\":\"$(basename "${REPO%.git}")\"}]" > "$E2E_RUN_DIR/repos-add.json"
+  REPO_NAME=$(jget '([r.get("name") for r in (d["body"]["result"].get("repositories") or d["body"]["result"].get("repos") or [])] or [""])[0]' <<<"$(inv runpane:repos:list '[{}]')" 2>/dev/null)
+  [ -n "$REPO_NAME" ] || { rec pane FAIL "could not register $RDIR either" "$E2E_RUN_DIR/repos-add.json"; exit 1; }
+  log "registered $RDIR as '$REPO_NAME' so the rest of the smoke can run"
+else rec repo-registered PASS "cloud new --repo registered '$REPO_NAME' with the cloud daemon"; fi
 if [ "$use_host" = 1 ]; then
   pc=$(rpc --host "$PAIR" panes create --repo "$REPO_NAME" --name smoke --tool-command bash --title smoke-shell --source agent --no-focus --wait-ready --yes --json 2>&1)
   pc="{\"http\":200,\"body\":{\"result\":$pc}}"

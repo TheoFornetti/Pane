@@ -67,8 +67,9 @@ runpane cloud setup \
 - Add `--anthropic-key-file <($D ANTHROPIC_API_KEY)` to store an Anthropic key as well.
 - `--golden` names the image new Sessions start from: a boat named snapshot with the Pane daemon, Tailscale
   and Playwright's Chromium preinstalled. It makes `new` about a minute faster. Without it (`--no-golden`)
-  each `new` installs everything onto the plain image. The fork's current golden image is named in the
-  release notes of the prerelease you installed.
+  each `new` installs everything onto the plain image. Fork builds make goldens named
+  `rp-loop-golden-<sha8>` in the boat account (`scripts/cloud-dist/make-golden.sh`; list them in boat's
+  console under snapshots). Releases keep only the newest two, so point `setup --golden` at a recent one.
 - `--size` sets the default machine size; see [Costs](#costs). The built-in default is `default`
   (4 vCPU / 8 GB); `large` (8 vCPU / 16 GB) is the one to use for more than one agent with browser tests.
 - Rerun `setup` with any subset of flags to change one setting. The others are kept.
@@ -84,7 +85,8 @@ runpane cloud new --label "api work" --repo https://github.com/<you>/<repo>.git 
 This takes about a minute (boat create ~1 s, running in ~4 s, then tailnet join, daemon install and the
 first TLS certificate). It:
 
-1. creates a sandbox named `rp-<8 chars>` (the same name is its tailnet host name);
+1. creates a sandbox named `rp-<8 chars>` (the same name is its tailnet host name; `setup --name-prefix`
+   changes `rp`);
 2. joins your tailnet as `tag:rp-session`, with a single-use key and Tailscale SSH off;
 3. starts the Pane daemon, reachable at `https://rp-<id>.<your-tailnet>.ts.net`;
 4. clones `--repo` (public HTTPS repositories only; add `--ref <branch>` for a branch) into
@@ -169,8 +171,9 @@ runpane cloud wake "api work"         # resumes and returns once the daemon answ
 - `wake --size large` resumes onto a bigger machine (about 11 s); the disk is kept.
 
 While a Session is asleep, Pane desktop can't connect to it. Wake it from the CLI, then pick it again in
-the switcher. `runpane --host <asleep Session> ...` fails with `ERR_RUNPANE_HOST_ASLEEP` without waking it,
-except `panels submit` when a coordinator is set up (next section).
+the switcher. `runpane --host <asleep Session> ...` fails without waking it: a plain connection error, or
+`ERR_RUNPANE_HOST_ASLEEP` when a coordinator is set up. With a coordinator, `panels submit` is the one
+command that wakes the Session first (next section).
 
 ## 6. The coordinator (idle-stop and wake-on-submit)
 
@@ -272,6 +275,7 @@ with boat's message; the CLI does not retry. Wait and run it again.
 |---|---|
 | `Unknown command: cloud` | You are running Pane's bundled `runpane` (inside a Pane terminal) or the npm release. Use a normal terminal, or `"$(npm prefix -g)/bin/runpane"`; check `runpane version` shows `-rc.` |
 | `new` or `wake` fails with `429` / "60 sandbox starts per hour" | boat's start limit (see [Costs](#costs)). Wait, then rerun. Prefer stopping and waking over creating new Sessions |
+| `new` fails at the create step with a boat error about the snapshot | The saved golden image was deleted (releases keep only the newest two). `runpane cloud setup --golden <newer snapshot>`, or `--no-golden` |
 | `setup` says a Tailscale key is invalid (401) | Wrong client id or secret, or the OAuth client lacks `auth_keys` for `tag:rp-session` |
 | `new` fails at `tailscale-join` or the /health wait | Check the tailnet policy has `tag:rp-session`. `new` has already cleaned up; rerun with `--keep-on-failure` to look inside |
 | `new` failed and `runpane cloud list` shows nothing for it | Rarely, boat creates the sandbox but naming it fails, and the CLI loses track of it. Look in boat's console for a sandbox without an `rp-` name created at that time and delete it there |
@@ -282,7 +286,7 @@ with boat's message; the CLI does not retry. Wait and run it again.
 | A tailnet host name got a `-1` suffix | A device with that name already existed. `destroy` deletes the device first; if you re-enrol a node by hand, delete the old device in the Tailscale admin console first |
 | Files written just before a stop are missing | boat powers off without warning ~4 s after the stop call. Don't use `stop --force`; let `stop` flush |
 | A tool cache or `/tmp` file is gone after wake | `~/.cache`, `/tmp` and `/var/tmp` are not kept across a stop. Keep what matters under `/home/user` |
-| `runpane --host X ...` says `ERR_RUNPANE_HOST_ASLEEP` | Expected: only `panels submit` (with a coordinator) wakes a Session. Run `runpane cloud wake X` |
+| `runpane --host X ...` fails to connect, or says `ERR_RUNPANE_HOST_ASLEEP` | X is asleep. Only `panels submit` with a coordinator wakes a Session; otherwise run `runpane cloud wake X` |
 | A coordinator command says `no coordinator client config at .../coordinator.json` | `~/.config/runpane-cloud/coordinator.json` is missing; see [section 6](#6-the-coordinator-idle-stop-and-wake-on-submit) |
 | `new`, `destroy` or `sync` warns "Retry with: runpane cloud sync" | The coordinator was unreachable. The change itself succeeded; run `runpane cloud sync` when it is back |
 

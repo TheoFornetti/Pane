@@ -125,6 +125,27 @@ everywhere below.
 `new` already added the host. In Pane desktop, open the remote host switcher in the sidebar and pick it:
 you get an ordinary remote Pane (agent panels, terminals, diffs). One remote host is active at a time.
 
+> **Released (upstream) Pane desktop builds: quit the app first.** `new`, `sync` and `destroy` edit the
+> desktop's saved remote hosts on disk (`~/.pane/config.json`). A released desktop that is running doesn't
+> notice that edit, so the host doesn't show up. Worse, the app's next settings save (any toggle) writes its
+> old copy back and **erases the hosts `runpane cloud` added** (`remoteDaemon.client.profiles` becomes empty).
+> Until your desktop has the fix:
+>
+> 1. Quit Pane desktop completely (on macOS: Pane > Quit, not just closing the window).
+> 2. Run `runpane cloud new`, `sync` or `destroy`.
+> 3. Reopen Pane desktop and check that the host is listed in the switcher. If it isn't, quit again and run
+>    `runpane cloud sync`.
+>
+> Or leave the desktop running and import through the app itself, which is safe: `runpane cloud new
+> --no-import ...`, then `runpane cloud pair <host>` and paste the code into `Settings > Remote Pane >
+> Import Remote Connection`.
+>
+> The fix (commit `cd190659`: the desktop now picks up outside edits live and never writes over them) is in
+> fork builds from `rc/integration` at `080d3828` or later. Those builds ship the desktop as a **Linux `.deb`
+> only**, so macOS and Windows desktops need the workaround until an upstream release has it. A fork `.deb`
+> desktop shows a "Software Update" prompt for the upstream release on launch. Dismiss it: updating would
+> replace the fork build.
+
 If Pane desktop was not installed yet, or you use another data directory, add every cloud Session later
 with:
 
@@ -348,6 +369,7 @@ for your other devices.
 | `new` fails at `install-pane` with a dpkg error (`failed to remove my own update file /var/lib/dpkg/updates/...`) | Seen once when a `--pane-deb-url` install ran on a fresh golden fork. `new` has already removed the sandbox and device; run it again. A golden image that already carries the right Pane (`--pane-preinstalled`, the default with `--golden`) skips this step |
 | `new` fails at `tailscale-join` or the /health wait | Check the tailnet policy has `tag:rp-session`. `new` has already cleaned up; rerun with `--keep-on-failure` to look inside |
 | `new` failed and `runpane cloud list` shows nothing for it | Rarely, boat creates the sandbox but naming it fails, and the CLI loses track of it. Look in boat's console for a sandbox without an `rp-` name created at that time and delete it there |
+| A host from `runpane cloud new` or `sync` doesn't show in the desktop switcher, or vanished after you changed a setting | A released desktop was running during the import and then wrote its old config back. Quit Pane desktop, run `runpane cloud sync`, reopen it (see [Pane desktop](#pane-desktop)) |
 | The desktop says "Connection failed" for a cloud host | The Session is probably asleep. The host switcher says so for cloud hosts ("Cloud host asleep or unreachable", with a Copy wake command item); run `runpane cloud wake <host>`, then pick it again. If it is awake, check `tailscale status` on the laptop |
 | The phone app can't connect | The phone must be on the same tailnet (Tailscale app signed in and connected) |
 | After a wake the Session (or the coordinator) doesn't answer; `tailscale status` in the sandbox says "Logged out" | boat sometimes restores a stopped sandbox with an empty Tailscale state file. `runpane cloud wake <host>` (or `runpane cloud coordinator start`) detects it and re-enrols the node under the same name; the pairing keeps working |

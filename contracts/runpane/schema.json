@@ -542,7 +542,11 @@
         "cloud coordinator destroy",
         "cloud peers allow",
         "cloud peers revoke",
-        "cloud peers list"
+        "cloud peers list",
+        "cloud github connect",
+        "cloud github disconnect",
+        "cloud github list",
+        "cloud git push"
       ],
       "properties": {
         "default": {
@@ -843,6 +847,18 @@
           "$ref": "#/$defs/helpLines"
         },
         "cloud peers list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud github connect": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud github disconnect": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud github list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud git push": {
           "$ref": "#/$defs/helpLines"
         }
       },

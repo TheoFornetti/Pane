@@ -454,11 +454,13 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   scrollbackCheckpoint?.start();
   if (panelResume) {
     // Not awaited: the socket is up already, and a submit to a panel that is
-    // still coming back waits for that panel on its own.
+    // still coming back waits for that panel on its own. /health readiness
+    // stays "starting" until the resume pass ends, so a cloud wake waits for it.
+    cloudDaemonHealth.setAgentRestorePhase('pending');
     void panelResume.resumeInterruptedAgents().then(status => {
       const failed = status.panels.filter(panel => panel.state === 'failed').length;
       logger.info(`[PanelResume] Resumed ${status.panels.length - failed} of ${status.panels.length} agent panel(s)`);
-    });
+    }).finally(() => cloudDaemonHealth.setAgentRestorePhase('done'));
   }
 
   if (options.restoreSpotlights !== false) {

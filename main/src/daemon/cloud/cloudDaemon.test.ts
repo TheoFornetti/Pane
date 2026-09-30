@@ -96,6 +96,13 @@ describe('registerCloudDaemonHandlers', () => {
     await expect(safeToStop()).resolves.toMatchObject({ safe: false, blockers: [{ condition: 'agent-working' }] });
   });
 
+  it('reports a busy shell as recent output, not as a working agent', async () => {
+    const { safeToStop, agentStates } = setup();
+    agentStates.set('shell-1', 'working');
+
+    await expect(safeToStop()).resolves.toMatchObject({ safe: true });
+  });
+
   it('counts user event streams and recent user calls, never peers', async () => {
     const { safeToStop, connected, clientActivity, config } = setup();
     connected.push(stream('peer-a', 'peer-a'));

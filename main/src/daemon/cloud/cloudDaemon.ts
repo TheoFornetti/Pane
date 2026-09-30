@@ -97,10 +97,12 @@ function createSafeToStopSources(dependencies: CloudDaemonDependencies, now: () 
   return {
     terminals: () => dependencies.terminals.getAllPanelIds().map((panelId): SafeToStopTerminal => {
       const lastOutputAt = dependencies.terminals.getLastOutputAt(panelId);
+      const panel = dependencies.getPanel(panelId);
       return {
         panelId,
-        paneId: dependencies.getPanel(panelId)?.sessionId,
-        agentState: dependencies.terminals.getAgentStatus(panelId),
+        paneId: panel?.sessionId,
+        // The status monitor also tracks shells; a busy shell is covered by recent output, not as an agent.
+        agentState: panel && isAgentPanel(panel) ? dependencies.terminals.getAgentStatus(panelId) : undefined,
         lastOutputAt: lastOutputAt ? Date.parse(lastOutputAt) : undefined,
       };
     }),

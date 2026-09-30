@@ -27,12 +27,16 @@ on:
         description: Also build macOS
         type: boolean
         default: true
+      proof_tag:
+        description: Only rerun the relay kit proof against this existing rc-desktop-<sha8> prerelease
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: rc-desktop-${{ inputs.ref || github.ref }}
+  group: rc-desktop-${{ inputs.ref || github.ref }}-${{ inputs.proof_tag }}
   cancel-in-progress: false
 
 env:
@@ -83,6 +87,7 @@ jobs:
   windows:
     name: Windows x64
     needs: meta
+    if: ${{ !inputs.proof_tag }}
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
@@ -149,7 +154,7 @@ jobs:
     name: macOS arm64 + x64
     needs: meta
     # inputs.macos is null on push, and Actions compares null == false.
-    if: github.event_name != 'workflow_dispatch' || inputs.macos
+    if: github.event_name != 'workflow_dispatch' || (inputs.macos && !inputs.proof_tag)
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
@@ -293,7 +298,7 @@ jobs:
   relay-proof:
     name: Relay kit proof (Windows)
     needs: [meta, release]
-    if: always() && needs.release.result == 'success'
+    if: always() && needs.meta.result == 'success' && (needs.release.result == 'success' || inputs.proof_tag)
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -327,7 +332,7 @@ jobs:
     - name: install.ps1 from the prerelease
       shell: pwsh
       env:
-        TAG: ${{ needs.meta.outputs.tag }}
+        TAG: ${{ inputs.proof_tag || needs.meta.outputs.tag }}
       run: |
         $base = "https://github.com/${{ github.repository }}/releases/download/$env:TAG"
         Invoke-WebRequest -UseBasicParsing "$base/sobeck-install.ps1" -OutFile sobeck-install.ps1
@@ -342,6 +347,7 @@ jobs:
           -AppSha256 ('0' * 64) -KitSha256 (Sum 'relay-kit') -Root "$HOME\PaneCloudTest-badhash"
         if ($LASTEXITCODE -eq 0 -or (Test-Path "$HOME\PaneCloudTest-badhash\app")) { Write-Error 'install.ps1 accepted a wrong hash'; exit 1 }
         Write-Host 'PASS install.ps1 refuses a wrong hash'
+        exit 0
 
     - name: Fake cloud host (real headless Pane daemon on loopback)
       shell: pwsh

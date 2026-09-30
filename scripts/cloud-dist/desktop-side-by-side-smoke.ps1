@@ -59,7 +59,10 @@ $testDir = Join-Path $HOME ".pane_$SideBySideName"
 $installedExe = Join-Path $env:LOCALAPPDATA 'Programs\Pane\Pane.exe'
 
 # 1. --version answers before any service starts (and before any data dir is touched).
-$versionOut = (& $TestExe --version 2>&1) | Out-String
+# Pane.exe is a GUI-subsystem program: PowerShell's `&` neither waits for it nor keeps its stdout.
+$versionFile = Join-Path $OutDir 'version.txt'
+Start-Process -FilePath $TestExe -ArgumentList '--version' -Wait -NoNewWindow -RedirectStandardOutput $versionFile
+$versionOut = Get-Content -Raw $versionFile
 Check 'version' ($versionOut.Trim() -eq $ExpectedVersion) "got '$($versionOut.Trim())', want '$ExpectedVersion'"
 Check 'version-touches-no-data' (-not (Test-Path $testDir)) "$testDir absent after --version"
 

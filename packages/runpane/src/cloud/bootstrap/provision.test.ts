@@ -1,0 +1,259 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { test } from 'node:test';
+import type { MintAuthKeyOptions, TailscaleApi, TailscaleDevice } from '../tailscale';
+import { cloudHostname, parseStepResult, provisionSandbox, reenrolSandbox, redact } from './provision';
+import type { SandboxCommandResult, SandboxHandle } from './types';
+
+const PAIRING = 'pane-remote://FAKE-user-pairing';
+const COORD_PAIRING = 'pane-remote://FAKE-coordinator-pairing';
+const AUTH_KEY = 'tskey-fake-kSECRETSECRET-abcdef';
+
+interface FakeState {
+  joined: boolean;
+  hostname: string;
+  runSsh: boolean;
+  checkOk: boolean;
+  dnsSuffix: string;
+}
+
+class FakeSandbox implements SandboxHandle {
+  readonly id = 'bx_fake';
+  readonly files = new Map<string, string>();
+  readonly steps: string[][] = [];
+  readonly scripts: string[] = [];
+  state: FakeState = { joined: false, hostname: '', runSsh: false, checkOk: true, dnsSuffix: '' };
+
+  async writeFile(filePath: string, content: string): Promise<void> {
+    this.files.set(filePath, content);
+  }
+
+  async runScript(script: string): Promise<SandboxCommandResult> {
+    this.scripts.push(script);
+    if (!script.startsWith('bash ')) {
+      return { exitCode: 0, stdout: '', stderr: '' };
+    }
+    const args = [...script.matchAll(/'((?:[^']|'\\'')*)'/g)].map((match) => match[1].replace(/'\\''/g, "'"));
+    const [, step, ...rest] = args;
+    this.steps.push([step, ...rest]);
+    return { exitCode: 0, stdout: `some log\nRP_RESULT ${this.respond(step, rest)}\n`, stderr: '' };
+  }
+
+  private identity(): string {
+    return JSON.stringify(this.state.joined
+      ? {
+          ok: true,
+          backendState: 'Running',
+          nodeId: 'nNEW11CNTRL',
+          hostname: this.state.hostname,
+          magicDnsName: `${this.state.hostname}${this.state.dnsSuffix}.tail03bf19.ts.net`,
+          tailscaleIps: ['100.64.0.9'],
+          tags: ['tag:rp-session'],
+          runSsh: this.state.runSsh,
+        }
+      : { ok: true, backendState: 'NeedsLogin' });
+  }
+
+  private respond(step: string, args: string[]): string {
+    return JSON.stringify(this.reply(step, args));
+  }
+
+  private reply(step: string, args: string[]) {
+    switch (step) {
+      case 'identity': return { ok: true, reset: true, machineId: 'abc' };
+      case 'tailscale-install': return { ok: true, installed: false, backendState: 'NeedsLogin' };
+      case 'tailnet-identity': return JSON.parse(this.identity());
+      case 'check': return this.state.checkOk ? { ok: true, failed: [], passed: 29 } : { ok: false, failed: ['npmrc (/home/user) present'], passed: 28 };
+      case 'tailscale-up': {
+        assert.equal(this.files.get(args[0]), AUTH_KEY, 'the key file holds the minted key');
+        this.files.delete(args[0]);
+        this.state.joined = true;
+        this.state.hostname = args[1];
+        return JSON.parse(this.identity());
+      }
+      case 'tailscale-reset': this.state.joined = false; return { ok: true, backendState: 'NeedsLogin' };
+      case 'serve-restore': return { ok: true, listenPort: 42137 };
+      case 'install-pane': return { ok: true, skipped: false, version: '2.4.141-rc.1', listenPort: 42137 };
+      case 'pairing-read': return { ok: true, code: args[0] ? COORD_PAIRING : PAIRING };
+      case 'add-client': return { ok: true };
+      case 'clone': return { ok: true, dir: args[2], head: 'deadbeef' };
+      case 'health-local': return { ok: true };
+      default: return { ok: false, error: `unknown step ${step}` };
+    }
+  }
+}
+
+class FakeTailscale implements TailscaleApi {
+  devices: TailscaleDevice[] = [];
+  readonly minted: MintAuthKeyOptions[] = [];
+  readonly deleted: string[] = [];
+  readonly log: string[] = [];
+
+  async mintAuthKey(options: MintAuthKeyOptions = {}) {
+    this.minted.push(options);
+    this.log.push('mint');
+    return { id: 'k1', key: AUTH_KEY };
+  }
+
+  async listDevices() {
+    return this.devices;
+  }
+
+  async findDevicesByHostname(hostname: string) {
+    return this.devices.filter((device) => device.hostname === hostname);
+  }
+
+  async deleteDevice(nodeId: string) {
+    this.deleted.push(nodeId);
+    this.log.push(`delete ${nodeId}`);
+    const before = this.devices.length;
+    this.devices = this.devices.filter((device) => device.nodeId !== nodeId);
+    return before !== this.devices.length;
+  }
+}
+
+function device(nodeId: string, hostname: string): TailscaleDevice {
+  return { nodeId, id: '1', hostname, name: `${hostname}.tail03bf19.ts.net`, addresses: [], tags: ['tag:rp-session'] };
+}
+
+const healthyFetch: typeof fetch = async () =>
+  new Response(JSON.stringify({ ok: true, status: 'ready', transport: 'http+sse', version: '2.4.141-rc.1' }), { status: 200 });
+
+function tempDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'rp-bootstrap-test-'));
+}
+
+test('cloudHostname takes rp- plus eight lowercase alphanumerics', () => {
+  assert.equal(cloudHostname('AbC-123_def-XYZ'), 'rp-abc123de');
+  assert.equal(cloudHostname('k3j9x0q2m1', 'rp-loop-cli'), 'rp-loop-cli-k3j9x0q2');
+  assert.throws(() => cloudHostname('--'));
+});
+
+test('provisionSandbox runs every step in order and writes the pairing file 0600', async () => {
+  const sandbox = new FakeSandbox();
+  const tailscale = new FakeTailscale();
+  const dir = tempDir();
+  const pairingOutputPath = path.join(dir, 'sub', 'pairing.code');
+  const coordPath = path.join(dir, 'coord.code');
+  const seen: string[] = [];
+
+  const result = await provisionSandbox(sandbox, {
+    sessionId: 'k3j9x0q2m1',
+    label: 'Cloud k3j9',
+    tailscale,
+    paneSource: { kind: 'deb-url', url: 'https://example.test/pane.deb', sha256: 'ff' },
+    repo: { url: 'https://github.com/example/app.git', ref: 'main' },
+    pairingOutputPath,
+    extraClients: [{ label: 'runpane-cloud-coordinator', outputPath: coordPath }],
+    fetchImpl: healthyFetch,
+    onStep: (step) => seen.push(`${step.step}:${step.state}`),
+  });
+
+  assert.deepEqual(sandbox.steps.map((step) => step[0]), [
+    'identity', 'tailscale-install', 'tailnet-identity', 'check', 'tailscale-up',
+    'install-pane', 'pairing-read', 'add-client', 'pairing-read', 'clone',
+  ]);
+  assert.deepEqual(sandbox.steps[4].slice(2), ['rp-k3j9x0q2']);
+  assert.deepEqual(sandbox.steps[5].slice(1), ['deb-url', 'https://example.test/pane.deb', 'ff', 'runpane@latest', 'Cloud k3j9']);
+  assert.deepEqual(sandbox.steps[9].slice(1), ['https://github.com/example/app.git', 'main', '/home/user/app']);
+  assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tail03bf19.ts.net');
+  assert.equal(result.baseUrl, 'https://rp-k3j9x0q2.tail03bf19.ts.net');
+  assert.equal(result.nodeId, 'nNEW11CNTRL');
+  assert.equal(result.daemonVersion, '2.4.141-rc.1');
+  assert.equal(result.runSsh, false);
+  assert.equal(fs.readFileSync(pairingOutputPath, 'utf8'), `${PAIRING}\n`);
+  assert.equal(fs.statSync(pairingOutputPath).mode & 0o777, 0o600);
+  assert.equal(fs.readFileSync(coordPath, 'utf8'), `${COORD_PAIRING}\n`);
+  assert.equal(fs.statSync(coordPath).mode & 0o777, 0o600);
+  assert.ok(seen.includes('health:done'));
+
+  // Single-use, tagged, pre-authorized key; the key never appears in a command line.
+  assert.deepEqual(tailscale.minted[0].tags, ['tag:rp-session']);
+  assert.notEqual(tailscale.minted[0].reusable, true);
+  assert.ok(sandbox.scripts.every((script) => !script.includes(AUTH_KEY) && !script.includes('--ssh')));
+  assert.ok(sandbox.files.has('/home/user/.runpane-cloud/bin/rp-bootstrap.sh'));
+  assert.ok(![...sandbox.files.keys()].some((key) => key.includes('tskey-')), 'the key file is consumed');
+});
+
+test('provisionSandbox deletes a stale device holding the hostname before joining', async () => {
+  const sandbox = new FakeSandbox();
+  const tailscale = new FakeTailscale();
+  tailscale.devices = [device('nSTALE11CNTRL', 'rp-k3j9x0q2'), device('nOTHER', 'rp-other')];
+  const result = await provisionSandbox(sandbox, {
+    sessionId: 'k3j9x0q2m1', label: 'x', tailscale, paneSource: { kind: 'preinstalled' },
+    pairingOutputPath: path.join(tempDir(), 'p'), fetchImpl: healthyFetch,
+  });
+  assert.deepEqual(result.deletedStaleNodeIds, ['nSTALE11CNTRL']);
+  assert.deepEqual(tailscale.log, ['delete nSTALE11CNTRL', 'mint']);
+});
+
+test('provisionSandbox skips the join when the sandbox is already on the tailnet (retry)', async () => {
+  const sandbox = new FakeSandbox();
+  sandbox.state = { ...sandbox.state, joined: true, hostname: 'rp-k3j9x0q2' };
+  const tailscale = new FakeTailscale();
+  await provisionSandbox(sandbox, {
+    sessionId: 'k3j9x0q2m1', label: 'x', tailscale, paneSource: { kind: 'preinstalled' },
+    pairingOutputPath: path.join(tempDir(), 'p'), fetchImpl: healthyFetch,
+  });
+  assert.equal(tailscale.minted.length, 0);
+  assert.ok(!sandbox.steps.some((step) => step[0] === 'check' || step[0] === 'tailscale-up'));
+});
+
+test('provisionSandbox refuses a failed strip-list check, Tailscale SSH, and a suffixed name', async () => {
+  const base = { sessionId: 'k3j9x0q2m1', label: 'x', paneSource: { kind: 'preinstalled' } as const, fetchImpl: healthyFetch };
+
+  const dirty = new FakeSandbox();
+  dirty.state.checkOk = false;
+  await assert.rejects(
+    provisionSandbox(dirty, { ...base, tailscale: new FakeTailscale(), pairingOutputPath: path.join(tempDir(), 'p') }),
+    { name: 'BootstrapError', step: 'check', message: /npmrc/ },
+  );
+
+  const ssh = new FakeSandbox();
+  ssh.state.runSsh = true;
+  await assert.rejects(
+    provisionSandbox(ssh, { ...base, tailscale: new FakeTailscale(), pairingOutputPath: path.join(tempDir(), 'p') }),
+    /Tailscale SSH/,
+  );
+
+  const suffixed = new FakeSandbox();
+  suffixed.state.dnsSuffix = '-1';
+  await assert.rejects(
+    provisionSandbox(suffixed, { ...base, tailscale: new FakeTailscale(), pairingOutputPath: path.join(tempDir(), 'p') }),
+    /joined as "rp-k3j9x0q2-1"/,
+  );
+});
+
+test('provisionSandbox fails with a diagnosis when /health never gets ready', async () => {
+  const notReady: typeof fetch = async () => new Response('bad gateway', { status: 502 });
+  await assert.rejects(
+    provisionSandbox(new FakeSandbox(), {
+      sessionId: 'k3j9x0q2m1', label: 'x', tailscale: new FakeTailscale(), paneSource: { kind: 'preinstalled' },
+      pairingOutputPath: path.join(tempDir(), 'p'), fetchImpl: notReady, healthTimeoutMs: 10,
+    }),
+    /last HTTP 502; in-sandbox loopback check ok/,
+  );
+});
+
+test('reenrolSandbox deletes the old device before wiping state, and keeps the name', async () => {
+  const sandbox = new FakeSandbox();
+  sandbox.state = { ...sandbox.state, joined: true, hostname: 'rp-k3j9x0q2' };
+  const tailscale = new FakeTailscale();
+  tailscale.devices = [device('nOLD11CNTRL', 'rp-k3j9x0q2')];
+
+  const result = await reenrolSandbox(sandbox, { hostname: 'rp-k3j9x0q2', oldNodeId: 'nOLD11CNTRL', tailscale });
+
+  assert.deepEqual(result.deletedNodeIds, ['nOLD11CNTRL']);
+  assert.deepEqual(tailscale.log, ['delete nOLD11CNTRL', 'mint']);
+  assert.deepEqual(sandbox.steps.map((step) => step[0]), ['tailscale-reset', 'tailscale-up', 'serve-restore']);
+  assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tail03bf19.ts.net');
+});
+
+test('step results parse from the last RP_RESULT line and errors are redacted', () => {
+  assert.deepEqual(parseStepResult('x\nRP_RESULT {"ok":false}\nRP_RESULT {"ok":true}\n'), { ok: true });
+  assert.equal(parseStepResult('no result'), undefined);
+  assert.equal(parseStepResult('RP_RESULT [1]'), undefined);
+  assert.equal(redact(`code ${PAIRING} key ${AUTH_KEY}`), 'code <pairing-redacted> key <tskey-redacted>');
+});

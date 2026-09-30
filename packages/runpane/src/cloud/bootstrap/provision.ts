@@ -33,9 +33,10 @@ interface ProvisionOptions {
   pairingOutputPath: string;
   /**
    * Further paired clients (e.g. label "runpane-cloud-coordinator"); each client's pane-remote:// code
-   * is written to its local outputPath with mode 0600.
+   * is written to its local outputPath with mode 0600. `scope: 'coordinator'` pairs a client that may
+   * only call runpane:cloud:* channels (needs a Pane daemon that knows `--client-scope`).
    */
-  extraClients?: { label: string; outputPath: string }[];
+  extraClients?: { label: string; outputPath: string; scope?: 'coordinator' }[];
   tags?: string[];
   healthTimeoutMs?: number;
   sandboxHome?: string;
@@ -164,7 +165,7 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     await step('extra-clients', async () => {
       for (const client of options.extraClients ?? []) {
         const slug = clientSlug(client.label);
-        await runner.run('add-client', [slug, client.label], envelopeSchema, { timeoutSeconds: 180 });
+        await runner.run('add-client', [slug, client.label, client.scope ?? ''], envelopeSchema, { timeoutSeconds: 180 });
         const pairing = await runner.run('pairing-read', [slug], pairingStepSchema);
         writeSecretFile(client.outputPath, requirePairingCode(pairing.code));
         extraClientPaths.push(client.outputPath);

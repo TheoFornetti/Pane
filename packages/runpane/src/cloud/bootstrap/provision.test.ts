@@ -168,7 +168,7 @@ test('provisionSandbox runs every step in order and writes the pairing file 0600
     paneSource: { kind: 'deb-url', url: 'https://example.test/pane.deb', sha256: 'ff' },
     repo: { url: 'https://github.com/example/app.git', ref: 'main' },
     pairingOutputPath,
-    extraClients: [{ label: 'runpane-cloud-coordinator', outputPath: coordPath }],
+    extraClients: [{ label: 'runpane-cloud-coordinator', outputPath: coordPath, scope: 'coordinator' }],
     fetchImpl: healthyFetch,
     remoteTransport: invoke.transport,
     onStep: (step) => seen.push(`${step.step}:${step.state}`),
@@ -180,6 +180,7 @@ test('provisionSandbox runs every step in order and writes the pairing file 0600
   ]);
   assert.deepEqual(sandbox.steps[4].slice(2), ['rp-k3j9x0q2']);
   assert.deepEqual(sandbox.steps[5].slice(1), ['deb-url', 'https://example.test/pane.deb', 'ff', '', 'Cloud k3j9']);
+  assert.deepEqual(sandbox.steps[7].slice(1), ['runpane-cloud-coordinator', 'runpane-cloud-coordinator', 'coordinator']);
   assert.deepEqual(sandbox.steps[9].slice(1), ['https://github.com/example/app.git', 'main', '/home/user/app']);
   assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tailnet-example.ts.net');
   assert.equal(result.baseUrl, 'https://rp-k3j9x0q2.tailnet-example.ts.net');

@@ -252,7 +252,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       repo: record.meta.repo,
       pairingOutputPath: record.meta.pairingPath,
       extraClients: coordinatorEnabled
-        ? [{ label: 'runpane-cloud-coordinator', outputPath: deps.store.coordinatorPairingPath(hostname) }]
+        ? [{ label: 'runpane-cloud-coordinator', outputPath: deps.store.coordinatorPairingPath(hostname), scope: 'coordinator' }]
         : undefined,
       healthTimeoutMs: args.timeoutMs ?? DEFAULT_NEW_HEALTH_TIMEOUT_MS,
       onStep: (step) => progress(`  - ${step}`),

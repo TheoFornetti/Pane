@@ -30,7 +30,7 @@ export interface ProvisionRequest {
   repo?: { url: string; ref?: string };
   /** Local 0600 file that receives the pane-remote:// code. */
   pairingOutputPath: string;
-  extraClients?: { label: string; outputPath: string }[];
+  extraClients?: { label: string; outputPath: string; scope?: 'coordinator' }[];
   healthTimeoutMs?: number;
   onStep?: (step: string) => void;
 }

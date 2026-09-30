@@ -1,5 +1,6 @@
 import { createPrivateKey, createSign } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
+import { boundary, decodeBoundary } from '../../../boundaryDecoder';
 import type { JsonValue } from '../../../boundaryDecoder';
 import { BrokerError } from './policy';
 
@@ -8,14 +9,14 @@ import { BrokerError } from './policy';
 
 const TIMEOUT_MS = 30_000;
 
-export interface GitHubResponse {
+interface GitHubResponse {
   status: number;
   body: JsonValue | undefined;
 }
 
-export type GitHubMethod = 'GET' | 'POST' | 'PATCH';
+type GitHubMethod = 'GET' | 'POST' | 'PATCH';
 
-export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<{
+export type FetchLike = (url: string, init: { method: string; headers: Headers; body?: string; signal?: AbortSignal }) => Promise<{
   status: number;
   headers: { get(name: string): string | null };
   text(): Promise<string>;
@@ -30,13 +31,13 @@ export function createGitHubRest(apiBaseUrl: string, fetchImpl: FetchLike = fetc
   const base = apiBaseUrl.replace(/\/+$/u, '');
   return {
     async request(method, route, auth, body) {
-      const headers: Record<string, string> = {
+      const headers = new Headers({
         Authorization: `Bearer ${auth}`,
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
         'User-Agent': 'runpane-cloud-coordinator',
-      };
-      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      });
+      if (body !== undefined) headers.set('Content-Type', 'application/json');
       let response;
       try {
         response = await fetchImpl(`${base}${route}`, {
@@ -51,7 +52,7 @@ export function createGitHubRest(apiBaseUrl: string, fetchImpl: FetchLike = fetc
       const text = await response.text();
       let parsed: JsonValue | undefined;
       try {
-        parsed = text ? (JSON.parse(text) as JsonValue) : undefined;
+        parsed = text ? decodeBoundary(JSON.parse(text), boundary.json) : undefined;
       } catch {
         parsed = undefined;
       }
@@ -73,13 +74,31 @@ function routeLabel(route: string): string {
   return route.split('?')[0];
 }
 
-function messageOf(body: JsonValue | undefined): string | null {
-  if (body && typeof body === 'object' && !Array.isArray(body) && typeof body.message === 'string') {
-    const errors = Array.isArray(body.errors) ? body.errors : [];
-    const details = errors.map((error) => (error && typeof error === 'object' && !Array.isArray(error) && typeof error.message === 'string' ? error.message : '')).filter(Boolean);
-    return details.length > 0 ? `${body.message} (${details.join('; ')})` : body.message;
+const errorBodySchema = boundary.object({
+  message: boundary.string,
+  errors: boundary.optional(boundary.array(boundary.json)),
+});
+const errorItemSchema = boundary.object({ message: boundary.optional(boundary.string) });
+
+/** One entry of GitHub's `errors[]`: an object with a message, or (rarely) a bare string. */
+function errorDetail(item: JsonValue): string {
+  try {
+    return decodeBoundary(item, errorItemSchema).message ?? '';
+  } catch {
+    return String(item);
   }
-  return null;
+}
+
+/** GitHub's `{message, errors[]}` error body, when that is what came back. */
+function messageOf(body: JsonValue | undefined): string | null {
+  let decoded;
+  try {
+    decoded = decodeBoundary(body, errorBodySchema);
+  } catch {
+    return null;
+  }
+  const details = (decoded.errors ?? []).map(errorDetail).filter(Boolean);
+  return details.length > 0 ? `${decoded.message} (${details.join('; ')})` : decoded.message;
 }
 
 // ---------------------------------------------------------------- GitHub App JWT (RS256)

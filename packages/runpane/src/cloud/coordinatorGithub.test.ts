@@ -16,6 +16,7 @@ import { createTestHarness, type TestHarness } from './__tests__/fakes';
 const STAGE = '/home/user/.runpane-cloud/coordinator-stage';
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const PEM = privateKey.export({ type: 'pkcs1', format: 'pem' }).toString();
+const PUBLIC_PEM = publicKey.export({ type: 'spki', format: 'pem' }).toString();
 const PAT = 'github_pat_11LAPTOPTEST_0123456789abcdefghijklmnop';
 
 async function run(harness: TestHarness, argv: string[]): Promise<number> {
@@ -109,7 +110,7 @@ test('github set refuses classic tokens and non-RSA keys before touching the coo
 
 test('github set verifies the App with GitHub: installation discovery, repos, and forbidden permissions', async () => {
   const root = await fs.mkdtemp(path.join((await import('node:os')).tmpdir(), 'rp-ghset-'));
-  const fake = new FakeGitHub({ root, appId: '42', appPublicKey: publicKey });
+  const fake = new FakeGitHub({ root, appId: '42', appPublicKey: PUBLIC_PEM });
   fake.createRepo('acme/app');
   const base = await fake.start();
   try {
@@ -131,7 +132,7 @@ test('github set verifies the App with GitHub: installation discovery, repos, an
   }
 
   const risky = await fs.mkdtemp(path.join((await import('node:os')).tmpdir(), 'rp-ghset-'));
-  const broad = new FakeGitHub({ root: risky, appId: '42', appPublicKey: publicKey, installationPermissions: { contents: 'write', workflows: 'write', metadata: 'read' } });
+  const broad = new FakeGitHub({ root: risky, appId: '42', appPublicKey: PUBLIC_PEM, installationPermissions: { contents: 'write', workflows: 'write', metadata: 'read' } });
   broad.createRepo('acme/app');
   const broadBase = await broad.start();
   try {

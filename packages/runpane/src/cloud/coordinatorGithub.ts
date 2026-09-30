@@ -1,4 +1,4 @@
-import type { JsonObject, JsonValue } from '../boundaryDecoder';
+import { boundary, decodeBoundary } from '../boundaryDecoder';
 import type { CloudDeps } from './commands';
 import { assertFineGrainedPat } from './coordinator/github/credentials';
 import { appJwt, createGitHubRest, loadAppPrivateKey } from './coordinator/github/rest';
@@ -113,25 +113,54 @@ export async function runCoordinatorGitHub(argv: readonly string[], deps: CloudD
 const FORBIDDEN_APP_PERMISSIONS = ['workflows', 'administration', 'secrets', 'organization_administration'];
 
 interface Verified {
-  app: { slug: string | null; installationId: number; permissions: JsonObject } | null;
+  app: { slug: string | null; installationId: number } | null;
   repos: string[];
 }
 
-function objectOf(value: JsonValue | undefined): JsonObject {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-}
+// What GitHub and the coordinator answer, parsed at this boundary.
+const appSchema = boundary.object({ slug: boundary.optional(boundary.nullable(boundary.string)) });
+const installationsSchema = boundary.array(boundary.object({ id: boundary.number, permissions: boundary.optional(boundary.jsonObject) }));
+const tokenSchema = boundary.object({ token: boundary.nonEmptyString });
+const repositoriesSchema = boundary.object({ repositories: boundary.array(boundary.object({ full_name: boundary.nonEmptyString })) });
+const repoSchema = boundary.object({ permissions: boundary.optional(boundary.object({ push: boundary.optional(boundary.boolean) })) });
+const brokerStatusSchema = boundary.object({
+  ok: boundary.optional(boundary.boolean),
+  mode: boundary.optional(boundary.string),
+  error: boundary.optional(boundary.string),
+  app: boundary.optional(boundary.nullable(boundary.object({ id: boundary.optional(boundary.string), slug: boundary.optional(boundary.nullable(boundary.string)) }))),
+  repos: boundary.optional(boundary.array(boundary.string)),
+  allowReadyPulls: boundary.optional(boundary.boolean),
+  tokens: boundary.optional(boundary.array(boundary.object({
+    repo: boundary.string,
+    access: boundary.optional(boundary.string),
+    permissions: boundary.optional(boundary.string),
+    expiresAt: boundary.optional(boundary.nullable(boundary.string)),
+  }))),
+});
+const auditSchema = boundary.object({
+  entries: boundary.array(boundary.jsonObject),
+});
+const auditEntrySchema = boundary.object({
+  at: boundary.optional(boundary.string),
+  callerId: boundary.optional(boundary.string),
+  label: boundary.optional(boundary.nullable(boundary.string)),
+  endpoint: boundary.optional(boundary.string),
+  repo: boundary.optional(boundary.nullable(boundary.string)),
+  target: boundary.optional(boundary.nullable(boundary.string)),
+  outcome: boundary.optional(boundary.string),
+  githubUrl: boundary.optional(boundary.nullable(boundary.string)),
+});
+const errorSchema = boundary.object({ message: boundary.optional(boundary.string) });
 
-function arrayOf(value: JsonValue | undefined): JsonValue[] {
-  return Array.isArray(value) ? value : [];
-}
+type BrokerStatus = ReturnType<typeof brokerStatusSchema.decode>;
 
 async function verifyApp(args: GitHubArgs, pem: string): Promise<Verified> {
   const rest = createGitHubRest(args.apiBaseUrl ?? 'https://api.github.com');
   const key = loadAppPrivateKey(pem);
   // Wall-clock time: GitHub checks the JWT's iat/exp against its own clock.
   const jwt = () => appJwt(args.appId ?? '', key, Date.now());
-  const app = objectOf((await rest.request('GET', '/app', jwt())).body);
-  const installations = arrayOf((await rest.request('GET', '/app/installations?per_page=100', jwt())).body).map(objectOf);
+  const app = decodeBoundary((await rest.request('GET', '/app', jwt())).body, appSchema);
+  const installations = decodeBoundary((await rest.request('GET', '/app/installations?per_page=100', jwt())).body, installationsSchema);
   const chosen = args.installationId !== undefined
     ? installations.find((installation) => installation.id === args.installationId)
     : installations.length === 1 ? installations[0] : undefined;
@@ -143,16 +172,14 @@ async function verifyApp(args: GitHubArgs, pem: string): Promise<Verified> {
         ? 'The App is not installed anywhere yet: install it on the repositories Sessions should reach (Install App -> Only select repositories).'
         : `The App has several installations (${ids}); pass --installation-id.`);
   }
-  const permissions = objectOf(chosen.permissions);
+  const permissions = chosen.permissions ?? {};
   const forbidden = FORBIDDEN_APP_PERMISSIONS.filter((name) => permissions[name] !== undefined);
   if (forbidden.length > 0) {
     throw new Error(`The App holds ${forbidden.join(', ')} permission(s). The broker needs only Contents, Issues and Pull requests (read and write) plus Metadata; remove the rest in the App settings, accept the new permissions on the installation, and rerun.`);
   }
-  const installationId = Number(chosen.id);
-  const token = objectOf((await rest.request('POST', `/app/installations/${installationId}/access_tokens`, jwt(), { permissions: { metadata: 'read' } })).body);
-  const listed = objectOf((await rest.request('GET', '/installation/repositories?per_page=100', String(token.token ?? ''))).body);
-  const repos = arrayOf(listed.repositories).map((repo) => String(objectOf(repo).full_name ?? '')).filter(Boolean);
-  return { app: { slug: typeof app.slug === 'string' ? app.slug : null, installationId, permissions }, repos };
+  const token = decodeBoundary((await rest.request('POST', `/app/installations/${chosen.id}/access_tokens`, jwt(), { permissions: { metadata: 'read' } })).body, tokenSchema);
+  const listed = decodeBoundary((await rest.request('GET', '/installation/repositories?per_page=100', token.token)).body, repositoriesSchema);
+  return { app: { slug: app.slug ?? null, installationId: chosen.id }, repos: listed.repositories.map((repo) => repo.full_name) };
 }
 
 async function verifyPat(args: GitHubArgs, pat: string, deps: CloudDeps): Promise<Verified> {
@@ -161,8 +188,8 @@ async function verifyPat(args: GitHubArgs, pat: string, deps: CloudDeps): Promis
   const hosts = await deps.store.listHosts();
   const repos = [...new Set([...args.repos, ...hosts.flatMap((record) => record.meta.brokerRepos ?? [])])];
   for (const repo of repos) {
-    const info = objectOf((await rest.request('GET', `/repos/${repo}`, pat)).body);
-    if (objectOf(info.permissions).push !== true) throw new Error(`The PAT cannot write to ${repo}: give it Contents, Issues and Pull requests (read and write) on that repository.`);
+    const info = decodeBoundary((await rest.request('GET', `/repos/${repo}`, pat)).body, repoSchema);
+    if (info.permissions?.push !== true) throw new Error(`The PAT cannot write to ${repo}: give it Contents, Issues and Pull requests (read and write) on that repository.`);
   }
   return { app: null, repos };
 }
@@ -202,7 +229,7 @@ async function set(args: GitHubArgs, deps: CloudDeps): Promise<number> {
   await saveCoordinatorDeployment(deps, next);
 
   const broker = await brokerStatus(deps);
-  const brokerError = broker && typeof broker.error === 'string' ? broker.error : null;
+  const brokerError = broker?.error ?? null;
   const summary = {
     ok: broker !== null && brokerError === null,
     mode,
@@ -225,28 +252,32 @@ async function set(args: GitHubArgs, deps: CloudDeps): Promise<number> {
   return summary.ok ? 0 : 1;
 }
 
-async function brokerStatus(deps: CloudDeps): Promise<JsonObject | null> {
+async function brokerStatus(deps: CloudDeps): Promise<BrokerStatus | null> {
   if (!deps.callCoordinatorApi) return null;
-  const result = await deps.callCoordinatorApi('GET', '/cloud/github/status', undefined, 60_000).catch(() => null);
-  return result ? objectOf(result.body) : null;
+  try {
+    const result = await deps.callCoordinatorApi('GET', '/cloud/github/status', undefined, 60_000);
+    return decodeBoundary(result.body, brokerStatusSchema);
+  } catch {
+    return null;
+  }
 }
 
 async function status(args: GitHubArgs, deps: CloudDeps): Promise<number> {
   const deployment = await requireCoordinatorDeployment(deps);
   const broker = await brokerStatus(deps);
   if (args.json) {
-    deps.stdout(JSON.stringify({ ok: broker !== null && broker.ok === true && broker.error === undefined, configured: deployment.github ?? null, broker }, null, 2));
+    deps.stdout(JSON.stringify({ ok: broker?.ok === true && broker.error === undefined, configured: deployment.github ?? null, broker }, null, 2));
   } else if (!broker) {
     deps.stdout(`coordinator ${deployment.hostname}: could not reach its API (is it running? runpane cloud coordinator status).`);
   } else {
-    const app = objectOf(broker.app);
-    deps.stdout(`GitHub broker on ${deployment.hostname}: ${String(broker.mode ?? 'unknown')}${broker.mode === 'app' ? ` (App ${String(app.id ?? '?')}${app.slug ? ` "${String(app.slug)}"` : ''})` : ''}`);
-    if (typeof broker.error === 'string') deps.stdout(`  error: ${broker.error}`);
+    const app = broker.app;
+    deps.stdout(`GitHub broker on ${deployment.hostname}: ${broker.mode ?? 'unknown'}${broker.mode === 'app' ? ` (App ${app?.id ?? '?'}${app?.slug ? ` "${app.slug}"` : ''})` : ''}`);
+    if (broker.error !== undefined) deps.stdout(`  error: ${broker.error}`);
     if (broker.mode !== 'off') {
-      deps.stdout(`  repos: ${arrayOf(broker.repos).map(String).join(', ') || '(none listed)'}`);
+      deps.stdout(`  repos: ${(broker.repos ?? []).join(', ') || '(none listed)'}`);
       deps.stdout(`  ready PRs allowed: ${broker.allowReadyPulls === true ? 'yes' : 'no (always drafts)'}`);
-      const tokens = arrayOf(broker.tokens).map(objectOf);
-      deps.stdout(`  cached installation tokens: ${tokens.length === 0 ? 'none' : tokens.map((token) => `${String(token.repo)} ${String(token.access)} until ${String(token.expiresAt)}`).join('; ')}`);
+      const tokens = broker.tokens ?? [];
+      deps.stdout(`  cached installation tokens: ${tokens.length === 0 ? 'none' : tokens.map((token) => `${token.repo} ${token.permissions ?? token.access ?? '?'} until ${token.expiresAt ?? '?'}`).join('; ')}`);
     }
   }
   return broker ? 0 : 1;
@@ -256,17 +287,25 @@ async function audit(args: GitHubArgs, deps: CloudDeps): Promise<number> {
   await requireCoordinatorDeployment(deps);
   if (!deps.callCoordinatorApi) throw new Error('This build cannot call the coordinator API.');
   const result = await deps.callCoordinatorApi('GET', `/cloud/github/audit?limit=${args.limit}`, undefined, 60_000);
-  const body = objectOf(result.body);
-  if (result.status !== 200) throw new Error(`The coordinator answered ${result.status}: ${String(body.message ?? '')}`);
-  const entries = arrayOf(body.entries).map(objectOf);
+  if (result.status !== 200) {
+    let message = '';
+    try {
+      message = decodeBoundary(result.body, errorSchema).message ?? '';
+    } catch {
+      // informational only
+    }
+    throw new Error(`The coordinator answered ${result.status}: ${message}`);
+  }
+  const { entries } = decodeBoundary(result.body, auditSchema);
   if (args.json) {
     deps.stdout(JSON.stringify({ ok: true, entries }, null, 2));
   } else if (entries.length === 0) {
     deps.stdout('No GitHub broker calls yet.');
   } else {
-    for (const entry of entries) {
-      const target = [entry.repo, entry.target].filter((part) => typeof part === 'string').join(' ');
-      deps.stdout(`${String(entry.at)}  ${String(entry.label ?? entry.callerId)}  ${String(entry.endpoint)}  ${target}  ${String(entry.outcome)}${entry.githubUrl ? `  ${String(entry.githubUrl)}` : ''}`);
+    for (const raw of entries) {
+      const entry = decodeBoundary(raw, auditEntrySchema);
+      const target = [entry.repo, entry.target].filter((part) => part).join(' ');
+      deps.stdout(`${entry.at ?? '?'}  ${entry.label ?? entry.callerId ?? '?'}  ${entry.endpoint ?? '?'}  ${target}  ${entry.outcome ?? '?'}${entry.githubUrl ? `  ${entry.githubUrl}` : ''}`);
     }
   }
   return 0;

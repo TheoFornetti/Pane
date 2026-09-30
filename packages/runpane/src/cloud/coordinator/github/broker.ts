@@ -31,14 +31,14 @@ import type { TailnetNode, WhoisResolver } from './whois';
  * tags, deletes, workflow files, merges or reviews.
  */
 
-export interface BrokerLimits {
+interface BrokerLimits {
   pushesPerSessionPerHour: number;
   writesPerSessionPerHour: number;
   readsPerSessionPerHour: number;
   writesPerHour: number;
 }
 
-export interface BrokerSettings {
+interface BrokerSettings {
   mode: 'app' | 'pat';
   apiBaseUrl: string;
   gitBaseUrl: string;
@@ -46,7 +46,7 @@ export interface BrokerSettings {
   limits: BrokerLimits;
 }
 
-export interface GitHubBrokerDeps {
+interface GitHubBrokerDeps {
   /** null: no `github` config, the broker is off. */
   settings: BrokerSettings | null;
   /** null with `credentialError`: configured, but the credential could not be loaded. */
@@ -61,7 +61,7 @@ export interface GitHubBrokerDeps {
   log?: (line: string) => void;
 }
 
-export interface BrokerCall {
+interface BrokerCall {
   method: string;
   /** The path after `/cloud/github/`, e.g. `pulls/12`. */
   path: string;
@@ -71,13 +71,13 @@ export interface BrokerCall {
   readBody(limitBytes: number): Promise<JsonValue>;
 }
 
-export interface BrokerAnswer {
+interface BrokerAnswer {
   status: number;
   body: JsonObject;
 }
 
 /** 50 MiB of bundle, base64-encoded, plus the JSON around it. */
-export const PUSH_BODY_LIMIT = 72 * 1024 * 1024;
+const PUSH_BODY_LIMIT = 72 * 1024 * 1024;
 const MAX_BUNDLE_BYTES = 50 * 1024 * 1024;
 const BODY_LIMIT = 1024 * 1024;
 const MAX_TEXT = 60_000;
@@ -142,6 +142,11 @@ const githubLabelsSchema = boundary.array(boundary.object({ name: boundary.strin
 
 type Kind = 'push' | 'write' | 'read' | 'free';
 
+interface EnabledBroker {
+  settings: BrokerSettings;
+  credential: GitHubCredential;
+}
+
 interface Route {
   endpoint: string;
   kind: Kind;
@@ -167,8 +172,8 @@ function decodeBody<Value>(value: JsonValue, schema: BoundarySchema<Value>): Val
 }
 
 /** PATCH bodies are checked key by key, so `draft`, `base` or `merged` get a clear refusal. */
-function onlyKeys(value: JsonValue, allowed: readonly string[]): void {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BrokerError('bad-request', 'expected a JSON object');
+function onlyKeys(raw: JsonValue, allowed: readonly string[]): void {
+  const value = decodeBody(raw, boundary.jsonObject);
   const extra = Object.keys(value).filter((key) => !allowed.includes(key));
   if (extra.length > 0) throw new BrokerError('forbidden', `the broker does not allow changing ${extra.join(', ')}`);
 }
@@ -182,10 +187,6 @@ function text(value: string | null | undefined, what: string): string | undefine
 function number(raw: string): number {
   if (!/^\d{1,9}$/u.test(raw)) throw new BrokerError('bad-request', 'expected an issue or pull request number');
   return Number(raw);
-}
-
-function asJson(value: object): JsonObject {
-  return value as JsonObject;
 }
 
 export class GitHubBroker {
@@ -209,13 +210,15 @@ export class GitHubBroker {
     let node: TailnetNode | null = null;
     let endpoint = `${call.method} ${call.path.split('/')[0] || '(none)'}`;
     try {
-      const route = this.route(call);
-      endpoint = route.endpoint;
-      if (call.caller.role === 'user') {
-        if (!route.users) throw new BrokerError('forbidden', `${route.endpoint} is only for cloud Sessions (peer callers)`);
-      } else {
+      // Peers are bound to their node before anything else, unknown endpoints included.
+      if (call.caller.role === 'peer') {
         entry = await this.entryFor(call.caller.id);
         node = await this.bindNode(entry, call.remoteAddress);
+      }
+      const route = this.route(call);
+      endpoint = route.endpoint;
+      if (call.caller.role === 'user' && !route.users) {
+        throw new BrokerError('forbidden', `${route.endpoint} is only for cloud Sessions (peer callers)`);
       }
       if (route.endpoint === 'GET status') return { status: 200, body: await this.status(entry) };
       if (route.endpoint === 'GET audit') {
@@ -287,7 +290,7 @@ export class GitHubBroker {
     return node;
   }
 
-  private requireEnabled(): { settings: BrokerSettings; credential: GitHubCredential } {
+  private requireEnabled(): EnabledBroker {
     const { settings, credential, credentialError } = this.deps;
     if (!settings) throw new BrokerError('github-disabled', 'the GitHub broker is off: run runpane cloud coordinator github set on your machine');
     if (!credential) throw new BrokerError('github-disabled', `the GitHub broker's credential could not be loaded: ${credentialError ?? 'unknown error'}`);
@@ -348,8 +351,13 @@ export class GitHubBroker {
       app: null,
       repos: [],
       allowReadyPulls: settings.allowReadyPulls,
-      tokens: credential ? asJson(credential.cachedTokens()) : [],
-      limits: asJson(settings.limits),
+      tokens: (credential?.cachedTokens() ?? []).map((token) => ({ repo: token.repo, access: token.access, permissions: token.permissions, expiresAt: token.expiresAt })),
+      limits: {
+        pushesPerSessionPerHour: settings.limits.pushesPerSessionPerHour,
+        writesPerSessionPerHour: settings.limits.writesPerSessionPerHour,
+        readsPerSessionPerHour: settings.limits.readsPerSessionPerHour,
+        writesPerHour: settings.limits.writesPerHour,
+      },
       caller,
     };
     if (!credential) return { ...base, error: credentialError ?? 'credential not loaded' };
@@ -380,7 +388,9 @@ export class GitHubBroker {
     return info.default_branch;
   }
 
+  /** Audits what was asked for (also when refused), then checks it against the Session's allowlist. */
   private allowedRepo(context: CallContext, repo: string): string {
+    context.audit.repo = repo.slice(0, 140);
     const allowed = requireAllowedRepo(context.entry, repo);
     context.audit.repo = allowed;
     return allowed;
@@ -402,6 +412,7 @@ export class GitHubBroker {
   private async push(context: CallContext): Promise<JsonObject> {
     const body = decodeBody(await context.call.readBody(PUSH_BODY_LIMIT), pushSchema);
     const repo = this.allowedRepo(context, body.repo);
+    context.audit.target = body.branch.slice(0, 140);
     const branch = namespacedBranch(context.entry, body.branch);
     context.audit.target = branch;
     const sha = body.sha ?? null;
@@ -441,6 +452,7 @@ export class GitHubBroker {
   private async createPull(context: CallContext): Promise<JsonObject> {
     const body = decodeBody(await context.call.readBody(BODY_LIMIT), pullCreateSchema);
     const repo = this.allowedRepo(context, body.repo);
+    context.audit.target = body.branch.slice(0, 140);
     const head = namespacedBranch(context.entry, body.branch);
     const base = body.base ?? await this.defaultBranch(context, repo);
     if (!validBranchName(base)) throw new BrokerError('bad-request', 'base is not a valid branch name');
@@ -474,17 +486,24 @@ export class GitHubBroker {
     if (headRepo !== repo.toLowerCase() || !inNamespace(context.entry, current.head.ref)) {
       throw new BrokerError('not-owner', `pull request #${pullNumber} is not from this Session's ${namespaceOf(context.entry)} branches`);
     }
-    const patch: JsonObject = {};
-    if (body.title !== undefined) patch.title = cleanTitle(body.title);
-    if (body.body !== undefined) patch.body = withFooter(text(body.body, 'body'), context.entry);
-    if (body.state !== undefined) patch.state = body.state;
-    if (Object.keys(patch).length === 0) throw new BrokerError('bad-request', 'nothing to change (title, body or state)');
-    context.audit.titleLength = typeof patch.title === 'string' ? patch.title.length : null;
-    context.audit.bodyLength = body.body?.length ?? null;
+    const patch = this.editPatch(context, body);
     const updated = decodeGitHubBody((await this.deps.rest.request('PATCH', `/repos/${repo}/pulls/${pullNumber}`, token, patch)).body, githubPullSchema, 'pull request');
     context.audit.githubId = updated.number;
     context.audit.githubUrl = updated.html_url ?? null;
     return { ok: true, number: updated.number, url: updated.html_url ?? null, state: updated.state ?? null, draft: updated.draft ?? null };
+  }
+
+  /** The fields a PATCH may change, with the caller's footer kept on a new body. */
+  private editPatch(context: CallContext, body: { title?: string; body?: string; state?: 'open' | 'closed' }): JsonObject {
+    const title = body.title === undefined ? undefined : cleanTitle(body.title);
+    const patch: JsonObject = {};
+    if (title !== undefined) patch.title = title;
+    if (body.body !== undefined) patch.body = withFooter(text(body.body, 'body'), context.entry);
+    if (body.state !== undefined) patch.state = body.state;
+    if (Object.keys(patch).length === 0) throw new BrokerError('bad-request', 'nothing to change (title, body or state)');
+    context.audit.titleLength = title?.length ?? null;
+    context.audit.bodyLength = body.body?.length ?? null;
+    return patch;
   }
 
   private async createIssue(context: CallContext): Promise<JsonObject> {
@@ -527,13 +546,7 @@ export class GitHubBroker {
     if (!carriesMarker(current.body, context.entry.sessionId)) {
       throw new BrokerError('not-owner', `issue #${issueNumber} was not opened by this Session`);
     }
-    const patch: JsonObject = {};
-    if (body.title !== undefined) patch.title = cleanTitle(body.title);
-    if (body.body !== undefined) patch.body = withFooter(text(body.body, 'body'), context.entry);
-    if (body.state !== undefined) patch.state = body.state;
-    if (Object.keys(patch).length === 0) throw new BrokerError('bad-request', 'nothing to change (title, body or state)');
-    context.audit.titleLength = typeof patch.title === 'string' ? patch.title.length : null;
-    context.audit.bodyLength = body.body?.length ?? null;
+    const patch = this.editPatch(context, body);
     const updated = decodeGitHubBody((await this.deps.rest.request('PATCH', `/repos/${repo}/issues/${issueNumber}`, token, patch)).body, githubIssueSchema, 'issue');
     context.audit.githubId = updated.number;
     context.audit.githubUrl = updated.html_url ?? null;

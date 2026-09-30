@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { promisify } from 'node:util';
+import { boundary, decodeBoundary } from '../../../../boundaryDecoder';
 import type { JsonObject, JsonValue } from '../../../../boundaryDecoder';
 import { MemoryAlertSink } from '../../alerts';
 import { mintCallerToken } from '../../callerAuth';
@@ -32,10 +33,15 @@ const PAT = 'github_pat_11FAKEFAKE0123456789_abcdefghijklmnopqrstuvwxyz';
 
 const S1 = entry('s1', 'bx_a', { label: 'One', baseUrl: 'https://rp-one.tail.ts.net', nodeId: 'nOne', githubRepos: ['acme/app'] });
 const S2 = entry('s2', 'bx_b', { label: 'Two', baseUrl: 'https://rp-two.tail.ts.net', nodeId: 'nTwo', githubRepos: ['acme/app'] });
-const NODES: Record<string, TailnetNode> = {
+const NODES = {
   s1: { stableId: 'nOne', name: 'rp-one.tail.ts.net', tags: ['tag:rp-session'] },
   s2: { stableId: 'nTwo', name: 'rp-two.tail.ts.net', tags: ['tag:rp-session'] },
-};
+} satisfies Record<string, TailnetNode>;
+
+const json = (value: JsonValue): JsonObject => decodeBoundary(value, boundary.jsonObject);
+const jsonList = (value: JsonValue | undefined): JsonObject[] => decodeBoundary(value, boundary.array(boundary.jsonObject));
+const auditLineSchema = boundary.object({ bundleSha: boundary.optional(boundary.nullable(boundary.string)), node: boundary.optional(boundary.nullable(boundary.string)) });
+const claimsSchema = boundary.object({ iat: boundary.number, exp: boundary.number, iss: boundary.string });
 
 const unusedApi: CoordinatorApi = {
   status: async () => ({ ok: false, code: 'unknown-host', message: '' }),
@@ -127,6 +133,7 @@ async function harness(options: { mode?: 'app' | 'pat' | 'off'; github?: JsonObj
     github: broker,
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  // SAFETY: listening on a TCP host and port, the server reports an AddressInfo.
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   return {
     fake,
@@ -141,7 +148,7 @@ async function harness(options: { mode?: 'app' | 'pat' | 'off'; github?: JsonObj
         headers: { Authorization: `Bearer ${mintCallerToken(SECRET, caller)}`, 'Content-Type': 'application/json' },
         body: body === undefined || method === 'GET' ? undefined : JSON.stringify(body),
       });
-      return { status: response.status, body: (await response.json()) as JsonObject };
+      return { status: response.status, body: json(await response.json()) };
     },
     async close() {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -207,7 +214,7 @@ describe('broker units', () => {
     const jwt = appJwt(APP_ID, loadAppPrivateKey(PRIVATE_PEM), now);
     const [header, payload, signature] = jwt.split('.');
     assert.deepEqual(JSON.parse(Buffer.from(header, 'base64url').toString()), { alg: 'RS256', typ: 'JWT' });
-    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString()) as { iat: number; exp: number; iss: string };
+    const claims = decodeBoundary(JSON.parse(Buffer.from(payload, 'base64url').toString()), claimsSchema);
     assert.equal(claims.iss, APP_ID);
     assert.equal(claims.iat, now / 1000 - 60);
     assert.equal(claims.exp, now / 1000 + 540);
@@ -277,6 +284,10 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     const peer = await h.call('s1', 'GET', 'status');
     assert.deepEqual(peer.body.caller, { sessionId: 's1', host: 'rp-one', namespace: 'cloud/rp-one/', repos: ['acme/app'] });
     assert.ok(!JSON.stringify(peer.body).includes('ghs_'));
+    // status is polled: the App, installations and repositories are cached, not re-minted per call.
+    const minted = h.fake.minted.length;
+    await h.call('user:red', 'GET', 'status');
+    assert.equal(h.fake.minted.length, minted);
   });
 
   it('push lands in cloud/<host>/<branch>, then fast-forwards; a non-fast-forward is refused unless forced', async () => {
@@ -423,7 +434,7 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
         headers: { Authorization: `Bearer ${mintCallerToken(SECRET, 's1')}` },
         body: JSON.stringify({ repo: 'acme/app', branch: 'stolen', sha: 'a'.repeat(40) }),
       });
-      const body = (await response.json()) as JsonObject;
+      const body = json(await response.json());
       assert.deepEqual([response.status, body.code], [403, 'caller-node-mismatch'], JSON.stringify(node));
     }
     assert.equal(h.fake.requests.length, calls);
@@ -468,7 +479,7 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     assert.equal(late.status, 200, JSON.stringify(late.body));
     assert.equal(count(), afterFirst + 1);
     const status = await h.call('user:red', 'GET', 'status');
-    assert.ok((status.body.tokens as JsonObject[]).some((token) => token.repo === 'acme/app' && token.access === 'write'));
+    assert.ok(jsonList(status.body.tokens).some((token) => token.repo === 'acme/app' && token.access === 'write'));
   });
 
   it('pull requests: head in the caller namespace, draft forced, marker footer; edits only on own PRs; never ready/merge', async () => {
@@ -556,14 +567,20 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     const text = fs.readFileSync(file, 'utf8');
     for (const token of h.fake.tokens.keys()) assert.ok(!text.includes(token));
     assert.ok(!text.includes('Does a thing') && !text.includes('bug found') && !text.includes('looking'));
-    const lines = text.trim().split('\n').map((line) => JSON.parse(line) as JsonObject);
+    const lines = text.trim().split('\n').map((line) => json(JSON.parse(line)));
     const refused = lines.find((line) => line.outcome === 'workflow-change-refused');
     assert.ok(refused && refused.callerId === 's1' && refused.label === 'One' && refused.repo === 'acme/app');
     assert.ok(lines.some((line) => line.outcome === 'caller-node-mismatch'));
+    // Refusals record what was asked for.
+    assert.ok(lines.some((line) => line.outcome === 'repo-not-allowed' && line.repo === 'acme/other'));
+    assert.ok(lines.some((line) => line.outcome === 'ref-outside-namespace' && line.target === 'refs/heads/master'));
     const push = lines.find((line) => line.endpoint === 'POST push' && line.outcome === 'ok');
-    assert.ok(push && typeof push.bundleSha === 'string' && typeof push.node === 'string' && String(push.node).startsWith('rp-one.tail.ts.net'));
+    assert.ok(push);
+    const pushed = decodeBoundary(push, auditLineSchema);
+    assert.match(pushed.bundleSha ?? '', /^[0-9a-f]{40}$/u);
+    assert.ok((pushed.node ?? '').startsWith('rp-one.tail.ts.net'));
     const audit = await h.call('user:red', 'GET', 'audit?limit=5');
-    assert.equal((audit.body.entries as JsonObject[]).length, 5);
+    assert.equal(jsonList(audit.body.entries).length, 5);
     const peer = await h.call('s1', 'GET', 'audit');
     assert.equal(peer.body.code, undefined);
   });

@@ -1,10 +1,10 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { createPublicKey, createVerify, randomBytes } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
+import type { AddressInfo } from 'node:net';
 import fs from 'node:fs';
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -73,11 +73,39 @@ export interface FakeRequestLog {
   status: number;
 }
 
+/** The request fields the fake reads (the broker is its only client). */
+interface RequestBody {
+  repositories?: string[];
+  permissions?: Permissions;
+  title?: string;
+  body?: string;
+  head?: string;
+  base?: string;
+  draft?: boolean;
+  labels?: string[];
+  state?: 'open' | 'closed';
+}
+
+interface TokenLookup {
+  kind: FakeRequestLog['auth'];
+  record?: TokenRecord;
+}
+
+interface JwtHeader {
+  alg?: string;
+}
+
+interface JwtClaims {
+  iss?: string | number;
+  iat?: number;
+  exp?: number;
+}
+
 export interface FakeGitHubOptions {
   root: string;
   appId?: string;
   /** PEM of the App's public key; without it, App endpoints answer 401. */
-  appPublicKey?: string | KeyObject;
+  appPublicKey?: string;
   installationId?: number;
   /** What the installation was granted. */
   installationPermissions?: Permissions;
@@ -86,7 +114,7 @@ export interface FakeGitHubOptions {
   now?: () => number;
 }
 
-const DEFAULT_PERMISSIONS: Permissions = { contents: 'write', issues: 'write', pull_requests: 'write', metadata: 'read' };
+const DEFAULT_PERMISSIONS = { contents: 'write', issues: 'write', pull_requests: 'write', metadata: 'read' } satisfies Permissions;
 
 export class FakeGitHub {
   readonly repos = new Map<string, RepoRecord>();
@@ -101,7 +129,7 @@ export class FakeGitHub {
   baseUrl = '';
 
   constructor(private readonly options: FakeGitHubOptions) {
-    this.appKey = options.appPublicKey ? (typeof options.appPublicKey === 'string' ? createPublicKey(options.appPublicKey) : options.appPublicKey) : null;
+    this.appKey = options.appPublicKey ? createPublicKey(options.appPublicKey) : null;
     this.now = options.now ?? (() => Date.now());
     fs.mkdirSync(options.root, { recursive: true });
   }
@@ -116,11 +144,12 @@ export class FakeGitHub {
 
   async start(port = 0, host = '127.0.0.1'): Promise<string> {
     this.server = http.createServer((request, response) => {
-      this.handle(request, response).catch((error: unknown) => {
-        if (!response.headersSent) this.json(response, 500, { message: error instanceof Error ? error.message : String(error) });
+      this.handle(request, response).catch((error: Error) => {
+        if (!response.headersSent) this.json(response, 500, { message: error.message });
       });
     });
     await new Promise<void>((resolve) => this.server?.listen(port, host, resolve));
+    // SAFETY: a server listening on a TCP host and port reports an AddressInfo (not a pipe name).
     const address = this.server.address() as AddressInfo;
     this.baseUrl = `http://${host}:${address.port}`;
     return this.baseUrl;
@@ -171,7 +200,10 @@ export class FakeGitHub {
     const repo = this.repos.get(fullName.toLowerCase());
     if (!repo) return {};
     const out = execFileSync('git', ['for-each-ref', '--format=%(refname) %(objectname)'], { cwd: repo.dir, env: gitEnv() }).toString();
-    return Object.fromEntries(out.split('\n').filter(Boolean).map((line) => line.split(' ') as [string, string]));
+    return Object.fromEntries(out.split('\n').filter(Boolean).map((line) => {
+      const [ref, sha] = line.split(' ');
+      return [ref, sha];
+    }));
   }
 
   // ---------------------------------------------------------------- dispatch
@@ -190,7 +222,7 @@ export class FakeGitHub {
     await this.rest(request, response, url);
   }
 
-  private snapshot(): Record<string, unknown> {
+  private snapshot() {
     return {
       repos: [...this.repos.values()].map((repo) => ({
         fullName: repo.fullName,
@@ -205,7 +237,7 @@ export class FakeGitHub {
     };
   }
 
-  private json(response: ServerResponse, status: number, body: unknown): void {
+  private json<Body>(response: ServerResponse, status: number, body: Body): void {
     response.writeHead(status, { 'Content-Type': 'application/json' });
     response.end(JSON.stringify(body));
   }
@@ -222,13 +254,13 @@ export class FakeGitHub {
     if (parts.length !== 3) return false;
     const [header, payload, signature] = parts;
     try {
-      const head = JSON.parse(Buffer.from(header, 'base64url').toString('utf8')) as { alg?: string };
-      const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { iss?: string | number; iat?: number; exp?: number };
+      const head: JwtHeader = JSON.parse(Buffer.from(header, 'base64url').toString('utf8'));
+      const claims: JwtClaims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
       if (head.alg !== 'RS256') return false;
       if (!createVerify('RSA-SHA256').update(`${header}.${payload}`).verify(this.appKey, Buffer.from(signature, 'base64url'))) return false;
       const now = Math.floor(this.now() / 1000);
       if (String(claims.iss) !== String(this.options.appId ?? '')) return false;
-      if (typeof claims.exp !== 'number' || typeof claims.iat !== 'number') return false;
+      if (claims.exp === undefined || claims.iat === undefined || !Number.isFinite(claims.exp) || !Number.isFinite(claims.iat)) return false;
       // GitHub: exp at most 10 minutes after iat, and not expired; iat not in the future.
       if (claims.exp <= now || claims.exp - claims.iat > 600 || claims.iat > now + 60) return false;
       return true;
@@ -237,7 +269,7 @@ export class FakeGitHub {
     }
   }
 
-  private tokenFor(raw: string | undefined): { kind: FakeRequestLog['auth']; record?: TokenRecord } {
+  private tokenFor(raw: string | undefined): TokenLookup {
     if (!raw) return { kind: 'none' };
     if (raw.split('.').length === 3 && raw.startsWith('ey')) return { kind: this.verifyJwt(raw) ? 'jwt' : 'invalid' };
     const record = this.tokens.get(raw);
@@ -332,11 +364,12 @@ export class FakeGitHub {
 
   // ---------------------------------------------------------------- REST
 
-  private async readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+  private async readJson(request: IncomingMessage): Promise<RequestBody> {
     const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(chunk as Buffer);
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const text = Buffer.concat(chunks).toString('utf8');
-    return text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    const parsed: RequestBody = text ? JSON.parse(text) : {};
+    return parsed;
   }
 
   private async rest(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
@@ -344,7 +377,7 @@ export class FakeGitHub {
     const bearer = /^(?:Bearer|token)\s+(\S+)$/iu.exec(request.headers.authorization ?? '')?.[1];
     const auth = this.tokenFor(bearer);
     const route = url.pathname;
-    const reply = (status: number, body: unknown) => {
+    const reply = <Body>(status: number, body: Body) => {
       this.log({ method, path: `${route}${url.search}`, auth: auth.kind, permissions: auth.record?.permissions, status });
       this.json(response, status, body);
     };
@@ -372,8 +405,8 @@ export class FakeGitHub {
       const mint = /^\/app\/installations\/(\d+)\/access_tokens$/u.exec(route);
       if (method === 'POST' && mint) {
         if (Number(mint[1]) !== this.installationId) return reply(404, { message: 'Not Found' });
-        const requestedRepos = Array.isArray(body.repositories) ? (body.repositories as string[]) : null;
-        const requested = (body.permissions ?? this.installationPermissions) as Permissions;
+        const requestedRepos = body.repositories ?? null;
+        const requested = body.permissions ?? this.installationPermissions;
         for (const [name, level] of Object.entries(requested)) {
           const has = this.installationPermissions[name];
           if (!has || (level === 'write' && has !== 'write')) {
@@ -382,14 +415,14 @@ export class FakeGitHub {
         }
         const installed = [...this.repos.values()];
         const repos = requestedRepos
-          ? requestedRepos.map((name) => installed.find((repo) => repo.fullName.split('/')[1].toLowerCase() === name.toLowerCase()))
+          ? installed.filter((repo) => requestedRepos.some((name) => repo.fullName.split('/')[1].toLowerCase() === name.toLowerCase()))
           : installed;
-        if (repos.some((repo) => !repo)) return reply(422, { message: 'There is at least one repository that does not exist or is not accessible to the parent installation.' });
+        if (requestedRepos && repos.length !== requestedRepos.length) return reply(422, { message: 'There is at least one repository that does not exist or is not accessible to the parent installation.' });
         const token = `ghs_fake${randomBytes(18).toString('hex')}`;
         const expiresAt = this.now() + (this.options.tokenTtlMs ?? 3_600_000);
         this.tokens.set(token, {
           kind: 'installation',
-          repos: requestedRepos ? repos.map((repo) => (repo as RepoRecord).fullName.toLowerCase()) : null,
+          repos: requestedRepos ? repos.map((repo) => repo.fullName.toLowerCase()) : null,
           permissions: requested,
           expiresAt,
         });
@@ -467,7 +500,7 @@ export class FakeGitHub {
     }
     if (rest === '/issues' && method === 'POST') {
       if (!need('issues', 'write')) return;
-      const labels = Array.isArray(body.labels) ? (body.labels as string[]) : [];
+      const labels = body.labels ?? [];
       if (labels.some((label) => !repo.labels.includes(label))) return reply(422, { message: 'Validation Failed' });
       const issue: IssueRecord = { number: repo.nextNumber++, title: String(body.title ?? ''), body: String(body.body ?? ''), labels, state: 'open' };
       repo.issues.push(issue);
@@ -493,8 +526,8 @@ export class FakeGitHub {
         if (sub === '' && method === 'GET') return need('pull_requests', 'read') ? reply(200, pullJson(pull)) : undefined;
         if (sub === '' && method === 'PATCH') {
           if (!need('pull_requests', 'write')) return;
-          if (typeof body.title === 'string') pull.title = body.title;
-          if (typeof body.body === 'string') pull.body = body.body;
+          if (body.title !== undefined) pull.title = body.title;
+          if (body.body !== undefined) pull.body = body.body;
           if (body.state === 'open' || body.state === 'closed') pull.state = body.state;
           return reply(200, pullJson(pull));
         }
@@ -524,8 +557,8 @@ export class FakeGitHub {
       if (sub === '' && method === 'PATCH') {
         if (!need('issues', 'write')) return;
         if (!issue) return reply(404, { message: 'Not Found' });
-        if (typeof body.title === 'string') issue.title = body.title;
-        if (typeof body.body === 'string') issue.body = body.body;
+        if (body.title !== undefined) issue.title = body.title;
+        if (body.body !== undefined) issue.body = body.body;
         if (body.state === 'open' || body.state === 'closed') issue.state = body.state;
         return reply(200, issueJson(issue));
       }
@@ -593,9 +626,10 @@ async function main(argv: string[]): Promise<void> {
   console.log(JSON.stringify({ apiBaseUrl: base, gitBaseUrl: base, root, repos: [...fake.repos.keys()] }));
 }
 
-if (typeof require !== 'undefined' && require.main === module) {
-  main(process.argv.slice(2)).catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
+// Run as a program (the live proof copies the compiled file to a box); tests import it instead.
+if (/fakeGitHub\.js$/u.test(process.argv[1] ?? '')) {
+  main(process.argv.slice(2)).catch((error: Error) => {
+    console.error(error.message);
     process.exitCode = 1;
   });
 }

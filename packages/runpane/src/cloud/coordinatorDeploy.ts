@@ -332,16 +332,25 @@ function idleStopConfig(deployment: CoordinatorDeployment): IdleStopConfig {
 }
 
 /** Where `coordinator github set` puts the App key or the PAT on the coordinator (0600, in a 0700 dir). */
-export const COORDINATOR_GITHUB_DIR = `${COORDINATOR_HOME}/github`;
+const COORDINATOR_GITHUB_DIR = `${COORDINATOR_HOME}/github`;
+
+/** The coordinator config's `github` section (coordinator/config.ts parses it on the box). */
+interface CoordinatorGitHubConfigFile {
+  mode: 'app' | 'pat';
+  allowReadyPulls: boolean;
+  appId?: string | null;
+  privateKeyFile?: string;
+  installationId?: number | null;
+  patFile?: string;
+  apiBaseUrl?: string;
+  gitBaseUrl?: string;
+}
 
 /** The broker section of the coordinator config: settings from this machine, credential paths on the box. */
-function githubConfig(deployment: CoordinatorDeployment): Record<string, string | number | boolean | null> | null {
+function githubConfig(deployment: CoordinatorDeployment): CoordinatorGitHubConfigFile | null {
   const github = deployment.github;
   if (!github) return null;
-  const config: Record<string, string | number | boolean | null> = {
-    mode: github.mode,
-    allowReadyPulls: github.allowReadyPulls,
-  };
+  const config: CoordinatorGitHubConfigFile = { mode: github.mode, allowReadyPulls: github.allowReadyPulls };
   if (github.mode === 'app') {
     config.appId = github.appId ?? null;
     config.privateKeyFile = `${COORDINATOR_GITHUB_DIR}/app.pem`;

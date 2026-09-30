@@ -1,6 +1,6 @@
 import type { KeyObject } from 'node:crypto';
 import { boundary, decodeBoundary } from '../../../boundaryDecoder';
-import type { BoundarySchema } from '../../../boundaryDecoder';
+import type { BoundarySchema, JsonObject, JsonValue } from '../../../boundaryDecoder';
 import type { Clock } from '../types';
 import { BrokerError } from './policy';
 import { appJwt, loadAppPrivateKey } from './rest';
@@ -11,25 +11,37 @@ import type { GitHubRest } from './rest';
 // one repository and the permissions that call needs) or a fine-grained PAT. Tokens live in memory only.
 
 type Level = 'read' | 'write';
-export type PermissionName = 'contents' | 'issues' | 'pull_requests' | 'metadata' | 'checks' | 'statuses' | 'actions';
-export type Permissions = Partial<Record<PermissionName, Level>>;
+const PERMISSION_NAMES = ['contents', 'issues', 'pull_requests', 'metadata', 'checks', 'statuses', 'actions'] as const;
 
-export interface RepoToken {
+/** The GitHub App permissions the broker ever asks for (a token is narrowed to a subset per call). */
+export interface Permissions {
+  contents?: Level;
+  issues?: Level;
+  pull_requests?: Level;
+  metadata?: Level;
+  checks?: Level;
+  statuses?: Level;
+  actions?: Level;
+}
+
+interface RepoToken {
   token: string;
   /** ISO time; null for a PAT (its expiry is GitHub's business). */
   expiresAt: string | null;
 }
 
-export interface CredentialStatus {
+interface CredentialStatus {
   mode: 'app' | 'pat';
   app: { id: string; slug: string | null; installationIds: number[] } | null;
   /** Repositories the credential can reach, when GitHub can list them (App mode). */
   repos: string[] | null;
 }
 
-export interface CachedTokenInfo {
+interface CachedTokenInfo {
   repo: string;
   access: Level;
+  /** e.g. "contents:write" (metadata:read is implied). */
+  permissions: string;
   expiresAt: string | null;
 }
 
@@ -45,9 +57,18 @@ export interface GitHubCredential {
 const TOKEN_REUSE_MARGIN_MS = 5 * 60_000;
 const INSTALLATION_CACHE_MS = 10 * 60_000;
 
+const grantedLevel = boundary.optional(boundary.string);
 const installationSchema = boundary.object({
   id: boundary.number,
-  permissions: boundary.optional(boundary.jsonObject),
+  permissions: boundary.optional(boundary.object({
+    contents: grantedLevel,
+    issues: grantedLevel,
+    pull_requests: grantedLevel,
+    metadata: grantedLevel,
+    checks: grantedLevel,
+    statuses: grantedLevel,
+    actions: grantedLevel,
+  })),
 });
 const accessTokenSchema = boundary.object({ token: boundary.nonEmptyString, expires_at: boundary.nonEmptyString });
 const appSchema = boundary.object({ slug: boundary.optional(boundary.string) });
@@ -60,7 +81,7 @@ interface Installation {
   fetchedAt: number;
 }
 
-function decodeGitHub<Value>(value: unknown, schema: BoundarySchema<Value>, what: string): Value {
+function decodeGitHub<Value>(value: JsonValue | undefined, schema: BoundarySchema<Value>, what: string): Value {
   try {
     return decodeBoundary(value, schema);
   } catch (cause) {
@@ -69,11 +90,11 @@ function decodeGitHub<Value>(value: unknown, schema: BoundarySchema<Value>, what
 }
 
 function accessOf(permissions: Permissions): Level {
-  return Object.values(permissions).includes('write') ? 'write' : 'read';
+  return PERMISSION_NAMES.some((name) => permissions[name] === 'write') ? 'write' : 'read';
 }
 
 function permissionKey(repo: string, permissions: Permissions): string {
-  return `${repo.toLowerCase()}|${Object.entries(permissions).sort(([a], [b]) => a.localeCompare(b)).map(([name, level]) => `${name}:${level}`).join(',')}`;
+  return `${repo.toLowerCase()}|${permissionLabel(permissions)}`;
 }
 
 /**
@@ -83,8 +104,9 @@ function permissionKey(repo: string, permissions: Permissions): string {
  */
 function narrow(requested: Permissions, granted: Permissions): Permissions {
   const result: Permissions = { metadata: 'read' };
-  for (const [name, level] of Object.entries(requested) as Array<[PermissionName, Level]>) {
-    if (name === 'metadata') continue;
+  for (const name of PERMISSION_NAMES) {
+    const level = requested[name];
+    if (name === 'metadata' || !level) continue;
     const has = granted[name];
     if (!has || (level === 'write' && has !== 'write')) {
       throw new BrokerError('github-error', `the GitHub App installation lacks the "${name}: ${level}" permission this call needs`, { status: 403, message: `missing ${name}:${level}` });
@@ -94,12 +116,26 @@ function narrow(requested: Permissions, granted: Permissions): Permissions {
   return result;
 }
 
+/** The permissions as the JSON GitHub's access_tokens endpoint takes. */
+function permissionsJson(permissions: Permissions): JsonObject {
+  const json: JsonObject = {};
+  for (const name of PERMISSION_NAMES) {
+    const level = permissions[name];
+    if (level) json[name] = level;
+  }
+  return json;
+}
+
+function permissionLabel(permissions: Permissions): string {
+  return PERMISSION_NAMES.filter((name) => name !== 'metadata' && permissions[name]).map((name) => `${name}:${permissions[name] ?? ''}`).join(',') || 'metadata:read';
+}
+
 export class GitHubAppCredential implements GitHubCredential {
   readonly mode = 'app' as const;
   private readonly key: KeyObject;
   private readonly installations = new Map<string, Installation>();
-  private readonly tokens = new Map<string, { repo: string; access: Level; token: string; expiresAt: string }>();
-  private slug: string | null = null;
+  private readonly tokens = new Map<string, { repo: string; access: Level; permissions: string; token: string; expiresAt: string }>();
+  private described: { at: number; status: CredentialStatus } | null = null;
 
   constructor(
     private readonly options: { appId: string; privateKeyPem: string; installationId: number | null },
@@ -131,8 +167,9 @@ export class GitHubAppCredential implements GitHubCredential {
       throw new BrokerError('repo-not-allowed', `${repo} belongs to installation ${decoded.id}, not the configured ${this.options.installationId}`);
     }
     const granted: Permissions = {};
-    for (const [name, level] of Object.entries(decoded.permissions ?? {})) {
-      if (level === 'read' || level === 'write') granted[name as PermissionName] = level;
+    for (const name of PERMISSION_NAMES) {
+      const level = decoded.permissions?.[name];
+      if (level === 'read' || level === 'write') granted[name] = level;
     }
     const installation = { id: decoded.id, granted, fetchedAt: this.clock.now() };
     this.installations.set(repo.toLowerCase(), installation);
@@ -149,10 +186,10 @@ export class GitHubAppCredential implements GitHubCredential {
     }
     const response = await this.rest.request('POST', `/app/installations/${installation.id}/access_tokens`, this.jwt(), {
       repositories: [repo.split('/')[1]],
-      permissions: wanted,
+      permissions: permissionsJson(wanted),
     });
     const minted = decodeGitHub(response.body, accessTokenSchema, 'installation token');
-    this.tokens.set(cacheKey, { repo, access: accessOf(wanted), token: minted.token, expiresAt: minted.expires_at });
+    this.tokens.set(cacheKey, { repo, access: accessOf(wanted), permissions: permissionLabel(wanted), token: minted.token, expiresAt: minted.expires_at });
     return { token: minted.token, expiresAt: minted.expires_at };
   }
 
@@ -160,13 +197,13 @@ export class GitHubAppCredential implements GitHubCredential {
     const now = this.clock.now();
     return [...this.tokens.values()]
       .filter((entry) => Date.parse(entry.expiresAt) > now)
-      .map(({ repo, access, expiresAt }) => ({ repo, access, expiresAt }));
+      .map(({ repo, access, permissions, expiresAt }) => ({ repo, access, permissions, expiresAt }));
   }
 
+  /** App, installations and repositories; cached for the installation-cache period (status is polled). */
   async describe(): Promise<CredentialStatus> {
-    if (this.slug === null) {
-      this.slug = decodeGitHub((await this.rest.request('GET', '/app', this.jwt())).body, appSchema, 'app').slug ?? null;
-    }
+    if (this.described && this.clock.now() - this.described.at < INSTALLATION_CACHE_MS) return this.described.status;
+    const slug = decodeGitHub((await this.rest.request('GET', '/app', this.jwt())).body, appSchema, 'app').slug ?? null;
     const installationIds = this.options.installationId !== null
       ? [this.options.installationId]
       : decodeGitHub((await this.rest.request('GET', '/app/installations?per_page=100', this.jwt())).body, installationListSchema, 'installation list').map((item) => item.id);
@@ -177,7 +214,9 @@ export class GitHubAppCredential implements GitHubCredential {
       const listed = decodeGitHub((await this.rest.request('GET', '/installation/repositories?per_page=100', minted.token)).body, repositoriesSchema, 'repository list');
       repos.push(...listed.repositories.map((repo) => repo.full_name));
     }
-    return { mode: 'app', app: { id: this.options.appId, slug: this.slug, installationIds }, repos };
+    const status: CredentialStatus = { mode: 'app', app: { id: this.options.appId, slug, installationIds }, repos };
+    this.described = { at: this.clock.now(), status };
+    return status;
   }
 }
 

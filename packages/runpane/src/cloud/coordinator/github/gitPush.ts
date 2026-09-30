@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -16,9 +16,9 @@ import { BrokerError, isSha, parseBundleHeader, refusedPaths } from './policy';
  * prerequisites shallowly into a throwaway repository, which has no history to find a merge base in.
  */
 
-export type PushOutcome = 'created' | 'fast-forward' | 'forced' | 'up-to-date';
+type PushOutcome = 'created' | 'fast-forward' | 'forced' | 'up-to-date';
 
-export interface PushRequest {
+interface PushRequest {
   /** owner/name */
   repo: string;
   /** e.g. https://github.com/owner/name.git */
@@ -34,7 +34,7 @@ export interface PushRequest {
   force: boolean;
 }
 
-export interface PushResult {
+interface PushResult {
   sha: string;
   outcome: PushOutcome;
   mergeBase: string | null;
@@ -84,10 +84,18 @@ export class GitPusher {
       ...args,
     ];
     return new Promise((resolve) => {
-      execFile(this.gitBin, full, { cwd: dir, env, timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8' }, (error, stdout, stderr) => {
-        const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
-        resolve({ code, stdout, stderr: scrub(stderr || (error && !stderr ? error.message : ''), token) });
-      });
+      const child = spawn(this.gitBin, full, { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'] });
+      const out: Buffer[] = [];
+      const err: Buffer[] = [];
+      child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
+      child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
+      const timer = setTimeout(() => child.kill('SIGKILL'), GIT_TIMEOUT_MS);
+      const finish = (code: number, extra = '') => {
+        clearTimeout(timer);
+        resolve({ code, stdout: Buffer.concat(out).toString('utf8'), stderr: scrub(`${Buffer.concat(err).toString('utf8')}${extra}`, token) });
+      };
+      child.on('error', (error) => finish(127, error.message));
+      child.on('close', (code) => finish(code ?? 1));
     });
   }
 
@@ -123,13 +131,14 @@ export class GitPusher {
     try {
       dir = await this.prepareMirror(request);
     } catch (error) {
-      if (!(error instanceof GitStepError) || error.step === 'config') throw toBrokerError(error);
+      if (!(error instanceof GitStepError)) throw error;
+      if (error.step === 'config') throw stepFailure(error);
       // A damaged mirror is only a cache: rebuild it once.
       await fs.rm(this.repoDir(request.repo), { recursive: true, force: true });
       try {
         dir = await this.prepareMirror(request);
       } catch (retryError) {
-        throw toBrokerError(retryError);
+        throw retryError instanceof GitStepError ? stepFailure(retryError) : retryError;
       }
     }
     const incoming = `refs/runpane/incoming-${randomBytes(6).toString('hex')}`;
@@ -217,9 +226,9 @@ class GitStepError extends Error {
   }
 }
 
-function toBrokerError(error: unknown): BrokerError {
-  if (error instanceof BrokerError) return error;
-  const message = error instanceof Error ? error.message : String(error);
+/** A failed fetch from GitHub, as the broker reports it (403/404 when git's message says so). */
+function stepFailure(error: GitStepError): BrokerError {
+  const { message } = error;
   const status = /\b403\b|denied|Authentication failed/iu.test(message) ? 403 : /\b404\b|not found/iu.test(message) ? 404 : 0;
   return new BrokerError('github-error', message, { status, message });
 }

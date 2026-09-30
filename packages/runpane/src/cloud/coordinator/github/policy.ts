@@ -3,7 +3,7 @@ import type { DirectoryEntry } from '../types';
 // The broker's allowlist rules, kept free of I/O so each one is tested on its own
 // (phase3-design.md §3). Everything not allowed here is refused.
 
-export type BrokerErrorCode =
+type BrokerErrorCode =
   | 'github-disabled'
   | 'repo-not-allowed'
   | 'ref-outside-namespace'
@@ -20,7 +20,7 @@ export type BrokerErrorCode =
   | 'broker-rate-limited'
   | 'github-error';
 
-const STATUS: Record<BrokerErrorCode, number> = {
+const STATUS = {
   'github-disabled': 503,
   'repo-not-allowed': 403,
   'ref-outside-namespace': 403,
@@ -36,7 +36,7 @@ const STATUS: Record<BrokerErrorCode, number> = {
   'github-rate-limited': 429,
   'broker-rate-limited': 429,
   'github-error': 502,
-};
+} as const satisfies Record<BrokerErrorCode, number>;
 
 export class BrokerError extends Error {
   readonly status: number;
@@ -53,7 +53,7 @@ export class BrokerError extends Error {
 }
 
 /** Paths a push may never change: GitHub runs these with the repository's secrets. */
-export const REFUSED_PATH_PREFIXES = ['.github/workflows/'] as const;
+const REFUSED_PATH_PREFIXES = ['.github/workflows/'] as const;
 
 const REPO_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/u;
 const BRANCH_PATTERN = /^[A-Za-z0-9._/-]{1,100}$/u;
@@ -143,7 +143,7 @@ export function withFooter(text: string | undefined, entry: DirectoryEntry): str
 }
 
 export function carriesMarker(body: string | null | undefined, sessionId: string): boolean {
-  return typeof body === 'string' && body.includes(marker(sessionId));
+  return (body ?? '').includes(marker(sessionId));
 }
 
 /** Titles never carry markers either (they would only confuse readers). */
@@ -170,8 +170,16 @@ const READ_PATHS: readonly RegExp[] = [
 
 const READ_QUERY_KEYS = new Set(['state', 'per_page', 'page', 'branch', 'head', 'base', 'sort', 'direction', 'labels', 'event', 'status', 'since']);
 
+interface ReadRequest {
+  repo: string;
+  /** The REST path under /repos/<owner>/<name>/. */
+  path: string;
+  /** The allowlisted query, with its leading "?" (or empty). */
+  query: string;
+}
+
 /** Splits `<owner>/<name>/<path>` and checks the path and query against the read allowlist. */
-export function parseReadPath(rest: string, query: URLSearchParams): { repo: string; path: string; query: string } {
+export function parseReadPath(rest: string, query: URLSearchParams): ReadRequest {
   const parts = rest.split('/');
   if (parts.length < 3) throw new BrokerError('bad-request', 'read paths look like /cloud/github/read/<owner>/<name>/<path>');
   const repo = parseRepo(`${parts[0]}/${parts[1]}`);
@@ -190,7 +198,7 @@ export function parseReadPath(rest: string, query: URLSearchParams): { repo: str
 
 // ---------------------------------------------------------------- git bundles
 
-export interface BundleHeader {
+interface BundleHeader {
   version: 2 | 3;
   prerequisites: string[];
   refs: Array<{ sha: string; name: string }>;

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { boundary, decodeBoundary } from '../../../boundaryDecoder';
 import type { JsonObject } from '../../../boundaryDecoder';
 import type { Clock } from '../types';
 
@@ -66,7 +67,7 @@ export class JsonlGitHubAudit implements GitHubAudit {
     const entries: JsonObject[] = [];
     for (const line of text.split('\n').filter(Boolean).slice(-Math.max(1, limit))) {
       try {
-        entries.push(JSON.parse(line) as JsonObject);
+        entries.push(decodeBoundary(JSON.parse(line), boundary.jsonObject));
       } catch {
         // a partial first line from the tail read
       }

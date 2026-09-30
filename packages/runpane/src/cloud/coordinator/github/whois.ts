@@ -28,7 +28,7 @@ const IPV4_TAILNET = /^100\.(?:\d{1,3})\.(?:\d{1,3})\.(?:\d{1,3})$/u;
 const IPV6_TAILNET = /^fd7a:115c:a1e0:[0-9a-f:]+$/iu;
 
 /** Strips the IPv4-mapped prefix a dual-stack socket reports (`::ffff:100.x.y.z`). */
-export function normalizeAddress(address: string): string {
+function normalizeAddress(address: string): string {
   return address.replace(/^::ffff:/iu, '');
 }
 

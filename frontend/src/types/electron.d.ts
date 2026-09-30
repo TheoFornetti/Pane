@@ -450,6 +450,8 @@ interface ElectronAPI {
      */
     onTerminalPtyReady: (callback: (data: { sessionId: string; panelId: string; ptyId: string }) => void) => () => void;
     onUncleanShutdownDetected: (callback: () => void) => () => void;
+    /** config.json changed outside the app, e.g. `runpane cloud` saved a remote host. */
+    onConfigChanged: (callback: () => void) => () => void;
     onMainLog: (callback: (level: string, message: string) => void) => () => void;
     onVersionUpdateAvailable: (callback: (versionInfo: VersionUpdateInfo) => void) => () => void;
     

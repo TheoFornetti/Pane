@@ -3,6 +3,7 @@ import { boundary, decodeBoundary } from '../boundaryDecoder';
 import type { CloudDeps } from './commands';
 import type { SandboxHandle } from './provider';
 import { findHost, type CloudHostRecord } from './store';
+import { hostProvider } from './wallet';
 
 /**
  * `runpane cloud secrets set|list|rm`: environment variables for a cloud Session's agents (BYOK).
@@ -388,7 +389,7 @@ export async function runSecretsCommand(argv: readonly string[], deps: CloudDeps
 }
 
 async function runningSandbox(record: CloudHostRecord, deps: CloudDeps): Promise<SandboxHandle> {
-  const provider = deps.createProvider(await deps.store.readCredentials());
+  const provider = await hostProvider(deps, await deps.store.readCredentials(), record);
   const sandboxId = record.profile.cloud.sandboxId;
   const sandbox = await provider.get(sandboxId);
   const host = record.profile.cloud.hostname;

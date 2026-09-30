@@ -4,6 +4,7 @@ import type { CloudDeps } from './commands';
 import type { GitHubApi } from './githubApi';
 import { MAX_SANDBOX_READ_BYTES, type CloudProvider, type SandboxHandle } from './provider';
 import { findHost, type CloudHostRecord, type GitHubGrant, type GitHubTokenSource } from './store';
+import { hostProvider } from './wallet';
 
 /**
  * `runpane cloud github connect|disconnect|list` and `runpane cloud git push`: GitHub access for cloud
@@ -432,7 +433,7 @@ async function githubConnect(argv: readonly string[], deps: CloudDeps): Promise<
   const existing = record.meta.github?.find((grant) => grant.repo.toLowerCase() === repo.toLowerCase());
   if (existing) throw new Error(`${host} is already connected to ${existing.repo} (${existing.mode}). Run runpane cloud github disconnect ${host} --repo ${existing.repo} first.`);
 
-  const provider = deps.createProvider(await deps.store.readCredentials());
+  const provider = await hostProvider(deps, await deps.store.readCredentials(), record);
   const handle = await requireRunning(record, provider);
   const progress = (line: string) => (json ? deps.stderr(`  - ${line}`) : deps.stdout(`  - ${line}`));
   if (readWrite) deps.stderr(`runpane cloud: --read-write lets anything in ${host} push to any branch of ${repo}, including its default branch. Prefer the read-only default and runpane cloud git push.`);
@@ -463,7 +464,7 @@ async function githubDisconnect(argv: readonly string[], deps: CloudDeps): Promi
   if (matches.length > 1) throw new Error(`${host} is connected to ${matches.map((grant) => grant.repo).join(', ')}; name one with --repo.`);
   const grant = matches[0];
 
-  const provider = deps.createProvider(await deps.store.readCredentials());
+  const provider = await hostProvider(deps, await deps.store.readCredentials(), record);
   const sandbox = await provider.get(record.profile.cloud.sandboxId);
   const running = sandbox.state === 'running';
   let keyDeleted: boolean | null = null;
@@ -553,7 +554,7 @@ async function gitPush(argv: readonly string[], deps: CloudDeps): Promise<number
   const json = flags.booleans.has('--json');
   const progress = (line: string) => (json ? deps.stderr(`  - ${line}`) : deps.stdout(`  - ${line}`));
 
-  const provider = deps.createProvider(await deps.store.readCredentials());
+  const provider = await hostProvider(deps, await deps.store.readCredentials(), record);
   const handle = await requireRunning(record, provider);
   const xfer = `${XFER_DIR}/${randomBytes(6).toString('hex')}`;
   try {

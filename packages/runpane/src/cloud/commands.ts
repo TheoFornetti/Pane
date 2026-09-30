@@ -11,6 +11,7 @@ import type { GitHubPort } from './githubApi';
 import { decodePairingCode } from './pairing';
 import { pushPeersFile, runPeersCommand } from './peers';
 import { runSecretsCommand } from './secrets';
+import { describeOrg, hostProvider, resolveBoatOrg } from './wallet';
 import type { BootstrapPort, TailnetDevice, TailnetPort } from './ports';
 import type { CloudProvider, CloudSandbox, CloudSize } from './provider';
 import {
@@ -29,7 +30,8 @@ import {
 /** Everything the cloud commands touch outside this module, so tests can swap in fakes. */
 export interface CloudDeps {
   store: CloudStore;
-  createProvider(credentials: CloudCredentials): CloudProvider;
+  /** A provider whose calls are scoped to `org` (a boat wallet id, name or `personal`); none: boat's active wallet. */
+  createProvider(credentials: CloudCredentials, org?: string): CloudProvider;
   bootstrap: BootstrapPort;
   /** Reads a secret from a file path, or stdin for "-". The value is never echoed. */
   readSecretFile(path: string): Promise<string>;
@@ -169,6 +171,12 @@ async function runSetup(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const paneSource = paneSourceFromArgs(args);
   if (paneSource) nextSettings.paneSource = paneSource;
 
+  if (args.boatOrg) {
+    if (!credentials.boat) throw new Error('--boat-org needs the boat API key: pass --boat-key-file too, or run setup with it first.');
+    nextSettings.boatOrg = await resolveBoatOrg(deps.createProvider(credentials), args.boatOrg);
+    changed.push('boat wallet');
+  }
+
   const checks: Record<string, string> = {};
   if (!args.noVerify) {
     if (credentials.boat) {
@@ -206,6 +214,7 @@ async function runSetup(args: CloudArgs, deps: CloudDeps): Promise<number> {
     deps.stdout(`  Anthropic API key:       ${summary.configured.anthropic ? 'set' : 'not set (optional)'}`);
     deps.stdout(`  Claude token:            ${summary.configured.claude ? 'set' : 'not set (optional)'}`);
     deps.stdout(`  golden snapshot:         ${nextSettings.goldenSnapshot ?? 'none (plain image; bootstrap installs everything)'}`);
+    deps.stdout(`  boat wallet (new):       ${nextSettings.boatOrg ? describeOrg(nextSettings.boatOrg) : "boat's active wallet (pin one with --boat-org <org|personal>)"}`);
     if (!summary.configured.boat || !summary.configured.tailscale) {
       deps.stdout('Next: runpane cloud setup --boat-key-file <path|-> --tailscale-client-id <id> --tailscale-secret-file <path|->');
     } else {
@@ -234,8 +243,12 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   if (!args.yes) {
     throw new Error('runpane cloud new creates a billed cloud sandbox. Rerun with --yes to confirm.');
   }
-  const { credentials, provider, tailnetCredentials } = await loadCloud(deps);
   const settings = await deps.store.readSettings();
+  const loaded = await loadCloud(deps);
+  // The wallet is fixed at create, so it is chosen explicitly: --boat-org, else the saved one.
+  const wantedOrg = args.boatOrg ? await resolveBoatOrg(loaded.provider, args.boatOrg) : settings.boatOrg;
+  const { credentials, tailnetCredentials } = loaded;
+  const provider = wantedOrg ? deps.createProvider(credentials, wantedOrg.id) : loaded.provider;
   const namePrefix = args.namePrefix ?? settings.namePrefix ?? DEFAULT_NAME_PREFIX;
   const size: CloudSize = args.size ?? settings.size ?? 'default';
   const fromSnapshot = args.noGolden ? undefined : args.fromSnapshot ?? settings.goldenSnapshot;
@@ -272,9 +285,12 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     name: hostname,
     size,
     fromSnapshot,
+    org: wantedOrg?.id,
     idempotencyKey: `runpane-cloud-new-${sessionId}`,
   });
   timings.createMs = deps.now() - started;
+  // Record the wallet boat actually billed (its answer, not our request); unknown until a later get.
+  const billedOrg = sandbox.org ?? wantedOrg;
 
   // Record the host before provisioning, so a failure part-way still leaves something `destroy` can find.
   const record: CloudHostRecord = {
@@ -296,6 +312,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       paneSource,
     },
   };
+  if (billedOrg) record.meta.boatOrg = billedOrg;
   if (args.repo) {
     record.meta.repo = { url: args.repo };
     if (args.ref) record.meta.repo.ref = args.ref;
@@ -306,7 +323,14 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     // The provider could not name it at create time: the record above already holds its id, so a
     // failure here still goes through the cleanup below instead of leaking an unnamed sandbox.
     if (sandbox.name !== hostname) await provider.rename(sandbox.id, hostname);
-    await waitForSandbox(provider, sandbox.id, 'running', SANDBOX_READY_TIMEOUT_MS, deps);
+    const ready = await waitForSandbox(provider, sandbox.id, 'running', SANDBOX_READY_TIMEOUT_MS, deps);
+    if (ready.org && ready.org.id !== record.meta.boatOrg?.id) {
+      record.meta.boatOrg = ready.org;
+      await deps.store.writeHost(record);
+    }
+    if (wantedOrg && record.meta.boatOrg && record.meta.boatOrg.id !== wantedOrg.id) {
+      throw new Error(`boat billed ${describeOrg(record.meta.boatOrg)} instead of the requested ${describeOrg(wantedOrg)}.`);
+    }
     timings.readyMs = deps.now() - started;
     progress(`runpane cloud: sandbox ${sandbox.id} is up; joining the tailnet and installing the Pane daemon...`);
     let cloneRepo = record.meta.repo;
@@ -398,6 +422,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   } else {
     deps.stdout(`runpane cloud: ${hostname} is ready at ${record.profile.baseUrl} (${Math.round(timings.totalMs / 1000)} s).`);
     deps.stdout(`  sandbox: ${sandbox.id}   tailnet node: ${record.profile.cloud.nodeId}`);
+    deps.stdout(`  boat wallet: ${record.meta.boatOrg ? describeOrg(record.meta.boatOrg) : 'unknown'}${wantedOrg ? '' : " (boat's active wallet; pin one with runpane cloud setup --boat-org <org|personal>)"}`);
     deps.stdout(`  pairing code saved to ${record.meta.pairingPath} (0600; not printed).`);
     if (hostTransport(record) === 'http') {
       deps.stdout(`  transport: ${HTTP_TRANSPORT_NOTE}. Let's Encrypt refused this node's certificate (50 per week per tailnet).`);
@@ -441,10 +466,20 @@ function randomSessionId(): string {
 // ---------------------------------------------------------------- list / status
 
 async function runList(args: CloudArgs, deps: CloudDeps): Promise<number> {
-  const { provider } = await loadCloud(deps);
+  const listSettings = await deps.store.readSettings();
+  const { credentials } = await loadCloud(deps);
+  // boat lists your own sandboxes in every wallet's scope; the saved wallet adds nothing hidden.
+  const provider = deps.createProvider(credentials, listSettings.boatOrg?.id);
   const records = await deps.store.listHosts();
   const sandboxes = await provider.list();
   const byId = new Map(sandboxes.map((sandbox) => [sandbox.id, sandbox]));
+  for (const record of records) {
+    const listed = byId.get(record.profile.cloud.sandboxId)?.org;
+    if (listed && listed.id !== record.meta.boatOrg?.id) {
+      record.meta.boatOrg = listed;
+      await deps.store.writeHost(record);
+    }
+  }
   const rows = records.map((record) => {
     const sandbox = byId.get(record.profile.cloud.sandboxId);
     return {
@@ -471,8 +506,8 @@ async function runList(args: CloudArgs, deps: CloudDeps): Promise<number> {
   if (rows.length === 0) {
     deps.stdout('No cloud hosts. Create one with: runpane cloud new --label "My Session" --yes');
   } else {
-    deps.stdout(formatTable(['HOST', 'LABEL', 'STATE', 'SIZE', 'SANDBOX', 'URL'],
-      rows.map((row) => [row.hostname, row.label, row.state, row.size, row.sandboxId, row.baseUrl || '-'])));
+    deps.stdout(formatTable(['HOST', 'LABEL', 'STATE', 'SIZE', 'WALLET', 'SANDBOX', 'URL'],
+      rows.map((row) => [row.hostname, row.label, row.state, row.size, row.boatOrg?.name ?? '?', row.sandboxId, row.baseUrl || '-'])));
   }
   if (unmanaged.length > 0) {
     deps.stdout('');
@@ -491,14 +526,15 @@ interface HostStatusReport {
 }
 
 async function runStatus(args: CloudArgs, deps: CloudDeps): Promise<number> {
-  const { provider, tailnet } = await loadCloudWithTailnet(deps);
   const record = findHost(await deps.store.listHosts(), requiredHost(args));
+  const { provider, tailnet } = await loadCloudWithTailnet(deps, record);
   const report = await hostStatus(record, provider, tailnet, deps);
   if (args.json) {
     deps.stdout(JSON.stringify({ ok: true, ...report }, null, 2));
   } else {
     deps.stdout(`${record.profile.cloud.hostname}: ${report.status}`);
     deps.stdout(`  sandbox ${record.profile.cloud.sandboxId}: ${report.sandbox.providerState}${report.sandbox.size ? ` (${report.sandbox.size})` : ''}`);
+    deps.stdout(`  boat wallet: ${record.meta.boatOrg ? describeOrg(record.meta.boatOrg) : 'unknown'}`);
     deps.stdout(`  transport: ${hostTransport(record) === 'http' ? HTTP_TRANSPORT_NOTE : 'https (Tailscale Serve)'}`);
     const device = report.tailnet.devices[0];
     deps.stdout(`  tailnet: ${device ? describeDevice(device) : 'no device'}${report.tailnet.sameNode === false ? ' (node id changed!)' : ''}`);
@@ -551,8 +587,8 @@ async function hostStatus(record: CloudHostRecord, provider: CloudProvider, tail
 
 async function runStop(args: CloudArgs, deps: CloudDeps): Promise<number> {
   if (!args.yes) throw new Error('runpane cloud stop powers the sandbox off. Rerun with --yes to confirm.');
-  const { provider } = await loadCloud(deps);
   const record = findHost(await deps.store.listHosts(), requiredHost(args));
+  const { provider } = await loadCloud(deps, record);
   const { sandboxId, hostname } = record.profile.cloud;
   const started = deps.now();
   const sandbox = await provider.get(sandboxId);
@@ -607,8 +643,8 @@ async function runStop(args: CloudArgs, deps: CloudDeps): Promise<number> {
 }
 
 async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
-  const { provider, tailnet, tailnetCredentials } = await loadCloudWithTailnet(deps);
   const record = findHost(await deps.store.listHosts(), requiredHost(args));
+  const { provider, tailnet, tailnetCredentials } = await loadCloudWithTailnet(deps, record);
   const { sandboxId, hostname } = record.profile.cloud;
   const timeoutMs = args.timeoutMs ?? DEFAULT_WAKE_TIMEOUT_MS;
   const started = deps.now();
@@ -712,8 +748,8 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
  * them) and re-applies a Tailscale Serve config a resume lost. Idempotent; never starts or stops a sandbox.
  */
 async function runRepair(args: CloudArgs, deps: CloudDeps): Promise<number> {
-  const { provider, tailnetCredentials } = await loadCloudWithTailnet(deps);
   const record = findHost(await deps.store.listHosts(), requiredHost(args));
+  const { provider, tailnetCredentials } = await loadCloudWithTailnet(deps, record);
   const { sandboxId, hostname } = record.profile.cloud;
   const sandbox = await provider.get(sandboxId);
   if (sandbox.state !== 'running') {
@@ -760,13 +796,13 @@ async function runDestroy(args: CloudArgs, deps: CloudDeps): Promise<number> {
   if (!args.yes) {
     throw new Error('runpane cloud destroy permanently deletes the sandbox, its disk and its tailnet device. Rerun with --yes to confirm.');
   }
-  const { provider, tailnet } = await loadCloudWithTailnet(deps);
   const record = findHost(await deps.store.listHosts(), requiredHost(args));
+  const { provider, tailnet } = await loadCloudWithTailnet(deps, record);
   const github = record.meta.github?.length ? await revokeGitHubGrants(record, deps) : undefined;
   const result = await destroyHost(record, provider, tailnet, deps);
   const desktop = await importIntoDesktop(args, deps, [], [record.profile.cloud.sessionId]);
   await deps.store.removeHost(record.profile.cloud.hostname);
-  const peers = await forgetPeerGrants(record, provider, deps);
+  const peers = await forgetPeerGrants(record, deps);
   const coordinator = await pushDirectory(deps);
   if (!args.json) printCoordinatorOutcome(deps, coordinator);
   const summary = { ok: true, host: record.profile.cloud.hostname, ...result, desktop: desktopSummary(desktop), coordinator, peers };
@@ -783,7 +819,7 @@ async function runDestroy(args: CloudArgs, deps: CloudDeps): Promise<number> {
  * After a destroy: the Sessions it could message revoke its peer records (best effort: a sleeping one
  * keeps a record whose sender no longer exists), and Sessions that could message it drop the grant.
  */
-async function forgetPeerGrants(destroyed: CloudHostRecord, provider: CloudProvider, deps: CloudDeps) {
+async function forgetPeerGrants(destroyed: CloudHostRecord, deps: CloudDeps) {
   const host = destroyed.profile.cloud.hostname;
   const records = await deps.store.listHosts();
   const revoked: string[] = [];
@@ -803,7 +839,7 @@ async function forgetPeerGrants(destroyed: CloudHostRecord, provider: CloudProvi
     record.meta.peers = record.meta.peers.filter((grant) => grant.host !== host);
     if (record.meta.peers.length === 0) delete record.meta.peers;
     await deps.store.writeHost(record);
-    await pushPeersFile(record, records, deps, provider);
+    await pushPeersFile(record, records, deps);
     dropped.push(record.profile.cloud.hostname);
   }
   return { revokedOn: revoked, droppedFrom: dropped };
@@ -919,6 +955,7 @@ function hostSummary(record: CloudHostRecord) {
     baseUrl: record.profile.baseUrl,
     transport: hostTransport(record),
     provider: record.profile.cloud.provider,
+    boatOrg: record.meta.boatOrg ?? null,
     createdAt: record.meta.createdAt,
   };
 }
@@ -945,17 +982,19 @@ function requiredHost(args: CloudArgs): string {
   return args.host;
 }
 
-async function loadCloud(deps: CloudDeps) {
+/** Credentials and a provider; given a host, the provider is scoped to the wallet that host bills. */
+async function loadCloud(deps: CloudDeps, record?: CloudHostRecord) {
   const credentials = await deps.store.readCredentials();
   if (!credentials.boat) throw new Error('No boat API key saved. Run: runpane cloud setup --boat-key-file <path|->');
   if (!credentials.tailscale) {
     throw new Error('No Tailscale OAuth client saved. Run: runpane cloud setup --tailscale-client-id <id> --tailscale-secret-file <path|->');
   }
-  return { credentials, provider: deps.createProvider(credentials), tailnetCredentials: credentials.tailscale };
+  const provider = record ? await hostProvider(deps, credentials, record) : deps.createProvider(credentials);
+  return { credentials, provider, tailnetCredentials: credentials.tailscale };
 }
 
-async function loadCloudWithTailnet(deps: CloudDeps) {
-  const loaded = await loadCloud(deps);
+async function loadCloudWithTailnet(deps: CloudDeps, record?: CloudHostRecord) {
+  const loaded = await loadCloud(deps, record);
   return { ...loaded, tailnet: deps.bootstrap.createTailnet(loaded.tailnetCredentials) };
 }
 

@@ -33,6 +33,8 @@ export interface CloudArgs {
   desktopDir?: string;
   timeoutMs?: number;
   boatKeyFile?: string;
+  /** boat wallet: org id, name or `personal` (setup saves it; new overrides it for one create). */
+  boatOrg?: string;
   tailscaleClientId?: string;
   tailscaleSecretFile?: string;
   tailscaleTailnet?: string;
@@ -71,6 +73,7 @@ const VALUE_FLAGS = new Map<string, ValueFlag>([
   ['--desktop-dir', 'desktopDir'],
   ['--timeout-ms', 'timeoutMs'],
   ['--boat-key-file', 'boatKeyFile'],
+  ['--boat-org', 'boatOrg'],
   ['--tailscale-client-id', 'tailscaleClientId'],
   ['--tailscale-secret-file', 'tailscaleSecretFile'],
   ['--tailscale-tailnet', 'tailscaleTailnet'],
@@ -98,10 +101,10 @@ const BOOLEAN_FLAGS = new Map<string, BooleanFlag>([
 
 /** Flags each subcommand accepts, beyond --json. */
 const ALLOWED = {
-  setup: ['--boat-key-file', '--tailscale-client-id', '--tailscale-secret-file', '--tailscale-tailnet', '--anthropic-key-file', '--claude-token-file',
+  setup: ['--boat-key-file', '--boat-org', '--tailscale-client-id', '--tailscale-secret-file', '--tailscale-tailnet', '--anthropic-key-file', '--claude-token-file',
     '--golden', '--no-golden', '--size', '--transport', '--name-prefix', '--pane-deb-url', '--pane-npm-spec', '--pane-preinstalled', '--max-live',
     '--coordinator', '--no-coordinator', '--no-verify'],
-  new: ['--label', '--repo', '--ref', '--size', '--transport', '--from', '--no-golden', '--name-prefix', '--pane-deb-url', '--pane-npm-spec',
+  new: ['--label', '--boat-org', '--repo', '--ref', '--size', '--transport', '--from', '--no-golden', '--name-prefix', '--pane-deb-url', '--pane-npm-spec',
     '--pane-preinstalled', '--desktop-dir', '--no-import', '--timeout-ms', '--keep-on-failure', '--yes', '-y',
     '--github', '--read-write', '--github-token-file'],
   list: [],

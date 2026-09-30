@@ -14,7 +14,8 @@ export interface CoordinatorConfig {
   directoryFile: string;
   /** HMAC secret used to mint and verify caller tokens (0600). */
   secretFile: string;
-  provider: { kind: 'boat'; apiBase: string; apiKeyFile: string };
+  /** `org`: the boat wallet its calls default to (X-Boat-Org); null: the account's active wallet. */
+  provider: { kind: 'boat'; apiBase: string; apiKeyFile: string; org: string | null };
   /** Only provider sandboxes whose name starts with this prefix are cloud Sessions. */
   managedNamePrefix: string;
   /** The coordinator's own sandbox; never counted as an orphan or stopped. */
@@ -69,6 +70,7 @@ const rawConfigSchema = boundary.object({
     kind: boundary.literal('boat'),
     apiBase: optionalString,
     apiKeyFile: boundary.nonEmptyString,
+    org: optionalNullableString,
   }),
   managedNamePrefix: boundary.nonEmptyString,
   selfSandboxId: optionalNullableString,
@@ -135,6 +137,7 @@ export function parseCoordinatorConfig(value: JsonValue, home = defaultCoordinat
       kind: 'boat',
       apiBase: (raw.provider.apiBase ?? 'https://boat.dev/api/v1').replace(/\/+$/, ''),
       apiKeyFile: raw.provider.apiKeyFile,
+      org: raw.provider.org ?? null,
     },
     managedNamePrefix: raw.managedNamePrefix,
     selfSandboxId: raw.selfSandboxId ?? null,

@@ -3,6 +3,7 @@ import type { CloudDeps } from './commands';
 import { mintCallerToken } from './coordinator/callerAuth';
 import { decodePairingCode } from './pairing';
 import type { CloudProvider } from './provider';
+import { hostProvider } from './wallet';
 import { findHost, type CloudHostRecord, type PeerGrant } from './store';
 
 /**
@@ -187,7 +188,7 @@ export async function pushPeersFile(
 ): Promise<PeersFileResult> {
   const host = record.profile.cloud.hostname;
   try {
-    const provider = givenProvider ?? deps.createProvider(await deps.store.readCredentials());
+    const provider = givenProvider ?? await hostProvider(deps, await deps.store.readCredentials(), record);
     const sandbox = await provider.get(record.profile.cloud.sandboxId);
     if (sandbox.state !== 'running') return { host, written: false, reason: `sandbox is ${sandbox.providerState}` };
     const file = await renderPeersFile(record, records, deps);
@@ -206,11 +207,11 @@ export async function pushPeersFile(
 }
 
 /** Rewrites the peers list of every running Session (after a coordinator deploy changes its address). */
-export async function refreshPeersFiles(records: readonly CloudHostRecord[], deps: CloudDeps, provider: CloudProvider): Promise<PeersFileResult[]> {
+export async function refreshPeersFiles(records: readonly CloudHostRecord[], deps: CloudDeps): Promise<PeersFileResult[]> {
   const results: PeersFileResult[] = [];
   for (const record of records) {
     if (!record.profile.baseUrl) continue;
-    results.push(await pushPeersFile(record, records, deps, provider));
+    results.push(await pushPeersFile(record, records, deps));
   }
   return results;
 }

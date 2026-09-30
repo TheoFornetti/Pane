@@ -87,7 +87,7 @@ export class IdleStopper {
     const outcome = await activity.exclusive(entry.sandboxId, async (): Promise<IdleCheckResult> => {
       let sandbox: ProviderSandbox;
       try {
-        sandbox = await this.deps.provider.get(entry.sandboxId);
+        sandbox = await this.deps.provider.get(entry.sandboxId, entry.org);
       } catch (error) {
         return result('provider-error', describeError(error));
       }
@@ -150,7 +150,7 @@ export class IdleStopper {
       }
       try {
         // Stop immediately after the daemon's checkpoint: boat snapshots ~4 s after this call.
-        await this.deps.provider.stop(entry.sandboxId);
+        await this.deps.provider.stop(entry.sandboxId, entry.org);
       } catch (error) {
         return result('stop-failed', describeError(error));
       }

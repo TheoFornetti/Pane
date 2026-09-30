@@ -1295,7 +1295,7 @@
       "name": "cloud setup",
       "summary": "Save the cloud provider key, Tailscale OAuth client and optional agent sign-in (Anthropic API key or Claude token) locally (0600) for runpane cloud.",
       "usage": [
-        "runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--transport <auto|https|http>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]"
+        "runpane cloud setup [--boat-key-file <path|->] [--boat-org <org|personal>] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--transport <auto|https|http>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]"
       ],
       "mutates": true,
       "wrappers": [
@@ -1306,7 +1306,7 @@
       "name": "cloud new",
       "summary": "Create a cloud Session: a sandbox from the golden image, joined to your tailnet, running a Pane daemon, saved as a remote host.",
       "usage": [
-        "runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--github [--read-write] [--github-token-file <path>]] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]"
+        "runpane cloud new [--label <name>] [--boat-org <org|personal>] [--repo <https-url>] [--ref <ref>] [--github [--read-write] [--github-token-file <path>]] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]"
       ],
       "mutates": true,
       "wrappers": [
@@ -1415,7 +1415,7 @@
       "name": "cloud coordinator deploy",
       "summary": "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (stop + alert only) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
       "usage": [
-        "runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--json]"
+        "runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]"
       ],
       "mutates": true,
       "idempotent": true,
@@ -3271,12 +3271,13 @@
       ],
       "cloud setup": [
         "Usage:",
-        "  runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--transport <auto|https|http>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
+        "  runpane cloud setup [--boat-key-file <path|->] [--boat-org <org|personal>] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--transport <auto|https|http>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
         "",
         "Save the cloud provider key, Tailscale OAuth client and optional agent sign-in (Anthropic API key or Claude token) locally (0600) for runpane cloud.",
         "",
         "Options:",
         "  --boat-key-file <path|->           File (or - for stdin) holding the boat.dev API key.",
+        "  --boat-org <org|personal>          Boat wallet new sandboxes bill (org id or name, or personal); saved in settings.json.",
         "  --tailscale-client-id <id>         Tailscale OAuth client id (auth_keys scope for tag:rp-session).",
         "  --tailscale-secret-file <path|->   File (or - for stdin) holding the Tailscale OAuth client secret.",
         "  --tailscale-tailnet <name>         Tailnet name; default is the OAuth client's own tailnet.",
@@ -3296,12 +3297,13 @@
       ],
       "cloud new": [
         "Usage:",
-        "  runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--github [--read-write] [--github-token-file <path>]] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
+        "  runpane cloud new [--label <name>] [--boat-org <org|personal>] [--repo <https-url>] [--ref <ref>] [--github [--read-write] [--github-token-file <path>]] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
         "",
         "Create a cloud Session: a sandbox from the golden image, joined to your tailnet, running a Pane daemon, saved as a remote host.",
         "",
         "Options:",
         "  --label <name>                 Name shown in Pane.",
+        "  --boat-org <org|personal>      Bill this sandbox to that boat wallet instead of the saved one.",
         "  --repo <https-url>             Repository to clone into the sandbox: public HTTPS, or a private GitHub one with --github.",
         "  --ref <ref>                    Branch or tag to check out.",
         "  --github                       Clone --repo over a deploy key generated in the sandbox (private repositories; see runpane cloud github connect).",
@@ -3419,7 +3421,7 @@
       ],
       "cloud coordinator deploy": [
         "Usage:",
-        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--json]",
+        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]",
         "",
         "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (stop + alert only) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
         "",
@@ -3438,6 +3440,7 @@
         "  --pin-deb-sha256 <hex>         SHA-256 of that .deb (required: the daemon installs it as root).",
         "  --no-pin                       Remove the pinned version.",
         "  --key-ttl <duration>           Scoped provider key lifetime, e.g. 90d (default 365d).",
+        "  --boat-org <org|personal>      Boat wallet a new coordinator sandbox bills; its config carries it.",
         "  --json                         Print machine-readable output."
       ],
       "cloud coordinator status": [
@@ -4724,14 +4727,14 @@
       ],
       "cloud setup": [
         "Usage:",
-        "  runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--transport <auto|https|http>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
+        "  runpane cloud setup [--boat-key-file <path|->] [--boat-org <org|personal>] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--transport <auto|https|http>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
         "",
         "`runpane cloud setup` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud setup"
       ],
       "cloud new": [
         "Usage:",
-        "  runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--github [--read-write] [--github-token-file <path>]] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
+        "  runpane cloud new [--label <name>] [--boat-org <org|personal>] [--repo <https-url>] [--ref <ref>] [--github [--read-write] [--github-token-file <path>]] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
         "",
         "`runpane cloud new` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud new"
@@ -4801,7 +4804,7 @@
       ],
       "cloud coordinator deploy": [
         "Usage:",
-        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--json]",
+        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]",
         "",
         "`runpane cloud coordinator deploy` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud coordinator deploy"
@@ -14366,6 +14369,12 @@
             "description": "File (or - for stdin) holding the boat.dev API key."
           },
           {
+            "name": "--boat-org",
+            "value": "<org|personal>",
+            "required": false,
+            "description": "Boat wallet new sandboxes bill: an organization id or name as GET /orgs lists it, or personal. Saved in settings.json; unset, boat bills the account's active wallet."
+          },
+          {
             "name": "--tailscale-client-id",
             "value": "<id>",
             "required": false,
@@ -14476,6 +14485,12 @@
             "value": "<name>",
             "required": false,
             "description": "Name shown in Pane."
+          },
+          {
+            "name": "--boat-org",
+            "value": "<org|personal>",
+            "required": false,
+            "description": "Bill this sandbox to that boat wallet (org id or name, or personal) instead of the saved one. The wallet is fixed at create and recorded on the host."
           },
           {
             "name": "--repo",
@@ -14930,6 +14945,12 @@
             "value": "<duration>",
             "required": false,
             "description": "Scoped provider key lifetime, e.g. 90d (default 365d)."
+          },
+          {
+            "name": "--boat-org",
+            "value": "<org|personal>",
+            "required": false,
+            "description": "Boat wallet a new coordinator sandbox bills (org id or name, or personal); written into the coordinator config as provider.org."
           },
           {
             "name": "--json",

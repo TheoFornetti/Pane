@@ -497,6 +497,33 @@ Destroy costs no boat start.
 - Runaway guard: `new` refuses when 25 of your cloud sandboxes are already live. Change it with
   `runpane cloud setup --max-live <n>`.
 
+### Which boat wallet pays (organizations)
+
+A boat account can belong to organizations, each with its own plan, balance and start limits. boat bills
+a new sandbox to the wallet the request names, else to the account's **active wallet**. That is one
+account-wide setting: anyone switching it in boat's dashboard or with `boat org switch` changes where
+every unnamed create goes. So pin the wallet:
+
+```bash
+runpane cloud setup --boat-org personal         # or an organization's name or team_… id (boat org list)
+runpane cloud new --boat-org acme --label "Team work" --yes      # one Session elsewhere
+runpane cloud coordinator deploy --yes --boat-org personal
+```
+
+- `new` and `coordinator deploy` send the wallet as `org` on the create and as `X-Boat-Org`. Without
+  `--boat-org` or a saved wallet, boat bills the active wallet; `new` then prints which one it was.
+- **A sandbox's wallet is fixed when it is created.** Each host records it (`boatOrg` in
+  `runpane cloud list --json` / `status --json`, and a WALLET column), and every later call for that host
+  (stop, wake, repair, exec, files, destroy, secrets, github) is scoped to it. Hosts made by an older CLI
+  learn it from boat on first use.
+- The coordinator's config carries its own wallet (`provider.org`), and its directory names each
+  Session's wallet, so its idle-stops and wakes target the right one. A coordinator deployed by an older
+  CLI keeps working. Redeploy it (`coordinator deploy --yes`) to record its wallet.
+- Start limits are per wallet. Creating and resuming an organization sandbox counted against that
+  organization's starts and left the personal counter alone (checked live). boat's docs say personal
+  sandboxes use personal limits. `GET /limits` (and anything built on it) reads the **active** wallet
+  unless you name one with `X-Boat-Org` or `?org=`, so check the wallet you mean.
+
 **boat start limits.** boat counts every sandbox start account-wide: `new` is one start, and every `wake`
 (including a coordinator wake) is one start. `stop`, `destroy`, `list` and `status` are free. The limits
 are **12 a minute, 60 an hour and 200 a day**. Past them boat answers HTTP 429 and `new`/`wake` exit 1
@@ -592,7 +619,7 @@ readiness (`readiness.state`: `starting`, `ready` or `degraded`).
 | Path | What |
 |---|---|
 | `~/.config/runpane-cloud/credentials.json` | boat key, Tailscale OAuth client, Anthropic key (0600). Override the directory with `RUNPANE_CLOUD_DIR` |
-| `~/.config/runpane-cloud/settings.json` | golden image, default size, name prefix, runaway guard, `secretsDenyList` |
+| `~/.config/runpane-cloud/settings.json` | golden image, default size, name prefix, runaway guard, `secretsDenyList`, `boatOrg` (the wallet new sandboxes bill) |
 | `~/.runpane-cloud/secrets.env`, `secrets.json` (in the sandbox) | agent secrets from `runpane cloud secrets` (0600); loaded by a block at the top of `~/.bashrc` and `~/.zshenv` |
 | `~/.config/runpane-cloud/hosts/<host>.json`, `.pairing` | one saved cloud Session and its pairing code (0600) |
 | `~/.config/runpane-cloud/coordinator.json` | the coordinator's address and your caller token (0600) |

@@ -30,6 +30,7 @@ async function buildCoordinatorDirectory(records: readonly CloudHostRecord[], ge
       nodeId: record.profile.cloud.nodeId || null,
       pinnedVersion: record.meta.pinnedVersion ?? null,
       coordinatorToken: await readCoordinatorToken(record.meta.coordinatorPairingPath),
+      org: record.meta.boatOrg?.id ?? null,
     });
   }
   return { version: 1, generatedAt: generatedAt.toISOString(), sessions };

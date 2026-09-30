@@ -3,6 +3,7 @@ import { boundary, decodeBoundary, type BoundarySchema, type JsonValue } from '.
 import {
   CLOUD_SIZES,
   CloudProviderError,
+  PERSONAL_ORG,
   type CloudProvider,
   type CloudSandbox,
   type CloudSandboxState,
@@ -29,6 +30,11 @@ const RETRY_DELAYS_MS = [500, 1_500, 4_000];
 
 export interface BoatProviderOptions {
   apiKey: string;
+  /**
+   * The wallet every call is scoped to (`X-Boat-Org`), and the one a create bills (body `org`).
+   * Omitted, boat applies the account's active wallet, which anyone can change from the dashboard.
+   */
+  org?: string;
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
@@ -39,6 +45,7 @@ interface CreateBody {
   ttlSeconds: null;
   noEnv: true;
   from?: string;
+  org?: string;
 }
 
 type BoatRequestBody =
@@ -73,6 +80,8 @@ const sandboxSchema = boundary.object({
   type: boundary.optional(boundary.string),
   error: optionalText,
   createdAt: optionalText,
+  /** The organization billed, or null when the owner (personal) is billed. */
+  team: boundary.optional(boundary.nullable(boundary.object({ id: boundary.nonEmptyString, name: boundary.string }))),
 });
 type BoatSandbox = ReturnType<typeof sandboxSchema.decode>;
 
@@ -109,6 +118,15 @@ const fileReadSchema = boundary.object({
   size: boundary.optional(boundary.number),
 });
 
+const orgListSchema = boundary.object({
+  orgs: boundary.array(boundary.object({
+    id: boundary.nonEmptyString,
+    name: boundary.string,
+    type: boundary.string,
+    active: boundary.optional(boundary.boolean),
+  })),
+});
+
 const errorFields = { code: boundary.optional(boundary.string), message: boundary.optional(boundary.string) };
 const errorSchema = boundary.object({ ...errorFields, error: boundary.optional(boundary.object(errorFields)) });
 
@@ -125,6 +143,7 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
       const headers = new Headers(request.headers);
       headers.set('Authorization', `Bearer ${options.apiKey}`);
       headers.set('Accept', 'application/json');
+      if (options.org && !headers.has('X-Boat-Org')) headers.set('X-Boat-Org', options.org);
       if (request.body) headers.set('Content-Type', 'application/json');
       try {
         const response = await fetchImpl(`${baseUrl}${request.path}`, {
@@ -219,14 +238,24 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
       const user = me.user ?? me;
       return { account: user.email ?? user.username ?? user.id ?? 'boat account' };
     },
+    async listOrgs() {
+      const request: BoatRequest = { method: 'GET', path: '/orgs', retry: true };
+      const { orgs } = decode(await call(request), orgListSchema, request);
+      return orgs.map((org) => ({
+        ...(org.type === 'personal' ? PERSONAL_ORG : { id: org.id, name: org.name }),
+        active: org.active === true,
+      }));
+    },
     async create(request: CreateSandboxRequest) {
       const body: CreateBody = { type: request.size, ttlSeconds: null, noEnv: true };
       if (request.fromSnapshot) body.from = request.fromSnapshot;
+      const org = request.org ?? options.org;
+      if (org) body.org = org;
       const createRequest: BoatRequest = {
         method: 'POST',
         path: '/sandboxes',
         body,
-        headers: { 'Idempotency-Key': request.idempotencyKey },
+        headers: org ? { 'Idempotency-Key': request.idempotencyKey, 'X-Boat-Org': org } : { 'Idempotency-Key': request.idempotencyKey },
         retry: true,
       };
       const sandbox = decodeSandbox(await call(createRequest), createRequest);
@@ -324,7 +353,7 @@ function toCloudState(providerState: string): CloudSandboxState {
 
 function toCloudSandbox(record: BoatSandbox): CloudSandbox {
   const providerState = record.state ?? 'unknown';
-  return {
+  const sandbox: CloudSandbox = {
     id: record.id,
     name: record.name ?? '',
     state: toCloudState(providerState),
@@ -333,6 +362,9 @@ function toCloudSandbox(record: BoatSandbox): CloudSandbox {
     error: record.error ?? null,
     createdAt: record.createdAt ?? null,
   };
+  // `team` absent: boat did not say. null: the owner's personal wallet pays.
+  if (record.team !== undefined) sandbox.org = record.team ? { id: record.team.id, name: record.team.name } : PERSONAL_ORG;
+  return sandbox;
 }
 
 function goneSandbox(sandboxId: string): CloudSandbox {

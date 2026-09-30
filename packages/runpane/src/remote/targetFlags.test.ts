@@ -17,8 +17,8 @@ describe('--host / --thread parsing', () => {
     assert.equal(parsed.panelId, 'orchestrator');
   });
 
-  it('keeps --host out of commands that manage the local install', () => {
-    assert.throws(() => parseRunpaneArgs(['--host', 'rp-b', 'install', 'daemon', '--print-only']), /--host/);
+  it('keeps --host out of commands that do not call a daemon', () => {
+    assert.throws(() => parseRunpaneArgs(['--host', 'rp-b', 'version']), /Unknown option for version: --host/);
     assert.equal(takesDaemonTarget('panels list'), true);
     assert.equal(takesDaemonTarget('doctor'), false);
   });

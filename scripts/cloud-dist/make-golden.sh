@@ -109,13 +109,17 @@ log "named snapshot $NAME: $st"
 TF=$(date +%s%3N)
 GATE=$("$RC_BIN/sb-create.sh" "golden-gate-$SHA8" large "$NAME")
 wait_idle "$GATE"; log "gate fork $GATE idle in $(( $(date +%s%3N) - TF ))ms"
+gerr=$(curl -sS -H @"$BOAT_HDR" "$BOAT/sandboxes/$GATE" | python3 -c 'import json,sys;print((json.load(sys.stdin).get("sandbox") or {}).get("error") or "")')
+[ -z "$gerr" ] || log "WARN boat reports on the gate fork: $gerr"
 put "$GATE" "$HERE/golden/gate-fork.sh" "rcl-gate.sh"
 set +e
-run_retry "$GATE" "bash /home/user/rcl-gate.sh '$VERSION' '$GMID' '$GHK'"; GATE_RC=$?
+# One attempt only: a retry would pile a second daemon onto the first (the gate bounds its own steps with timeouts).
+for _ in 1 2 3 4 5; do run "$GATE" "true" >/dev/null && break; sleep 3; done
+run "$GATE" "bash /home/user/rcl-gate.sh '$VERSION' '$GMID' '$GHK'" 540; GATE_RC=$?
 set -e
 log "gate fork first-exec..gate done in $(( $(date +%s%3N) - TF ))ms total, rc=$GATE_RC"
 [ "$KEEP_GATE" = 1 ] || { "$RC_BIN/sb-destroy.sh" "$GATE" | tail -1; }
-[ "$GATE_RC" = 0 ] || { log "LIVE GATE FAILED"; exit 1; }
+[ "$GATE_RC" = 0 ] || { log "LIVE GATE FAILED: $NAME is NOT recorded as current; delete it (DELETE /named-snapshots/$NAME)"; exit 1; }
 
 python3 - "$DIST_CURRENT" "$NAME" "$VERSION" "$COMMIT" "$EVID" <<'PY'
 import sys, re, os, datetime

@@ -33,10 +33,31 @@ pnpm run build:frontend
 pnpm run build:main
 pnpm run inject-build-info
 
+# Native modules must match Electron's ABI. A build host that also runs vitest (like the integrator's devbox)
+# has better-sqlite3 compiled for plain Node; packaging that ships a daemon that can't open its DB
+# (NODE_MODULE_VERSION 137 vs 145). Rebuild for Electron, and put the host's original binary back afterwards so
+# its Node test runs keep working.
+SQLITE_DIR=$(cd main && node -p "require('path').dirname(require.resolve('better-sqlite3-multiple-ciphers/package.json'))")
+NATIVE_BAK=$(mktemp -d)
+[ -d "$SQLITE_DIR/build" ] && cp -a "$SQLITE_DIR/build" "$NATIVE_BAK/"
+restore_native() { [ -d "$NATIVE_BAK/build" ] && { rm -rf "$SQLITE_DIR/build"; cp -a "$NATIVE_BAK/build" "$SQLITE_DIR/"; }; rm -rf "$NATIVE_BAK"; }
+trap restore_native EXIT
+log "rebuilding native modules for Electron"
+pnpm run electron:rebuild
+
 log "packaging deb (x64)"
 # extraMetadata.version sets app.getVersion() (pane --version) and the deb version without editing package.json.
 pnpm exec electron-builder --linux deb --x64 --publish never \
   -c.extraMetadata.version="$VERSION"
+# Load every locally compiled native module with the packaged Electron's own Node (catches ABI mismatches).
+APP=dist-electron/linux-unpacked
+native=$(find "$APP/resources/app.asar.unpacked" -path '*/build/Release/*.node')
+[ -n "$native" ] || { echo "cloud-dist: no build/Release native modules found in $APP" >&2; exit 1; }
+for n in $native; do
+  ELECTRON_RUN_AS_NODE=1 "$APP/pane" -e 'process.dlopen({ exports: {} }, process.argv[1])' "$(realpath "$n")" \
+    || { echo "cloud-dist: packaged native module does not load under Electron: $n" >&2; exit 1; }
+  log "native ok: ${n#"$APP"/resources/}"
+done
 DEB=$(ls dist-electron/*.deb | head -1)
 cp "$DEB" "$OUT/pane_${VERSION}_amd64.deb"
 

@@ -18,7 +18,7 @@ interface Recorded {
 function fakeFetch(responses: Array<{ status: number; body?: unknown }>) {
   const calls: Recorded[] = [];
   const impl: typeof fetch = async (input, init) => {
-    const headers = Object.fromEntries(Object.entries(init?.headers ?? {}).map(([key, value]) => [key, String(value)]));
+    const headers = Object.fromEntries(new Headers(init?.headers).entries());
     calls.push({
       method: init?.method ?? 'GET',
       url: String(input),
@@ -59,8 +59,8 @@ test('create sends the Idempotency-Key, never sends env, then names the sandbox'
   assert.equal(created.state, 'running');
   assert.equal(fetch.calls[0].method, 'POST');
   assert.equal(fetch.calls[0].url, 'https://boat.dev/api/v1/sandboxes');
-  assert.equal(fetch.calls[0].headers['Idempotency-Key'], 'runpane-cloud-new-abc');
-  assert.equal(fetch.calls[0].headers.Authorization, 'Bearer boat_test');
+  assert.equal(fetch.calls[0].headers['idempotency-key'], 'runpane-cloud-new-abc');
+  assert.equal(fetch.calls[0].headers.authorization, 'Bearer boat_test');
   assert.deepEqual(fetch.calls[0].body, { type: 'large', ttlSeconds: null, noEnv: true, from: 'rp-golden' });
   assert.equal(fetch.calls[1].method, 'PATCH');
   assert.deepEqual(fetch.calls[1].body, { name: 'rp-abc12345' });
@@ -73,7 +73,7 @@ test('create retries a 5xx with the same Idempotency-Key', async () => {
   ]);
   await boat.create({ name: 'rp-x', size: 'default', idempotencyKey: 'k1' });
   assert.equal(fetch.calls.length, 2);
-  assert.equal(fetch.calls[1].headers['Idempotency-Key'], 'k1');
+  assert.equal(fetch.calls[1].headers['idempotency-key'], 'k1');
 });
 
 test('stop is not retried, and errors carry boat\'s code without the key', async () => {
@@ -105,7 +105,7 @@ test('destroy sends the delete confirmation header and accepts 404', async () =>
   await boat.destroy('bx_abcdefgh');
   await boat.destroy('bx_abcdefgh');
   assert.equal(fetch.calls[0].method, 'DELETE');
-  assert.equal(fetch.calls[0].headers['X-Ascii-Confirm-Delete'], 'bx_abcdefgh');
+  assert.equal(fetch.calls[0].headers['x-ascii-confirm-delete'], 'bx_abcdefgh');
 });
 
 test('resume passes a size change; stop sends an empty body', async () => {

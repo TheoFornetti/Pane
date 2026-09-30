@@ -19,13 +19,6 @@ const UPLOADED_ASSETS: CloudBootstrapAssetName[] = ['rp-bootstrap.sh', 'golden-s
 const HOSTNAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const PAIRING_PATTERN = /pane-remote:\/\/\S+/g;
 
-export interface ExtraClientRequest {
-  /** Client record label on the daemon, e.g. "runpane-cloud-coordinator". */
-  label: string;
-  /** Local file that receives this client's pane-remote:// code (0600). */
-  outputPath: string;
-}
-
 export interface ProvisionOptions {
   sessionId: string;
   label: string;
@@ -36,7 +29,11 @@ export interface ProvisionOptions {
   repo?: { url: string; ref?: string; dir?: string };
   /** Local path that receives the pane-remote:// code with mode 0600. The code is never printed. */
   pairingOutputPath: string;
-  extraClients?: ExtraClientRequest[];
+  /**
+   * Further paired clients (e.g. label "runpane-cloud-coordinator"); each client's pane-remote:// code
+   * is written to its local outputPath with mode 0600.
+   */
+  extraClients?: { label: string; outputPath: string }[];
   tags?: string[];
   healthTimeoutMs?: number;
   sandboxHome?: string;
@@ -72,7 +69,8 @@ export interface ReenrolResult extends TailnetIdentity {
   elapsedMs: number;
 }
 
-export class BootstrapError extends Error {
+/** Failures carry the step name; messages are redacted. Callers match on `name === 'BootstrapError'`. */
+class BootstrapError extends Error {
   constructor(readonly step: string, message: string) {
     super(`cloud bootstrap step "${step}" failed: ${message}`);
     this.name = 'BootstrapError';
@@ -375,7 +373,7 @@ function requirePairingCode(code: string): string {
 }
 
 /** Writes a secret to a local file with mode 0600 (parent created 0700). */
-export function writeSecretFile(filePath: string, content: string): void {
+function writeSecretFile(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
   const temporary = `${filePath}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, `${content}\n`, { mode: 0o600 });

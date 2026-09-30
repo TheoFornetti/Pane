@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { boundary, decodeBoundary } from '../../boundaryDecoder';
 import type { RemoteHttpRequest, RemoteHttpTransport } from '../../remote/remoteDaemonClient';
-import { encodePairingCode } from '../pairing';
+import { decodePairingCode, encodePairingCode } from '../pairing';
 import type { MintAuthKeyOptions, TailscaleApi, TailscaleDevice } from '../tailscale';
 import { cloudHostname, parseStepResult, provisionSandbox, reenrolSandbox, redact } from './provision';
 import type { SandboxCommandResult, SandboxHandle } from './types';
@@ -35,6 +35,7 @@ class FakeSandbox implements SandboxHandle {
   readonly steps: string[][] = [];
   readonly scripts: string[] = [];
   state: FakeState = { joined: false, hostname: '', runSsh: false, checkOk: true, dnsSuffix: '' };
+  certRateLimited = false;
 
   async writeFile(filePath: string, content: string): Promise<void> {
     this.files.set(filePath, content);
@@ -74,6 +75,8 @@ class FakeSandbox implements SandboxHandle {
     switch (step) {
       case 'identity': return { ok: true, reset: true, machineId: 'abc' };
       case 'ts-guard': return { ok: true };
+      case 'cert-status': return { ok: true, rateLimited: this.certRateLimited, detail: this.certRateLimited ? '429 rateLimited: too many certificates (50) already issued' : null };
+      case 'serve-http': return { ok: true, baseUrl: `http://${this.state.hostname}.tailnet-example.ts.net:42137` };
       case 'firewall': return { ok: true, allowedTcp: args[0].split(',').map(Number) };
       case 'tailscale-install': return { ok: true, installed: false, backendState: 'NeedsLogin' };
       case 'tailnet-identity': return JSON.parse(this.identity());
@@ -263,6 +266,64 @@ test('provisionSandbox refuses a failed strip-list check, Tailscale SSH, and a s
     provisionSandbox(suffixed, { ...base, tailscale: new FakeTailscale(), pairingOutputPath: path.join(tempDir(), 'p') }),
     /joined as "rp-k3j9x0q2-1"/,
   );
+});
+
+test('auto transport: when Let\'s Encrypt refuses the Serve certificate, it switches to plain HTTP inside the tailnet', async () => {
+  const sandbox = new FakeSandbox();
+  sandbox.certRateLimited = true;
+  const dir = tempDir();
+  const pairingOutputPath = path.join(dir, 'pairing.code');
+  const coordPath = path.join(dir, 'coord.code');
+  const invoke = recordingInvoke();
+  const httpsNeverAnswers: typeof fetch = async (input) =>
+    String(input).startsWith('https://') ? new Response('', { status: 502 }) : healthyFetch(input);
+  const seen: string[] = [];
+
+  const result = await provisionSandbox(sandbox, {
+    sessionId: 'k3j9x0q2m1', label: 'Cloud k3j9', tailscale: new FakeTailscale(), paneSource: { kind: 'preinstalled' },
+    repo: { url: 'https://github.com/example/app.git' }, pairingOutputPath,
+    extraClients: [{ label: 'runpane-cloud-coordinator', outputPath: coordPath, scope: 'coordinator' }],
+    fetchImpl: httpsNeverAnswers, remoteTransport: invoke.transport, autoHttpsWaitMs: 10,
+    onStep: (step) => { if (step.state === 'done') seen.push(`${step.step}:${step.detail ?? ''}`); },
+  });
+
+  const httpBase = 'http://rp-k3j9x0q2.tailnet-example.ts.net:42137';
+  assert.equal(result.transport, 'http');
+  assert.equal(result.baseUrl, httpBase);
+  assert.ok(seen.some((line) => line.startsWith('cert-check:') && line.includes('rate limit')), seen.join('\n'));
+  // Both pairing codes now point at the http address with their own tokens, and the repo is registered through it.
+  assert.equal(decodePairingCode(fs.readFileSync(pairingOutputPath, 'utf8')).baseUrl, httpBase);
+  assert.equal(decodePairingCode(fs.readFileSync(pairingOutputPath, 'utf8')).token, PAIRING_TOKEN);
+  assert.equal(decodePairingCode(fs.readFileSync(coordPath, 'utf8')).baseUrl, httpBase);
+  assert.equal(invoke.requests[0].url, `${httpBase}/invoke`);
+});
+
+test('auto transport keeps waiting on HTTPS when the certificate is not rate limited, and https never switches', async () => {
+  const notReady: typeof fetch = async () => new Response('bad gateway', { status: 502 });
+  const sandbox = new FakeSandbox();
+  await assert.rejects(provisionSandbox(sandbox, {
+    sessionId: 'k3j9x0q2m1', label: 'x', tailscale: new FakeTailscale(), paneSource: { kind: 'preinstalled' },
+    pairingOutputPath: path.join(tempDir(), 'p'), fetchImpl: notReady, healthTimeoutMs: 10, autoHttpsWaitMs: 5,
+  }), /https:\/\/rp-k3j9x0q2\.tailnet-example\.ts\.net\/health not ready/);
+  assert.ok(!sandbox.steps.some((step) => step[0] === 'serve-http'));
+
+  const strict = new FakeSandbox();
+  strict.certRateLimited = true;
+  await assert.rejects(provisionSandbox(strict, {
+    sessionId: 'k3j9x0q2m1', label: 'x', tailscale: new FakeTailscale(), paneSource: { kind: 'preinstalled' },
+    pairingOutputPath: path.join(tempDir(), 'p'), fetchImpl: notReady, healthTimeoutMs: 10, transport: 'https',
+  }), /not ready/);
+  assert.ok(!strict.steps.some((step) => step[0] === 'cert-status' || step[0] === 'serve-http'));
+});
+
+test('http transport serves plain HTTP inside the tailnet from the start', async () => {
+  const sandbox = new FakeSandbox();
+  const result = await provisionSandbox(sandbox, {
+    sessionId: 'k3j9x0q2m1', label: 'x', tailscale: new FakeTailscale(), paneSource: { kind: 'preinstalled' },
+    pairingOutputPath: path.join(tempDir(), 'p'), fetchImpl: healthyFetch, transport: 'http',
+  });
+  assert.equal(result.baseUrl, 'http://rp-k3j9x0q2.tailnet-example.ts.net:42137');
+  assert.ok(!sandbox.steps.some((step) => step[0] === 'cert-status'));
 });
 
 test('provisionSandbox fails with a diagnosis when /health never gets ready', async () => {

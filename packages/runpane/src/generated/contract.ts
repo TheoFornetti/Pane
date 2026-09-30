@@ -1297,7 +1297,7 @@ export const RUNPANE_CONTRACT = {
       "name": "cloud setup",
       "summary": "Save the cloud provider key, Tailscale OAuth client and optional agent sign-in (Anthropic API key or Claude token) locally (0600) for runpane cloud.",
       "usage": [
-        "runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]"
+        "runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--transport <auto|https|http>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]"
       ],
       "mutates": true,
       "wrappers": [
@@ -1308,7 +1308,7 @@ export const RUNPANE_CONTRACT = {
       "name": "cloud new",
       "summary": "Create a cloud Session: a sandbox from the golden image, joined to your tailnet, running a Pane daemon, saved as a remote host.",
       "usage": [
-        "runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]"
+        "runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]"
       ],
       "mutates": true,
       "wrappers": [
@@ -3183,7 +3183,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud setup": [
         "Usage:",
-        "  runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
+        "  runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--transport <auto|https|http>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
         "",
         "Save the cloud provider key, Tailscale OAuth client and optional agent sign-in (Anthropic API key or Claude token) locally (0600) for runpane cloud.",
         "",
@@ -3208,7 +3208,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud new": [
         "Usage:",
-        "  runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
+        "  runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
         "",
         "Create a cloud Session: a sandbox from the golden image, joined to your tailnet, running a Pane daemon, saved as a remote host.",
         "",
@@ -4535,14 +4535,14 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud setup": [
         "Usage:",
-        "  runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
+        "  runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--transport <auto|https|http>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
         "",
         "`runpane cloud setup` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud setup"
       ],
       "cloud new": [
         "Usage:",
-        "  runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
+        "  runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
         "",
         "`runpane cloud new` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud new"

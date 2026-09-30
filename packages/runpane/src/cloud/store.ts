@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { CloudSize } from './provider';
+import type { CloudTransport } from './args';
 
 /**
  * Local state for `runpane cloud`, on the user's machine only. Never in the desktop app or a sandbox.
@@ -33,6 +34,8 @@ export type PaneSource =
 export interface CloudSettings {
   goldenSnapshot?: string;
   size?: CloudSize;
+  /** Default for `new --transport` (auto when unset). */
+  transport?: CloudTransport;
   namePrefix?: string;
   paneSource?: PaneSource;
   /** Largest number of live cloud sandboxes `new` may leave running (final-plan §4 runaway guard). */

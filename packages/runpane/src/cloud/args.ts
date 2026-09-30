@@ -1,5 +1,9 @@
 import { CLOUD_SIZES, type CloudSize } from './provider';
 
+/** How clients reach a cloud Session's daemon: see ProvisionOptions.transport. */
+export const CLOUD_TRANSPORTS = ['auto', 'https', 'http'] as const;
+export type CloudTransport = (typeof CLOUD_TRANSPORTS)[number];
+
 const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'destroy', 'pair', 'sync', 'coordinator', 'peers'] as const;
 type CloudSubcommand = typeof CLOUD_SUBCOMMANDS[number];
 
@@ -19,6 +23,7 @@ export interface CloudArgs {
   repo?: string;
   ref?: string;
   size?: CloudSize;
+  transport?: CloudTransport;
   fromSnapshot?: string;
   noGolden: boolean;
   namePrefix?: string;
@@ -54,6 +59,7 @@ const VALUE_FLAGS = new Map<string, ValueFlag>([
   ['--repo', 'repo'],
   ['--ref', 'ref'],
   ['--size', 'size'],
+  ['--transport', 'transport'],
   ['--from', 'fromSnapshot'],
   ['--name-prefix', 'namePrefix'],
   ['--pane-deb-url', 'paneDebUrl'],
@@ -86,9 +92,9 @@ const BOOLEAN_FLAGS = new Map<string, BooleanFlag>([
 /** Flags each subcommand accepts, beyond --json. */
 const ALLOWED = {
   setup: ['--boat-key-file', '--tailscale-client-id', '--tailscale-secret-file', '--tailscale-tailnet', '--anthropic-key-file', '--claude-token-file',
-    '--golden', '--no-golden', '--size', '--name-prefix', '--pane-deb-url', '--pane-npm-spec', '--pane-preinstalled', '--max-live',
+    '--golden', '--no-golden', '--size', '--transport', '--name-prefix', '--pane-deb-url', '--pane-npm-spec', '--pane-preinstalled', '--max-live',
     '--coordinator', '--no-coordinator', '--no-verify'],
-  new: ['--label', '--repo', '--ref', '--size', '--from', '--no-golden', '--name-prefix', '--pane-deb-url', '--pane-npm-spec',
+  new: ['--label', '--repo', '--ref', '--size', '--transport', '--from', '--no-golden', '--name-prefix', '--pane-deb-url', '--pane-npm-spec',
     '--pane-preinstalled', '--desktop-dir', '--no-import', '--timeout-ms', '--keep-on-failure', '--yes', '-y'],
   list: [],
   status: ['--host'],
@@ -185,6 +191,12 @@ function assignValue(parsed: CloudArgs, key: ValueFlag, flag: string, value: str
     const size = CLOUD_SIZES.find((candidate) => candidate === value);
     if (!size) throw new Error(`--size must be one of: ${CLOUD_SIZES.join(', ')}.`);
     parsed.size = size;
+    return;
+  }
+  if (key === 'transport') {
+    const transport = CLOUD_TRANSPORTS.find((candidate) => candidate === value);
+    if (!transport) throw new Error(`--transport must be one of: ${CLOUD_TRANSPORTS.join(', ')}.`);
+    parsed.transport = transport;
     return;
   }
   if (key === 'timeoutMs' || key === 'maxLive') {

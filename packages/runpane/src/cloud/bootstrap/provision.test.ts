@@ -60,7 +60,7 @@ class FakeSandbox implements SandboxHandle {
     return JSON.stringify(this.reply(step, args));
   }
 
-  private reply(step: string, args: string[]): object {
+  private reply(step: string, args: string[]) {
     switch (step) {
       case 'identity': return { ok: true, reset: true, machineId: 'abc' };
       case 'tailscale-install': return { ok: true, installed: false, backendState: 'NeedsLogin' };

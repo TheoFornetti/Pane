@@ -177,11 +177,21 @@ async function callTool(tool: McpTool, input: JsonObject, signal: AbortSignal, r
  * command throws. Tool results carry the plain message, as before the envelope existed; a
  * command's own `ok: false` result (with `blocked`, `nextCommand`, ...) is left as JSON.
  */
+const failureEnvelopeSchema = boundary.object({
+  ok: boundary.literal(false),
+  code: boundary.string,
+  message: boundary.string,
+});
+const FAILURE_ENVELOPE_KEYS = new Set(['ok', 'code', 'message', 'details']);
+
 function failureMessage(text: string): string | undefined {
   const value = parseJsonObject(text);
-  if (!value || value.ok !== false || typeof value.code !== 'string' || typeof value.message !== 'string') return undefined;
-  const envelopeKeys = new Set(['ok', 'code', 'message', 'details']);
-  return Object.keys(value).every((key) => envelopeKeys.has(key)) ? value.message : undefined;
+  if (!value || !Object.keys(value).every((key) => FAILURE_ENVELOPE_KEYS.has(key))) return undefined;
+  try {
+    return decodeBoundary(value, failureEnvelopeSchema).message;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseJsonObject(text: string): JsonObject | undefined {

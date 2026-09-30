@@ -111,6 +111,8 @@ export interface FakeGitHubOptions {
   installationPermissions?: Permissions;
   /** Lifetime of installation tokens (GitHub: 1 h). */
   tokenTtlMs?: number;
+  /** The installation's repository_selection: "selected" (default) or "all". */
+  repositorySelection?: 'selected' | 'all';
   now?: () => number;
 }
 
@@ -120,7 +122,8 @@ export class FakeGitHub {
   readonly repos = new Map<string, RepoRecord>();
   readonly tokens = new Map<string, TokenRecord>();
   readonly requests: FakeRequestLog[] = [];
-  readonly minted: Array<{ repositories: string[] | null; permissions: Permissions; expiresAt: string }> = [];
+  /** Every access_tokens request as sent (`requestedPermissions` null = the body had no permissions: all of the grant). */
+  readonly minted: Array<{ repositories: string[] | null; requestedPermissions: Permissions | null; permissions: Permissions; expiresAt: string }> = [];
   /** The next REST call answers 403 "API rate limit exceeded" (GitHub's primary rate limit). */
   rateLimitNext = false;
   private server: http.Server | null = null;
@@ -401,7 +404,9 @@ export class FakeGitHub {
         return;
       }
       if (method === 'GET' && route === '/app') return reply(200, { id: Number(this.options.appId), slug: 'runpane-cloud-fake', name: 'runpane cloud (fake)' });
-      if (method === 'GET' && route === '/app/installations') return reply(200, [{ id: this.installationId, permissions: this.installationPermissions }]);
+      const installation = { id: this.installationId, permissions: this.installationPermissions, repository_selection: this.options.repositorySelection ?? 'selected' };
+      if (method === 'GET' && route === '/app/installations') return reply(200, [installation]);
+      if (method === 'GET' && route === `/app/installations/${this.installationId}`) return reply(200, installation);
       const mint = /^\/app\/installations\/(\d+)\/access_tokens$/u.exec(route);
       if (method === 'POST' && mint) {
         if (Number(mint[1]) !== this.installationId) return reply(404, { message: 'Not Found' });
@@ -427,7 +432,7 @@ export class FakeGitHub {
           expiresAt,
         });
         const expires = new Date(expiresAt).toISOString().replace(/\.\d{3}Z$/u, 'Z');
-        this.minted.push({ repositories: requestedRepos, permissions: requested, expiresAt: expires });
+        this.minted.push({ repositories: requestedRepos, requestedPermissions: body.permissions ?? null, permissions: requested, expiresAt: expires });
         return reply(201, { token, expires_at: expires, permissions: requested, repository_selection: requestedRepos ? 'selected' : 'all' });
       }
       return reply(404, { message: 'Not Found' });

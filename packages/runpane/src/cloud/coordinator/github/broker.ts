@@ -367,7 +367,21 @@ export class GitHubBroker {
       const described = await credential.describe();
       return {
         ...base,
-        app: described.app ? { id: described.app.id, slug: described.app.slug, installationIds: described.app.installationIds } : null,
+        app: described.app
+          ? {
+              id: described.app.id,
+              slug: described.app.slug,
+              installationIds: described.app.installationIds,
+              // Grants beyond what the broker uses are reported, never used: every token is capped.
+              installations: described.app.installations.map((installation) => ({
+                id: installation.id,
+                repositorySelection: installation.repositorySelection,
+                extraPermissions: installation.extra,
+                missingPermissions: installation.missing,
+                forbiddenPermissions: installation.forbidden,
+              })),
+            }
+          : null,
         repos: described.repos ?? (entry ? entry.githubRepos : []),
       };
     } catch (error) {

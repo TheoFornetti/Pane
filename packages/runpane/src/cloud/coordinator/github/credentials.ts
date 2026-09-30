@@ -24,15 +24,86 @@ export interface Permissions {
   actions?: Level;
 }
 
+/**
+ * The most any broker token may ever carry. Writes only for contents, issues and pull requests;
+ * checks, statuses and actions are read-only here even when the App was granted write. Every
+ * access_tokens request is capped by this and by the installation's grant (see narrow()).
+ */
+const BROKER_PERMISSION_CEILING = {
+  contents: 'write',
+  issues: 'write',
+  pull_requests: 'write',
+  metadata: 'read',
+  checks: 'read',
+  statuses: 'read',
+  actions: 'read',
+} as const satisfies Permissions;
+
+/** What the broker cannot work without. */
+const BROKER_REQUIRED = { contents: 'write', issues: 'write', pull_requests: 'write', metadata: 'read' } as const satisfies Permissions;
+
+/** Permissions the App must not hold at all (any level): GitHub would stop backing up the broker's refusals. */
+const FORBIDDEN_APP_PERMISSIONS = ['workflows', 'administration', 'secrets', 'organization_administration'] as const;
+
+interface InstallationAssessment {
+  /** Granted beyond the ceiling, e.g. "actions:write", "gists:write". The broker never requests them. */
+  extra: string[];
+  /** Needed by the broker but not granted (or only read), e.g. "contents:write". */
+  missing: string[];
+  /** Granted and forbidden outright (FORBIDDEN_APP_PERMISSIONS). */
+  forbidden: string[];
+}
+
+const LEVEL_RANK = new Map([['read', 1], ['write', 2], ['admin', 3]]);
+
+/** none < read < write < admin; an unknown level counts as the highest. */
+function levelRank(level: string | undefined): number {
+  return level === undefined ? 0 : LEVEL_RANK.get(level) ?? 3;
+}
+
+/** Compares an installation's grant (GitHub's `permissions` object) with what the broker needs. */
+export function assessInstallation(granted: ReadonlyMap<string, string>): InstallationAssessment {
+  const ceiling = new Map<string, string>(Object.entries(BROKER_PERMISSION_CEILING));
+  const extra: string[] = [];
+  const forbidden: string[] = [];
+  for (const [name, level] of granted) {
+    if (FORBIDDEN_APP_PERMISSIONS.some((bad) => bad === name)) forbidden.push(`${name}:${level}`);
+    else if (levelRank(level) > levelRank(ceiling.get(name))) extra.push(`${name}:${level}`);
+  }
+  const missing = Object.entries(BROKER_REQUIRED)
+    .filter(([name, level]) => levelRank(granted.get(name)) < levelRank(level))
+    .map(([name, level]) => `${name}:${level}`);
+  return { extra: extra.sort(), missing, forbidden: forbidden.sort() };
+}
+
+/** GitHub's `permissions` object as name -> level (non-string values are ignored). */
+export function grantedPermissions(permissions: JsonObject | undefined): Map<string, string> {
+  const granted = new Map<string, string>();
+  for (const [name, value] of Object.entries(permissions ?? {})) {
+    try {
+      granted.set(name, decodeBoundary(value, boundary.string));
+    } catch {
+      // not a permission level
+    }
+  }
+  return granted;
+}
+
 interface RepoToken {
   token: string;
   /** ISO time; null for a PAT (its expiry is GitHub's business). */
   expiresAt: string | null;
 }
 
+interface InstallationStatus extends InstallationAssessment {
+  id: number;
+  /** "selected" or "all"; "all" reaches every repository of the account. */
+  repositorySelection: string | null;
+}
+
 interface CredentialStatus {
   mode: 'app' | 'pat';
-  app: { id: string; slug: string | null; installationIds: number[] } | null;
+  app: { id: string; slug: string | null; installationIds: number[]; installations: InstallationStatus[] } | null;
   /** Repositories the credential can reach, when GitHub can list them (App mode). */
   repos: string[] | null;
 }
@@ -72,7 +143,12 @@ const installationSchema = boundary.object({
 });
 const accessTokenSchema = boundary.object({ token: boundary.nonEmptyString, expires_at: boundary.nonEmptyString });
 const appSchema = boundary.object({ slug: boundary.optional(boundary.string) });
-const installationListSchema = boundary.array(boundary.object({ id: boundary.number }));
+const installationDetailSchema = boundary.object({
+  id: boundary.number,
+  repository_selection: boundary.optional(boundary.string),
+  permissions: boundary.optional(boundary.jsonObject),
+});
+const installationListSchema = boundary.array(installationDetailSchema);
 const repositoriesSchema = boundary.object({ repositories: boundary.array(boundary.object({ full_name: boundary.nonEmptyString })) });
 
 interface Installation {
@@ -107,6 +183,10 @@ function narrow(requested: Permissions, granted: Permissions): Permissions {
   for (const name of PERMISSION_NAMES) {
     const level = requested[name];
     if (name === 'metadata' || !level) continue;
+    if (levelRank(level) > levelRank(BROKER_PERMISSION_CEILING[name])) {
+      // A programming error, never a GitHub answer: no call may ask for more than the ceiling.
+      throw new BrokerError('github-error', `the broker never requests "${name}: ${level}"`, { status: 0, message: 'over the permission ceiling' });
+    }
     const has = granted[name];
     if (!has || (level === 'write' && has !== 'write')) {
       throw new BrokerError('github-error', `the GitHub App installation lacks the "${name}: ${level}" permission this call needs`, { status: 403, message: `missing ${name}:${level}` });
@@ -204,17 +284,26 @@ export class GitHubAppCredential implements GitHubCredential {
   async describe(): Promise<CredentialStatus> {
     if (this.described && this.clock.now() - this.described.at < INSTALLATION_CACHE_MS) return this.described.status;
     const slug = decodeGitHub((await this.rest.request('GET', '/app', this.jwt())).body, appSchema, 'app').slug ?? null;
-    const installationIds = this.options.installationId !== null
-      ? [this.options.installationId]
-      : decodeGitHub((await this.rest.request('GET', '/app/installations?per_page=100', this.jwt())).body, installationListSchema, 'installation list').map((item) => item.id);
+    const installations = this.options.installationId !== null
+      ? [decodeGitHub((await this.rest.request('GET', `/app/installations/${this.options.installationId}`, this.jwt())).body, installationDetailSchema, 'installation')]
+      : decodeGitHub((await this.rest.request('GET', '/app/installations?per_page=100', this.jwt())).body, installationListSchema, 'installation list');
     const repos: string[] = [];
-    for (const id of installationIds) {
-      // A metadata-only token over the whole installation, just to list its repositories.
-      const minted = decodeGitHub((await this.rest.request('POST', `/app/installations/${id}/access_tokens`, this.jwt(), { permissions: { metadata: 'read' } })).body, accessTokenSchema, 'installation token');
+    for (const installation of installations) {
+      // GitHub has no App-JWT endpoint that lists an installation's repositories, so this is the one
+      // token not narrowed to a repository: it can't be (the list is what it's for). It carries only
+      // metadata:read, serves this one request, is never cached or returned, and describe() itself is
+      // cached for 10 minutes.
+      const minted = decodeGitHub((await this.rest.request('POST', `/app/installations/${installation.id}/access_tokens`, this.jwt(), { permissions: { metadata: 'read' } })).body, accessTokenSchema, 'installation token');
       const listed = decodeGitHub((await this.rest.request('GET', '/installation/repositories?per_page=100', minted.token)).body, repositoriesSchema, 'repository list');
       repos.push(...listed.repositories.map((repo) => repo.full_name));
     }
-    const status: CredentialStatus = { mode: 'app', app: { id: this.options.appId, slug, installationIds }, repos };
+    const installationIds = installations.map((installation) => installation.id);
+    const assessed = installations.map((installation): InstallationStatus => ({
+      id: installation.id,
+      repositorySelection: installation.repository_selection ?? null,
+      ...assessInstallation(grantedPermissions(installation.permissions)),
+    }));
+    const status: CredentialStatus = { mode: 'app', app: { id: this.options.appId, slug, installationIds, installations: assessed }, repos };
     this.described = { at: this.clock.now(), status };
     return status;
   }

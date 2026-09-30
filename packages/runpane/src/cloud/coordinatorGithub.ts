@@ -1,6 +1,6 @@
 import { boundary, decodeBoundary } from '../boundaryDecoder';
 import type { CloudDeps } from './commands';
-import { assertFineGrainedPat } from './coordinator/github/credentials';
+import { assertFineGrainedPat, assessInstallation, grantedPermissions } from './coordinator/github/credentials';
 import { appJwt, createGitHubRest, loadAppPrivateKey } from './coordinator/github/rest';
 import { loadCoordinatorProvider, reconfigureCoordinator, requireCoordinatorDeployment, saveCoordinatorDeployment } from './coordinatorDeploy';
 import type { CoordinatorDeployment, CoordinatorGitHub } from './store';
@@ -14,7 +14,7 @@ import type { CoordinatorDeployment, CoordinatorGitHub } from './store';
 
 export const COORDINATOR_GITHUB_USAGE = `GitHub broker on the coordinator (Sessions push, open PRs and issues through it; no laptop at runtime):
   runpane cloud coordinator github set --app-id <id> --private-key-file <pem|-> [--installation-id <id>]
-        [--allow-ready-pulls] [--api-base-url <url> --git-base-url <url>] [--no-verify] [--json]
+        [--expect-repos <owner/name>[,...]] [--allow-ready-pulls] [--api-base-url <url> --git-base-url <url>] [--no-verify] [--json]
   runpane cloud coordinator github set --pat-file <file|-> [--repo <owner/name>]... [--allow-ready-pulls] [--no-verify] [--json]
   runpane cloud coordinator github status [--json]
   runpane cloud coordinator github audit [--limit <n>] [--json]
@@ -29,6 +29,8 @@ interface GitHubArgs {
   installationId?: number;
   patFile?: string;
   repos: string[];
+  /** App mode: refuse an installation that reaches any other repository. */
+  expectRepos?: string[];
   allowReadyPulls?: boolean;
   apiBaseUrl?: string;
   gitBaseUrl?: string;
@@ -70,6 +72,13 @@ export function parseCoordinatorGitHubArgs(argv: readonly string[]): GitHubArgs 
         args.repos.push(repo);
         break;
       }
+      case '--expect-repos': {
+        only(flag, 'set');
+        const repos = value(index++, flag).split(',').map((repo) => repo.trim()).filter(Boolean);
+        if (repos.length === 0 || repos.some((repo) => !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/u.test(repo))) throw new Error('--expect-repos takes owner/name[,owner/name...].');
+        args.expectRepos = [...(args.expectRepos ?? []), ...repos];
+        break;
+      }
       case '--allow-ready-pulls': only(flag, 'set'); args.allowReadyPulls = true; break;
       case '--no-allow-ready-pulls': only(flag, 'set'); args.allowReadyPulls = false; break;
       case '--api-base-url': only(flag, 'set'); args.apiBaseUrl = value(index++, flag); break;
@@ -94,6 +103,8 @@ export function parseCoordinatorGitHubArgs(argv: readonly string[]): GitHubArgs 
     for (const [flag, url] of [['--api-base-url', args.apiBaseUrl], ['--git-base-url', args.gitBaseUrl]] as const) {
       if (url !== undefined && !/^https?:\/\/[^\s/]+/u.test(url)) throw new Error(`${flag} must be an http(s) URL.`);
     }
+    if (args.expectRepos && args.patFile) throw new Error('--expect-repos checks a GitHub App installation; a PAT cannot list its repositories (use --repo).');
+    if (args.expectRepos && !args.verify) throw new Error('--expect-repos needs the check with GitHub; drop --no-verify.');
     if ((args.apiBaseUrl === undefined) !== (args.gitBaseUrl === undefined)) throw new Error('--api-base-url and --git-base-url go together (a fake GitHub serves both).');
   }
   return args;
@@ -110,16 +121,20 @@ export async function runCoordinatorGitHub(argv: readonly string[], deps: CloudD
 }
 
 /** GitHub App permissions the broker must not hold: with them, GitHub stops backing up its refusals. */
-const FORBIDDEN_APP_PERMISSIONS = ['workflows', 'administration', 'secrets', 'organization_administration'];
-
 interface Verified {
   app: { slug: string | null; installationId: number } | null;
   repos: string[];
+  /** Printed as WARNING lines; nothing here stops the broker. */
+  warnings: string[];
 }
 
 // What GitHub and the coordinator answer, parsed at this boundary.
 const appSchema = boundary.object({ slug: boundary.optional(boundary.nullable(boundary.string)) });
-const installationsSchema = boundary.array(boundary.object({ id: boundary.number, permissions: boundary.optional(boundary.jsonObject) }));
+const installationsSchema = boundary.array(boundary.object({
+  id: boundary.number,
+  repository_selection: boundary.optional(boundary.string),
+  permissions: boundary.optional(boundary.jsonObject),
+}));
 const tokenSchema = boundary.object({ token: boundary.nonEmptyString });
 const repositoriesSchema = boundary.object({ repositories: boundary.array(boundary.object({ full_name: boundary.nonEmptyString })) });
 const repoSchema = boundary.object({ permissions: boundary.optional(boundary.object({ push: boundary.optional(boundary.boolean) })) });
@@ -127,7 +142,17 @@ const brokerStatusSchema = boundary.object({
   ok: boundary.optional(boundary.boolean),
   mode: boundary.optional(boundary.string),
   error: boundary.optional(boundary.string),
-  app: boundary.optional(boundary.nullable(boundary.object({ id: boundary.optional(boundary.string), slug: boundary.optional(boundary.nullable(boundary.string)) }))),
+  app: boundary.optional(boundary.nullable(boundary.object({
+    id: boundary.optional(boundary.string),
+    slug: boundary.optional(boundary.nullable(boundary.string)),
+    installations: boundary.optional(boundary.array(boundary.object({
+      id: boundary.number,
+      repositorySelection: boundary.optional(boundary.nullable(boundary.string)),
+      extraPermissions: boundary.optional(boundary.array(boundary.string)),
+      missingPermissions: boundary.optional(boundary.array(boundary.string)),
+      forbiddenPermissions: boundary.optional(boundary.array(boundary.string)),
+    }))),
+  }))),
   repos: boundary.optional(boundary.array(boundary.string)),
   allowReadyPulls: boundary.optional(boundary.boolean),
   tokens: boundary.optional(boundary.array(boundary.object({
@@ -172,14 +197,31 @@ async function verifyApp(args: GitHubArgs, pem: string): Promise<Verified> {
         ? 'The App is not installed anywhere yet: install it on the repositories Sessions should reach (Install App -> Only select repositories).'
         : `The App has several installations (${ids}); pass --installation-id.`);
   }
-  const permissions = chosen.permissions ?? {};
-  const forbidden = FORBIDDEN_APP_PERMISSIONS.filter((name) => permissions[name] !== undefined);
-  if (forbidden.length > 0) {
-    throw new Error(`The App holds ${forbidden.join(', ')} permission(s). The broker needs only Contents, Issues and Pull requests (read and write) plus Metadata; remove the rest in the App settings, accept the new permissions on the installation, and rerun.`);
-  }
+  // The broker caps every token it mints (credentials.ts BROKER_PERMISSION_CEILING), so an excess grant
+  // is never used; still, what can't be narrowed per token is refused, and the rest is reported.
+  const assessed = assessInstallation(grantedPermissions(chosen.permissions));
+  const refusals: string[] = [];
+  if (assessed.forbidden.length > 0) refusals.push(`it grants ${assessed.forbidden.join(', ')}; the broker must not hold Workflows, Administration or Secrets permissions`);
+  if (chosen.repository_selection === 'all') refusals.push('it is installed on ALL repositories; reinstall it with "Only select repositories"');
   const token = decodeBoundary((await rest.request('POST', `/app/installations/${chosen.id}/access_tokens`, jwt(), { permissions: { metadata: 'read' } })).body, tokenSchema);
   const listed = decodeBoundary((await rest.request('GET', '/installation/repositories?per_page=100', token.token)).body, repositoriesSchema);
-  return { app: { slug: app.slug ?? null, installationId: chosen.id }, repos: listed.repositories.map((repo) => repo.full_name) };
+  const repos = listed.repositories.map((repo) => repo.full_name);
+  const warnings: string[] = [];
+  if (args.expectRepos) {
+    const expected = new Set(args.expectRepos.map((repo) => repo.toLowerCase()));
+    const beyond = repos.filter((repo) => !expected.has(repo.toLowerCase()));
+    if (beyond.length > 0) refusals.push(`it reaches ${beyond.join(', ')}, beyond --expect-repos ${args.expectRepos.join(',')}`);
+    const absent = args.expectRepos.filter((repo) => !repos.some((installed) => installed.toLowerCase() === repo.toLowerCase()));
+    if (absent.length > 0) warnings.push(`the installation does not include ${absent.join(', ')} (--expect-repos); Sessions can't reach it until you add it.`);
+  }
+  if (refusals.length > 0) {
+    throw new Error(`Refusing GitHub App ${args.appId ?? ''} installation ${chosen.id}: ${refusals.join('; ')}. Fix it under the App's settings (Permissions & events, Install App) and rerun.`);
+  }
+  if (assessed.extra.length > 0) {
+    warnings.push(`the App is granted more than the broker uses: ${assessed.extra.join(', ')}. The broker never requests these (every token is narrowed per call), but narrow the App to Contents, Issues, Pull requests (read and write) and Metadata (read), plus optionally Checks, Commit statuses and Actions (read).`);
+  }
+  if (assessed.missing.length > 0) warnings.push(`the App lacks ${assessed.missing.join(', ')}; pushes, PRs or issues will fail until you grant it.`);
+  return { app: { slug: app.slug ?? null, installationId: chosen.id }, repos, warnings };
 }
 
 async function verifyPat(args: GitHubArgs, pat: string, deps: CloudDeps): Promise<Verified> {
@@ -191,7 +233,7 @@ async function verifyPat(args: GitHubArgs, pat: string, deps: CloudDeps): Promis
     const info = decodeBoundary((await rest.request('GET', `/repos/${repo}`, pat)).body, repoSchema);
     if (info.permissions?.push !== true) throw new Error(`The PAT cannot write to ${repo}: give it Contents, Issues and Pull requests (read and write) on that repository.`);
   }
-  return { app: null, repos };
+  return { app: null, repos, warnings: [] };
 }
 
 async function set(args: GitHubArgs, deps: CloudDeps): Promise<number> {
@@ -207,6 +249,7 @@ async function set(args: GitHubArgs, deps: CloudDeps): Promise<number> {
   if (args.verify) {
     progress(`runpane cloud: checking the ${mode === 'app' ? 'GitHub App' : 'PAT'} with GitHub${args.apiBaseUrl ? ` at ${args.apiBaseUrl}` : ''}...`);
     verified = mode === 'app' ? await verifyApp(args, secret) : await verifyPat(args, secret, deps);
+    for (const warning of verified.warnings) deps.stderr(`WARNING: ${warning}`);
   }
 
   const github: CoordinatorGitHub = {
@@ -238,6 +281,7 @@ async function set(args: GitHubArgs, deps: CloudDeps): Promise<number> {
     allowReadyPulls: github.allowReadyPulls,
     verifiedWithGitHub: verified !== null,
     repos: verified?.repos ?? null,
+    warnings: verified?.warnings ?? [],
     coordinator: broker,
   };
   if (args.json) {
@@ -276,6 +320,15 @@ async function status(args: GitHubArgs, deps: CloudDeps): Promise<number> {
     if (broker.mode !== 'off') {
       deps.stdout(`  repos: ${(broker.repos ?? []).join(', ') || '(none listed)'}`);
       deps.stdout(`  ready PRs allowed: ${broker.allowReadyPulls === true ? 'yes' : 'no (always drafts)'}`);
+      for (const installation of app?.installations ?? []) {
+        const notes = [
+          installation.repositorySelection === 'all' ? 'installed on ALL repositories' : '',
+          installation.forbiddenPermissions?.length ? `FORBIDDEN grants ${installation.forbiddenPermissions.join(', ')}` : '',
+          installation.extraPermissions?.length ? `granted but never used ${installation.extraPermissions.join(', ')}` : '',
+          installation.missingPermissions?.length ? `missing ${installation.missingPermissions.join(', ')}` : '',
+        ].filter(Boolean);
+        if (notes.length > 0) deps.stdout(`  WARNING: installation ${installation.id}: ${notes.join('; ')}`);
+      }
       const tokens = broker.tokens ?? [];
       deps.stdout(`  cached installation tokens: ${tokens.length === 0 ? 'none' : tokens.map((token) => `${token.repo} ${token.permissions ?? token.access ?? '?'} until ${token.expiresAt ?? '?'}`).join('; ')}`);
     }

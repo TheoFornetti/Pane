@@ -2,7 +2,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { SessionPortsListResult } from '../../../../../shared/types/sessionPorts';
+import { SESSION_PORTS_CHANGED_EVENT, type SessionPortsListResult } from '../../../../../shared/types/sessionPorts';
+import { isPaneDaemonEventChannel } from '../../server';
 import { PaneCommandError } from '../../../core/commandError';
 import type { ManifestRead } from './manifest';
 import { readPortsState } from './portsStore';
@@ -354,5 +355,11 @@ describe('SessionPortsService.detect', () => {
     h.manifests.set('/home/user/new-repo', { kind: 'ok', ports: [{ name: 'docs', port: 4000, path: '/' }] });
     await h.service.detect();
     expect((await h.service.list()).ports.map(port => port.name)).toEqual(['docs']);
+  });
+});
+
+describe('runpane:ports:changed delivery', () => {
+  it('passes the daemon event filter, so desktop and web clients hear about changes at once', () => {
+    expect(isPaneDaemonEventChannel(SESSION_PORTS_CHANGED_EVENT)).toBe(true);
   });
 });

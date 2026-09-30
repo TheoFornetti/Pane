@@ -306,3 +306,19 @@ test('coordinator start re-enrols a node that came back logged out and reinstall
   assert.equal(harness.world.scripts.filter((entry) => entry.script.includes('install-service')).length, installsBefore + 1);
   assert.match((await harness.deps.store.readSettings()).coordinator?.deployment?.nodeId ?? '', /NEW$/u);
 });
+
+test('destroy revokes the destroyed Session\'s peer records and drops grants to it', async () => {
+  const harness = await createTestHarness();
+  const a = await newHost(harness, 'Alpha');
+  const b = await newHost(harness, 'Beta');
+  const c = await newHost(harness, 'Gamma');
+  harness.world.daemons.set(b, { sessions: [{ id: 'sess-b', name: 'Main' }], peers: [] });
+  harness.world.daemons.set(a, { sessions: [{ id: 'sess-a', name: 'Main' }], peers: [] });
+  assert.equal(await run(harness, ['peers', 'allow', a, b]), 0);
+  assert.equal(await run(harness, ['peers', 'allow', c, a]), 0);
+  assert.equal(await run(harness, ['destroy', a, '--yes', '--no-import', '--json']), 0);
+  assert.deepEqual(harness.world.daemons.get(b)?.peers, []);
+  const gamma = (await harness.deps.store.listHosts()).find((record) => record.profile.cloud.hostname === c);
+  assert.equal(gamma?.meta.peers, undefined);
+  assert.deepEqual(peersFile(harness, c).hosts, []);
+});

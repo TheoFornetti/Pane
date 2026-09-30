@@ -668,15 +668,46 @@ async function runDestroy(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const result = await destroyHost(record, provider, tailnet, deps);
   const desktop = await importIntoDesktop(args, deps, [], [record.profile.cloud.sessionId]);
   await deps.store.removeHost(record.profile.cloud.hostname);
+  const peers = await forgetPeerGrants(record, provider, deps);
   const coordinator = await pushDirectory(deps);
   if (!args.json) printCoordinatorOutcome(deps, coordinator);
   report(
     args,
     deps,
-    { ok: true, host: record.profile.cloud.hostname, ...result, desktop: desktopSummary(desktop), coordinator },
+    { ok: true, host: record.profile.cloud.hostname, ...result, desktop: desktopSummary(desktop), coordinator, peers },
     `${record.profile.cloud.hostname} destroyed: tailnet device${result.deletedNodeIds.length === 1 ? '' : 's'} ${result.deletedNodeIds.join(', ') || '(none)'} deleted, sandbox ${record.profile.cloud.sandboxId} ${result.sandbox}.`,
   );
   return 0;
+}
+
+/**
+ * After a destroy: the Sessions it could message revoke its peer records (best effort: a sleeping one
+ * keeps a record whose sender no longer exists), and Sessions that could message it drop the grant.
+ */
+async function forgetPeerGrants(destroyed: CloudHostRecord, provider: CloudProvider, deps: CloudDeps) {
+  const host = destroyed.profile.cloud.hostname;
+  const records = await deps.store.listHosts();
+  const revoked: string[] = [];
+  for (const grant of destroyed.meta.peers ?? []) {
+    const target = records.find((record) => record.profile.cloud.hostname === grant.host);
+    if (!target) continue;
+    try {
+      await deps.invokeDaemon(target.profile, 'runpane:peers:revoke', [{ peer: grant.peerId }], 30_000);
+      revoked.push(grant.host);
+    } catch (error) {
+      deps.stderr(`runpane cloud: could not revoke ${host}'s peer record on ${grant.host} (${error instanceof Error ? error.message : String(error)}); run runpane cloud wake ${grant.host} and remove it with runpane --host ${grant.host} peers revoke --peer ${grant.peerId} --yes.`);
+    }
+  }
+  const dropped: string[] = [];
+  for (const record of records) {
+    if (!record.meta.peers?.some((grant) => grant.host === host)) continue;
+    record.meta.peers = record.meta.peers.filter((grant) => grant.host !== host);
+    if (record.meta.peers.length === 0) delete record.meta.peers;
+    await deps.store.writeHost(record);
+    await pushPeersFile(record, records, deps, provider);
+    dropped.push(record.profile.cloud.hostname);
+  }
+  return { revokedOn: revoked, droppedFrom: dropped };
 }
 
 /** Tailnet device first, then the sandbox (a live node would otherwise linger as an orphan). */

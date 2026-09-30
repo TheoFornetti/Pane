@@ -158,7 +158,17 @@ The directory is a JSON file on the coordinator (0600), written through `PUT /cl
 
 ## Setting it up
 
-These steps run on the coordinator sandbox after it has joined the tailnet with a single-use
+From the laptop, `runpane cloud coordinator deploy --yes` does all of this (`packages/runpane/src/cloud/coordinatorDeploy.ts`):
+it creates the sandbox from the golden image, joins it with the Session bootstrap's identity reset,
+strip-list check, firewall (tailnet tcp 47300 only) and single-use `tag:rp-session` key, mints the scoped
+boat key (`POST /api-keys/scoped`, stepping the lifetime down until boat accepts it), uploads this CLI's own
+`dist/` and a config it writes itself (listen address = the node's tailnet IP, `selfSandboxId` = its own
+sandbox), installs the unit, and writes the laptop's `coordinator.json` plus a copy of the caller secret
+(`coordinator-secret`, 0600) so `new` can mint each Session's own caller token for its peers list. The laptop
+CLI is the config's single writer: rerunning `deploy` rewrites it in place. `coordinator stop|start|status|destroy`
+manage the sandbox; `start` re-enrols the node if a resume brought it back logged out.
+
+The manual steps below are what `deploy` automates. They run on the coordinator sandbox after it has joined the tailnet with a single-use
 `tag:rp-session` key (the Session bootstrap's `tailscale-up` step):
 
 ```sh

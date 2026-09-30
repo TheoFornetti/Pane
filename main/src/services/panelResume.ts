@@ -95,8 +95,17 @@ export class PanelResume {
   private status: PanelResumeStatus = { phase: 'idle', panels: [] };
   private readonly inFlight = new Map<string, Promise<void>>();
   private readonly phaseListeners = new Set<(phase: PanelResumeStatus['phase']) => void>();
+  private extraPaneIds: () => readonly string[] = () => [];
 
   constructor(private readonly deps: PanelResumeDeps) {}
+
+  /**
+   * Hidden Panes whose agents come back on start too: a named Session's orchestrator lives in a
+   * hidden Pane, and `listSessions` leaves hidden Panes out (they are mostly worktree reserves).
+   */
+  alsoResumePanes(source: () => readonly string[]): void {
+    this.extraPaneIds = source;
+  }
 
   /** Lazily start panels on use. Only the headless daemon enables this. */
   enable(): void {
@@ -149,7 +158,12 @@ export class PanelResume {
   /** Start every interrupted agent panel of a Pane that is not archived. */
   async resumeInterruptedAgents(): Promise<PanelResumeStatus> {
     const candidates: Array<{ panel: ToolPanel; session: PanelResumeSession }> = [];
-    for (const session of this.deps.listSessions()) {
+    const sessions = new Map(this.deps.listSessions().map(session => [session.id, session]));
+    for (const paneId of this.extraPaneIds()) {
+      const session = sessions.has(paneId) ? undefined : this.deps.getSession(paneId);
+      if (session) sessions.set(session.id, session);
+    }
+    for (const session of sessions.values()) {
       if (session.archived) continue;
       for (const panel of this.deps.getPanelsForSession(session.id)) {
         if (panel.type !== 'terminal' || this.deps.isRunning(panel.id)) continue;

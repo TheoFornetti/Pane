@@ -885,13 +885,14 @@ export function hasCadenceValueFlag(parsed: ParsedArgs): boolean {
 /**
  * Commands that honour --host/--thread/$RUNPANE_HOST: every daemon-control
  * command except the ones that inspect or repair the local install, and the
- * `runpane cloud` family, which manages hosts rather than calling one.
+ * `runpane cloud` family, which manages hosts rather than calling one
+ * (`cloud safe-to-stop` asks a daemon, so it takes a target like the rest).
  */
 export function takesDaemonTarget(command: RunpaneCommand): boolean {
   return isRunpaneLocalCommand(command)
     && command !== 'doctor'
     && command !== 'daemon repair'
-    && !command.startsWith('cloud');
+    && (!command.startsWith('cloud') || command === 'cloud safe-to-stop');
 }
 
 function isRunpaneLocalCommand(command: RunpaneCommand): boolean {

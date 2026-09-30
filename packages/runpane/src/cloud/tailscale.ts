@@ -9,7 +9,7 @@ const DEFAULT_API_BASE = 'https://api.tailscale.com/api/v2';
 
 export const CLOUD_SESSION_TAG = 'tag:rp-session';
 
-export interface TailscaleOAuthCredentials {
+interface TailscaleOAuthCredentials {
   clientId: string;
   clientSecret: string;
   /** Tailnet name; "-" (the default) means the OAuth client's own tailnet. */

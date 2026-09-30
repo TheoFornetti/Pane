@@ -1,7 +1,7 @@
 import { boundary, decodeBoundary } from '../../boundaryDecoder';
 import type { DaemonHealthResult } from './types';
 
-export interface WaitForDaemonHealthOptions {
+interface WaitForDaemonHealthOptions {
   timeoutMs?: number;
   intervalMs?: number;
   /** Per-request timeout. */
@@ -61,14 +61,14 @@ const healthPayloadSchema = boundary.object({
 });
 
 /** The `/health` fields bootstrap reads; `readiness` arrives with M2 daemons. */
-export interface HealthPayload {
+interface HealthPayload {
   ok?: boolean;
   status?: string;
   version?: string;
   readiness?: { state?: string };
 }
 
-export interface HealthInterpretation {
+interface HealthInterpretation {
   ok: boolean;
   version?: string;
   readiness?: string;

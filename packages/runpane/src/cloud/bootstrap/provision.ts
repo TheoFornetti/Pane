@@ -19,7 +19,7 @@ const UPLOADED_ASSETS: CloudBootstrapAssetName[] = ['rp-bootstrap.sh', 'golden-s
 const HOSTNAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const PAIRING_PATTERN = /pane-remote:\/\/\S+/g;
 
-export interface ProvisionOptions {
+interface ProvisionOptions {
   sessionId: string;
   label: string;
   tailscale: TailscaleApi;
@@ -41,7 +41,7 @@ export interface ProvisionOptions {
   onStep?: (step: ProvisionStep) => void;
 }
 
-export interface ProvisionResult extends TailnetIdentity {
+interface ProvisionResult extends TailnetIdentity {
   baseUrl: string;
   pairingPath: string;
   extraClientPaths: string[];
@@ -53,7 +53,7 @@ export interface ProvisionResult extends TailnetIdentity {
   timings: Partial<Record<ProvisionStepName, number>>;
 }
 
-export interface ReenrolOptions {
+interface ReenrolOptions {
   hostname: string;
   tailscale: TailscaleApi;
   /** The node id recorded at provision time. Devices under the same hostname are deleted too. */
@@ -64,7 +64,7 @@ export interface ReenrolOptions {
   sandboxHome?: string;
 }
 
-export interface ReenrolResult extends TailnetIdentity {
+interface ReenrolResult extends TailnetIdentity {
   deletedNodeIds: string[];
   elapsedMs: number;
 }

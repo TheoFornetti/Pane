@@ -26,11 +26,16 @@ describe('flushDurableState', () => {
       order.push('sync');
       return true;
     });
+    const backupTailnetState = vi.fn(async () => {
+      order.push('tailnet-backup');
+      return true;
+    });
     let clock = 100;
 
-    const result = await flushDurableState({ checkpointWal, paneDirectory, syncFilesystem, now: () => (clock += 5) });
+    const result = await flushDurableState({ checkpointWal, paneDirectory, syncFilesystem, backupTailnetState, now: () => (clock += 5) });
 
-    expect(order).toEqual(['checkpoint', 'sync']);
+    // The tailscaled.state copy is written before the final sync, so the snapshot has it.
+    expect(order).toEqual(['checkpoint', 'tailnet-backup', 'sync']);
     expect(result.walCheckpoint).toEqual({ busy: 0, log: 3, checkpointed: 3 });
     expect(result.fsynced.slice(0, 2)).toEqual([
       path.join(paneDirectory, 'sessions.db'),

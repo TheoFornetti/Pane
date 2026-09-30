@@ -26,6 +26,7 @@ for h in "$H" /root; do
   absent "runpane cloud pairing ($h)" "$h/.runpane-cloud/pairing.code" $(ls "$h"/.runpane-cloud/client-*.code 2>/dev/null)
   absent "other agent auth ($h)"     "$h/.codex/auth.json" "$h/.config/opencode/auth.json" "$h/.local/share/opencode/auth.json"
 done
+absent "tailscaled state backup (bootstrap guard)" /var/lib/rp-ts-backup/tailscaled.state
 if [ "$MODE" = golden ]; then absent "tailscaled state" /var/lib/tailscale/tailscaled.state
 elif [ -e /var/lib/tailscale/tailscaled.state ]; then
   boot=$(( $(date +%s) - $(cut -d. -f1 /proc/uptime) )); m=$(stat -c %Y /var/lib/tailscale/tailscaled.state)

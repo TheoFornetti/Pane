@@ -12,10 +12,16 @@ describe('upsertMarkedBlock', () => {
     expect(upsertMarkedBlock('# Mine\n', `${START}\nnew\n${END}`, START, END)).toBe(`# Mine\n\n${START}\nnew\n${END}\n`);
   });
 
-  it('replaces an older copy (moved to the end, like the CLI blocks) and keeps the other blocks', () => {
+  it('replaces an older copy where it is and keeps the other blocks in order', () => {
     const other = '<!-- runpane-cloud-github:start -->\ngh\n<!-- runpane-cloud-github:end -->';
     const before = `# Mine\n\n${START}\nold\n${END}\n\n${other}\n`;
-    expect(upsertMarkedBlock(before, `${START}\nnew\n${END}`, START, END)).toBe(`# Mine\n\n${other}\n\n${START}\nnew\n${END}\n`);
+    expect(upsertMarkedBlock(before, `${START}\nnew\n${END}`, START, END)).toBe(`# Mine\n\n${START}\nnew\n${END}\n\n${other}\n`);
+  });
+
+  it('leaves a current block where it is, even when it is not last', () => {
+    const other = '<!-- runpane-cloud-github:start -->\ngh\n<!-- runpane-cloud-github:end -->';
+    const text = `${START}\nsame\n${END}\n\n${other}\n`;
+    expect(upsertMarkedBlock(text, `${START}\nsame\n${END}`, START, END)).toBe(text);
   });
 
   it('writes just the block into an empty file', () => {

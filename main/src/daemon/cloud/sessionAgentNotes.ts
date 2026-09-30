@@ -28,10 +28,12 @@ This Session is a cloud machine. The person you work for is not on it, so \`loca
 ${NOTES_END}`;
 }
 
-/** `text` with the marked block replaced (or appended after a blank line); other text is kept. */
+/** `text` with the marked block replaced where it is (or appended after a blank line); other text is kept. */
 export function upsertMarkedBlock(text: string, block: string, start: string, end: string): string {
-  const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  const rest = text.replace(new RegExp(`${escape(start)}[\\s\\S]*?${escape(end)}\\n*`, 'gu'), '').replace(/\n+$/u, '');
+  const from = text.indexOf(start);
+  const to = from === -1 ? -1 : text.indexOf(end, from);
+  if (to !== -1) return `${text.slice(0, from)}${block}${text.slice(to + end.length)}`;
+  const rest = text.replace(/\n+$/u, '');
   return `${rest.trim() ? `${rest}\n\n` : ''}${block}\n`;
 }
 

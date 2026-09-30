@@ -99,7 +99,7 @@
         "scripts/mark-executable.js"
       ],
       "project": ["src/**/*.ts", "scripts/**/*.js"],
-      "ignoreBinaries": ["ditto", "loginctl"]
+      "ignoreBinaries": ["ditto", "loginctl", "openssl"]
     },
     "mobile": {
       "entry": ["capacitor.config.ts", "src/**/*.test.ts", "scripts/**/*.mjs"],

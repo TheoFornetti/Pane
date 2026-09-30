@@ -131,6 +131,11 @@ interface CloudHostMeta {
   paneSource: PaneSource;
   daemonVersion?: string;
   pinnedVersion?: string;
+  /**
+   * The broker's credential kind when `brokerRepos` was last set (app: the Session reads through the broker's
+   * read-only token and has the git credential helper; pat: it reads over a deploy key).
+   */
+  brokerMode?: 'app' | 'pat';
   repo?: { url: string; ref?: string };
   /** Sessions this one may message (J3): each is a peer record minted on the target host. */
   peers?: PeerGrant[];

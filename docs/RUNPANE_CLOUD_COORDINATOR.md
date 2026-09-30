@@ -182,11 +182,36 @@ a command line, in the environment, in the provider's metadata or in this machin
 rewrites the config, restarts the unit and asks the broker whether it loaded. `coordinator deploy` rebuilds
 the config from the saved settings, so an in-place redeploy keeps the broker; the key file is left alone.
 
-- **App mode.** Validation finds the installation (pass `--installation-id` if there are several), lists
-  its repositories, and refuses an App that holds the Workflows, Administration or Secrets permission. The
-  coordinator mints a **1-hour installation token per call**, narrowed to that one repository and to the
-  permissions the call needs (for example `contents:write` for a push, `pull_requests:write` for a PR). It
-  keeps them in memory only, reuses each until 5 minutes before it expires, and never logs them.
+- **App mode.** Validation finds the installation (pass `--installation-id` if there are several) and lists
+  its repositories.
+  - **Refused (exit 1, nothing uploaded):**
+    - the App holds Workflows, Administration or Secrets (any level);
+    - the installation is on **all** repositories. An explicit *selected* list is fine, even a wide one.
+  - **Warned:**
+    - selected repositories beyond `--expect-repos owner/name[,…]`, or not granted to any cloud Session
+      (`github.repos`). Tokens are only minted for repositories in the calling Session's allowlist, so
+      these are never used;
+    - every other permission beyond what the broker uses (for example `actions:write`, `statuses:write`,
+      `gists`, `merge_queues`, `organization_*`), printed as `WARNING:` lines;
+    - an `--expect-repos` entry that isn't installed;
+    - a missing Contents, Issues or Pull requests write.
+  - **Tokens.** The coordinator mints a **1-hour installation token per call**. It is narrowed to that one
+    repository and to the permissions the call needs (for example `contents:write` for a push,
+    `pull_requests:write` plus `contents:read` for a PR, since GitHub reads its head and base refs). It keeps them in memory only, reuses each until 5 minutes before it
+    expires, and never logs them.
+- **The ceiling, whatever the App was granted.** Every `access_tokens` request carries an explicit
+  `permissions` object within:
+  - `contents`, `issues`, `pull_requests`: read or write;
+  - `metadata`: read;
+  - `checks`, `statuses`, `actions`: **read only**.
+
+  Every token beyond metadata carries `repositories:[<one>]`. An over-privileged App (for example one granted
+  Actions or Commit statuses *write*) therefore never produces a token with those writes.
+  - **The one exception.** `status` needs the installation's repository list, and GitHub has no App-JWT
+    endpoint for it. So that list comes from a `metadata:read`-only token over the installation, used for one
+    request, never cached or returned, with `status` itself cached for 10 minutes.
+  - **Excess grants.** `coordinator github status` shows `WARNING` lines for excess or missing grants and for
+    all-repository installations.
 - **PAT mode.** Only fine-grained tokens (`github_pat_…`). Classic and OAuth tokens (`ghp_`, `gho_`, `ghu_`,
   `ghs_`, `ghr_`) reach every repository you can and are refused, on the laptop and again on the coordinator.
 - **Fakes.** `--api-base-url` and `--git-base-url` point the broker at a fake GitHub (tests, and the live

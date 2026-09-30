@@ -278,7 +278,12 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     const user = await h.call('user:red', 'GET', 'status');
     assert.equal(user.status, 200);
     assert.equal(user.body.mode, 'app');
-    assert.deepEqual(user.body.app, { id: APP_ID, slug: 'runpane-cloud-fake', installationIds: [4242] });
+    assert.deepEqual(user.body.app, {
+      id: APP_ID,
+      slug: 'runpane-cloud-fake',
+      installationIds: [4242],
+      installations: [{ id: 4242, repositorySelection: 'selected', extraPermissions: [], missingPermissions: [], forbiddenPermissions: [] }],
+    });
     assert.deepEqual(user.body.repos, ['acme/app', 'acme/other']);
     assert.equal(user.body.caller, null);
     const peer = await h.call('s1', 'GET', 'status');
@@ -448,7 +453,7 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     assert.deepEqual(result.body.permissions, { contents: 'read', metadata: 'read' });
     const expiresIn = Date.parse(String(result.body.expiresAt)) - h.clock.now();
     assert.ok(expiresIn > 0 && expiresIn <= 3_600_000);
-    assert.deepEqual(h.fake.minted.slice(minted), [{ repositories: ['app'], permissions: { metadata: 'read', contents: 'read' }, expiresAt: String(result.body.expiresAt) }]);
+    assert.deepEqual(h.fake.minted.slice(minted), [{ repositories: ['app'], requestedPermissions: { metadata: 'read', contents: 'read' }, permissions: { metadata: 'read', contents: 'read' }, expiresAt: String(result.body.expiresAt) }]);
     const token = String(result.body.token);
     const work = tempDir('rp-readtoken-');
     const env = { ...GIT_ENV, RP_TOKEN: token };
@@ -683,6 +688,126 @@ describe('GitHub broker limits, PAT mode and off', () => {
       const second = await h.call('s1', 'POST', 'push', { repo: 'acme/app', branch: 'ttl-2', sha: master });
       assert.equal(second.status, 200, JSON.stringify(second.body));
       assert.equal(h.fake.minted.filter((token) => token.permissions.contents === 'write').length, 2);
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+// Red's first real App was granted more than the broker needs. Whatever the grant, every token the
+// broker mints must be capped: explicit permissions within the ceiling, never write for checks,
+// statuses or actions, and one repository for anything beyond metadata.
+describe('GitHub broker with an over-privileged App installation', () => {
+  const OVER_PRIVILEGED = {
+    contents: 'write',
+    issues: 'write',
+    pull_requests: 'write',
+    metadata: 'read',
+    actions: 'write',
+    statuses: 'write',
+    merge_queues: 'write',
+    gists: 'write',
+    issue_fields: 'write',
+    issue_types: 'write',
+    organization_events: 'read',
+  } satisfies Record<string, 'read' | 'write'>;
+  const CEILING = new Map([['contents', 'write'], ['issues', 'write'], ['pull_requests', 'write'], ['metadata', 'read'], ['checks', 'read'], ['statuses', 'read'], ['actions', 'read']]);
+
+  it('every access_tokens request, across every endpoint, is explicit, capped and single-repo', async () => {
+    const h = await harness({ permissions: OVER_PRIVILEGED, github: { limits: { pushesPerSessionPerHour: 1000, writesPerSessionPerHour: 1000 } } });
+    try {
+      const calls: Array<[string, string, string, JsonValue?]> = [];
+      const call = async (caller: string, method: string, route: string, body?: JsonValue) => {
+        const result = await h.call(caller, method, route, body);
+        calls.push([caller, method, route, result.body.code === undefined ? 'ok' : String(result.body.code)]);
+        return result;
+      };
+      // status as user and as a Session (describe), then every Session endpoint.
+      const status = await call('user:red', 'GET', 'status');
+      await call('s1', 'GET', 'status');
+      await call('s1', 'POST', 'token', { repo: 'acme/app' });
+      const work = new Work(h.fake);
+      work.commit('over.txt', 'o\n');
+      assert.equal((await call('s1', 'POST', 'push', { repo: 'acme/app', branch: 'over', bundle: work.bundle() })).status, 200);
+      const pull = await call('s1', 'POST', 'pulls', { repo: 'acme/app', branch: 'over', title: 'over' });
+      assert.equal(pull.status, 200, JSON.stringify(pull.body));
+      const n = String(pull.body.number);
+      await call('s1', 'PATCH', `pulls/${n}`, { repo: 'acme/app', title: 'renamed' });
+      const issue = await call('s1', 'POST', 'issues', { repo: 'acme/app', title: 'over issue', labels: ['bug'] });
+      const i = String(issue.body.number);
+      await call('s1', 'PATCH', `issues/${i}`, { repo: 'acme/app', state: 'closed' });
+      await call('s1', 'POST', 'comments', { repo: 'acme/app', number: Number(n), body: 'c' });
+      for (const path of ['issues', `issues/${i}`, `issues/${i}/comments`, 'pulls', `pulls/${n}`, `pulls/${n}/files`, `pulls/${n}/reviews`, 'commits/master/status', 'commits/master/check-runs', 'actions/runs?branch=master']) {
+        await call('s1', 'GET', `read/acme/app/${path}`);
+      }
+      // Everything the grant allows worked; check-runs is refused because this App has no checks at all.
+      const failed = calls.filter(([, , , outcome]) => outcome !== 'ok').map(([, method, route, outcome]) => `${method} ${route} ${outcome}`);
+      assert.deepEqual(failed, ['GET read/acme/app/commits/master/check-runs github-error']);
+
+      assert.ok(h.fake.minted.length >= 8, `minted ${h.fake.minted.length}`);
+      for (const minted of h.fake.minted) {
+        const label = JSON.stringify(minted);
+        assert.ok(minted.requestedPermissions, `no explicit permissions: ${label}`);
+        const requested = Object.entries(minted.requestedPermissions);
+        assert.ok(requested.length > 0, label);
+        for (const [name, level] of requested) {
+          const cap = CEILING.get(name);
+          assert.ok(cap, `${name} is outside the broker's permission set: ${label}`);
+          assert.ok(level === 'read' || cap === 'write', `${name}:${level} exceeds ${cap}: ${label}`);
+        }
+        const beyondMetadata = requested.some(([name]) => name !== 'metadata');
+        if (beyondMetadata) assert.deepEqual(minted.repositories, ['app'], label);
+        // The only installation-wide token is describe()'s metadata-only one (it lists repositories).
+        if (minted.repositories === null) assert.deepEqual(minted.requestedPermissions, { metadata: 'read' }, label);
+      }
+      // acme/other is installed too, but no Session is granted it: no token ever names it.
+      await call('s1', 'GET', 'read/acme/other/pulls');
+      assert.ok(!h.fake.minted.some((minted) => minted.repositories?.includes('other')));
+      // Reads of statuses/actions got read-only tokens despite the write grant.
+      assert.ok(h.fake.minted.some((minted) => minted.requestedPermissions?.statuses === 'read'));
+      assert.ok(h.fake.minted.some((minted) => minted.requestedPermissions?.actions === 'read'));
+
+      // status reports the excess grant (never used) so the user can narrow the App.
+      const installation = jsonList(json(status.body.app ?? null).installations)[0];
+      assert.deepEqual(installation.extraPermissions, ['actions:write', 'gists:write', 'issue_fields:write', 'issue_types:write', 'merge_queues:write', 'organization_events:read', 'statuses:write']);
+      assert.deepEqual(installation.missingPermissions, []);
+      assert.deepEqual(installation.forbiddenPermissions, []);
+      assert.equal(installation.repositorySelection, 'selected');
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+// P4 on real montlakev2: POST pulls answered 422 "not all refs are readable" because the token had
+// only pull_requests:write. GitHub reads the head and base refs, which needs contents:read.
+describe('pull requests need contents:read (real-GitHub regression)', () => {
+  it('the fake refuses a PR without contents:read like GitHub; the broker mints contents:read + pull_requests:write', async () => {
+    const h = await harness();
+    try {
+      const work = new Work(h.fake);
+      work.commit('refs.txt', 'r\n');
+      assert.equal((await h.call('s1', 'POST', 'push', { repo: 'acme/app', branch: 'refs', bundle: work.bundle() })).status, 200);
+      // A token with pull_requests:write only, straight at the fake: GitHub's 422.
+      h.fake.addPat('github_pat_prsonly', ['acme/app'], { pull_requests: 'write', metadata: 'read' });
+      const direct = await fetch(`${h.fake.baseUrl}/repos/acme/app/pulls`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer github_pat_prsonly', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 't', head: 'cloud/rp-one/refs', base: 'master', draft: true }),
+      });
+      assert.equal(direct.status, 422);
+      assert.match(JSON.stringify(await direct.json()), /not all refs are readable/u);
+
+      const before = h.fake.minted.length;
+      const pull = await h.call('s1', 'POST', 'pulls', { repo: 'acme/app', branch: 'refs', title: 'refs' });
+      assert.equal(pull.status, 200, JSON.stringify(pull.body));
+      const edited = await h.call('s1', 'PATCH', `pulls/${String(pull.body.number)}`, { repo: 'acme/app', state: 'closed' });
+      assert.equal(edited.status, 200, JSON.stringify(edited.body));
+      const pullTokens = h.fake.minted.slice(before).filter((minted) => minted.requestedPermissions?.pull_requests === 'write');
+      assert.ok(pullTokens.length >= 1);
+      for (const minted of pullTokens) assert.deepEqual(minted.requestedPermissions, { metadata: 'read', contents: 'read', pull_requests: 'write' });
+      const files = await h.call('s1', 'GET', `read/acme/app/pulls/${String(pull.body.number)}/files`);
+      assert.equal(files.status, 200, JSON.stringify(files.body));
     } finally {
       await h.close();
     }

@@ -50,6 +50,10 @@ test('coordinator github args: one credential, URLs in pairs', () => {
   assert.throws(() => parseCoordinatorGitHubArgs(['set', '--pat-file', 'p', '--api-base-url', 'http://x']), /go together/u);
   assert.equal(parseCoordinatorGitHubArgs(['set', '--pat-file', '-']).patFile, '-');
   assert.throws(() => parseCoordinatorGitHubArgs(['unset', '--app-id', '1']), /Unknown option/u);
+  assert.throws(() => parseCoordinatorGitHubArgs(['set', '--pat-file', 'p', '--expect-repos', 'a/b']), /PAT cannot list/u);
+  assert.throws(() => parseCoordinatorGitHubArgs(['set', '--app-id', '1', '--private-key-file', 'k', '--expect-repos', 'a/b', '--no-verify']), /drop --no-verify/u);
+  assert.throws(() => parseCoordinatorGitHubArgs(['set', '--app-id', '1', '--private-key-file', 'k', '--expect-repos', 'nope']), /owner\/name/u);
+  assert.deepEqual(parseCoordinatorGitHubArgs(['set', '--app-id', '1', '--private-key-file', 'k', '--expect-repos', 'a/b, c/d']).expectRepos, ['a/b', 'c/d']);
 });
 
 test('github set (App) uploads the key 0600 through the files API, rewrites the config, and never prints the key', async () => {
@@ -138,7 +142,7 @@ test('github set verifies the App with GitHub: installation discovery, repos, an
     const { harness } = await deployed();
     const keyFile = path.join(harness.root, 'app.pem');
     await fs.writeFile(keyFile, PEM, { mode: 0o600 });
-    await assert.rejects(run(harness, ['coordinator', 'github', 'set', '--app-id', '42', '--private-key-file', keyFile, '--api-base-url', broadBase, '--git-base-url', broadBase]), /holds workflows permission/u);
+    await assert.rejects(run(harness, ['coordinator', 'github', 'set', '--app-id', '42', '--private-key-file', keyFile, '--api-base-url', broadBase, '--git-base-url', broadBase]), /grants workflows:write; the broker must not hold Workflows, Administration or Secrets/u);
   } finally {
     await broad.stop();
     await fs.rm(risky, { recursive: true, force: true });
@@ -151,4 +155,70 @@ test('github status and audit read the coordinator API', async () => {
   assert.match(harness.out.join('\n'), /GitHub broker on .*: app \(App 42 "fake"\)/u);
   assert.equal(await run(harness, ['coordinator', 'github', 'audit', '--limit', '5']), 0);
   assert.match(harness.out[harness.out.length - 1], /One {2}POST push {2}acme\/app cloud\/rp-one\/x {2}ok/u);
+});
+
+/** A fake GitHub App for `set` checks; the returned `run` sets the broker up with it. */
+async function withFakeApp(options: { permissions?: Record<string, 'read' | 'write'>; repositorySelection?: 'selected' | 'all'; repos?: string[] }, body: (run: (extra: string[]) => Promise<{ code: number | Error; harness: TestHarness }>) => Promise<void>): Promise<void> {
+  const root = await fs.mkdtemp(path.join((await import('node:os')).tmpdir(), 'rp-ghscope-'));
+  const fake = new FakeGitHub({ root, appId: '42', appPublicKey: PUBLIC_PEM, installationPermissions: options.permissions, repositorySelection: options.repositorySelection });
+  for (const repo of options.repos ?? ['acme/app']) fake.createRepo(repo);
+  const base = await fake.start();
+  try {
+    await body(async (extra) => {
+      const { harness } = await deployed();
+      const keyFile = path.join(harness.root, 'app.pem');
+      await fs.writeFile(keyFile, PEM, { mode: 0o600 });
+      const code = await run(harness, ['coordinator', 'github', 'set', '--app-id', '42', '--private-key-file', keyFile, '--api-base-url', base, '--git-base-url', base, ...extra]).catch((error: Error) => error);
+      // No token (fake installation tokens start ghs_) and no key is ever printed.
+      assert.doesNotMatch([...harness.out, ...harness.err].join('\n'), /ghs_|PRIVATE KEY/u);
+      return { code, harness };
+    });
+  } finally {
+    await fake.stop();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
+const OVER_PRIVILEGED = {
+  contents: 'write', issues: 'write', pull_requests: 'write', metadata: 'read',
+  actions: 'write', statuses: 'write', merge_queues: 'write', gists: 'write', issue_fields: 'write', issue_types: 'write', organization_events: 'read',
+} satisfies Record<string, 'read' | 'write'>;
+
+test('github set warns about an over-privileged App (but proceeds: every token is capped)', async () => {
+  await withFakeApp({ permissions: OVER_PRIVILEGED }, async (setUp) => {
+    const { code, harness } = await setUp(['--json']);
+    assert.equal(code, 0);
+    const warning = harness.err.find((line) => line.startsWith('WARNING: the App is granted more than the broker uses'));
+    assert.ok(warning, harness.err.join('\n'));
+    for (const extra of ['actions:write', 'statuses:write', 'gists:write', 'merge_queues:write', 'issue_fields:write', 'issue_types:write', 'organization_events:read']) assert.ok(warning.includes(extra), extra);
+    // The excess grant, and acme/app not granted to any Session yet.
+    assert.equal(JSON.parse(harness.out[harness.out.length - 1]).warnings.length, 2);
+  });
+});
+
+test('github set refuses an App installed on all repositories; a wider selected list is only warned about', async () => {
+  await withFakeApp({ repositorySelection: 'all' }, async (setUp) => {
+    const { code } = await setUp([]);
+    assert.ok(code instanceof Error && /installed on ALL repositories/u.test(code.message), String(code));
+  });
+  // Red's real shape: selected [montlakev2, Pane] with extra write permissions -> accepted with warnings.
+  await withFakeApp({ permissions: OVER_PRIVILEGED, repos: ['jamari-morrison/montlakev2', 'jamari-morrison/Pane'] }, async (setUp) => {
+    const { code, harness } = await setUp(['--expect-repos', 'jamari-morrison/montlakev2', '--json']);
+    assert.equal(code, 0);
+    const warnings: string[] = JSON.parse(harness.out[harness.out.length - 1]).warnings;
+    assert.ok(warnings.some((line) => line.includes('also reaches jamari-morrison/Pane, beyond --expect-repos jamari-morrison/montlakev2')), warnings.join('\n'));
+    assert.ok(warnings.some((line) => line.includes('which no cloud Session is granted')), warnings.join('\n'));
+    assert.ok(warnings.some((line) => line.includes('actions:write')), warnings.join('\n'));
+    assert.ok(harness.err.filter((line) => line.startsWith('WARNING: ')).length >= 3);
+    assert.ok([...harness.world.files.keys()].some((key) => key.endsWith('/github-credential')), 'credential uploaded');
+  });
+  await withFakeApp({ repos: ['acme/app'] }, async (setUp) => {
+    const { code, harness } = await setUp(['--expect-repos', 'ACME/app,acme/missing']);
+    assert.equal(code, 0);
+    assert.ok(harness.err.some((line) => line.startsWith('WARNING: the installation does not include acme/missing')));
+  });
+  await withFakeApp({ permissions: { contents: 'read', metadata: 'read', administration: 'read' } }, async (setUp) => {
+    const { code } = await setUp([]);
+    assert.ok(code instanceof Error && /grants administration:read/u.test(code.message), String(code));
+  });
 });

@@ -1470,9 +1470,9 @@
     },
     {
       "name": "cloud coordinator github set",
-      "summary": "Turn on the coordinator's GitHub broker with your GitHub App (recommended) or fine-grained PAT: checks it with GitHub, uploads it to the coordinator (0600, never printed or kept on this machine), and restarts the coordinator. Classic ghp_/gho_ tokens are refused.",
+      "summary": "Turn on the coordinator's GitHub broker with your GitHub App (recommended) or fine-grained PAT: checks it with GitHub, uploads it to the coordinator (0600, never printed or kept on this machine), and restarts the coordinator. Classic ghp_/gho_ tokens, and Apps with Workflows/Administration/Secrets permissions or installed on all repositories, are refused; excess permissions and extra selected repositories are warned about.",
       "usage": [
-        "runpane cloud coordinator github set --app-id <id> --private-key-file <path|-> [--installation-id <id>] [--allow-ready-pulls] [--api-base-url <url> --git-base-url <url>] [--no-verify] [--json]",
+        "runpane cloud coordinator github set --app-id <id> --private-key-file <path|-> [--installation-id <id>] [--expect-repos <owner/name>[,...]] [--allow-ready-pulls] [--api-base-url <url> --git-base-url <url>] [--no-verify] [--json]",
         "runpane cloud coordinator github set --pat-file <path|-> [--repo <owner/name>]... [--allow-ready-pulls] [--no-verify] [--json]"
       ],
       "mutates": true,
@@ -3568,7 +3568,7 @@
       ],
       "cloud coordinator github set": [
         "Usage:",
-        "  runpane cloud coordinator github set --app-id <id> --private-key-file <path|-> [--installation-id <id>] [--allow-ready-pulls] [--api-base-url <url> --git-base-url <url>] [--no-verify] [--json]",
+        "  runpane cloud coordinator github set --app-id <id> --private-key-file <path|-> [--installation-id <id>] [--expect-repos <owner/name>[,...]] [--allow-ready-pulls] [--api-base-url <url> --git-base-url <url>] [--no-verify] [--json]",
         "  runpane cloud coordinator github set --pat-file <path|-> [--repo <owner/name>]... [--allow-ready-pulls] [--no-verify] [--json]",
         "",
         "Turn on the coordinator's GitHub broker. Cloud Sessions then push cloud/<host>/ branches and open draft PRs, issues and comments through the coordinator, with no laptop at runtime. The credential is checked with GitHub, uploaded to the coordinator (0600) and never printed or kept on this machine.",
@@ -3577,6 +3577,7 @@
         "  --app-id <id>                 The GitHub App ID (recommended: tokens are minted per call, 1 h, one repository).",
         "  --private-key-file <path|->   The App private key (.pem).",
         "  --installation-id <id>        Which installation, when the App has several.",
+        "  --expect-repos <owner/name>   App mode: warn when the installation reaches any other repository (comma-separated).",
         "  --pat-file <path|->           A fine-grained PAT (github_pat_...) instead; classic ghp_/gho_ tokens are refused.",
         "  --repo <owner/name>           PAT mode: also check the token can write this repository.",
         "  --allow-ready-pulls           Let Sessions open ready (non-draft) PRs. Default: always drafts.",
@@ -5017,7 +5018,7 @@
       ],
       "cloud coordinator github set": [
         "Usage:",
-        "  runpane cloud coordinator github set --app-id <id> --private-key-file <path|-> [--installation-id <id>] [--allow-ready-pulls] [--api-base-url <url> --git-base-url <url>] [--no-verify] [--json]",
+        "  runpane cloud coordinator github set --app-id <id> --private-key-file <path|-> [--installation-id <id>] [--expect-repos <owner/name>[,...]] [--allow-ready-pulls] [--api-base-url <url> --git-base-url <url>] [--no-verify] [--json]",
         "  runpane cloud coordinator github set --pat-file <path|-> [--repo <owner/name>]... [--allow-ready-pulls] [--no-verify] [--json]",
         "",
         "`runpane cloud coordinator github set` ships in the npm package, not in the Python package.",
@@ -15297,7 +15298,7 @@
       "cloud coordinator github set": {
         "name": "cloud coordinator github set",
         "summary": "Turn on the coordinator's GitHub broker with your GitHub App (recommended) or fine-grained PAT.",
-        "details": "Checks the credential with GitHub from this machine (App: finds the installation and its repositories and refuses Workflows/Administration/Secrets permissions; PAT: refuses classic ghp_/gho_ tokens and checks write access), uploads it to the coordinator through the provider's files API into ~/.config/runpane-cloud-coordinator/github/ (0600), rewrites the coordinator config and restarts it, then asks the broker whether it loaded. The credential is never printed, never on a command line and never saved on this machine. Cloud Sessions then push only cloud/<host>/ branches in the repositories granted to them and open draft PRs, issues and comments through the coordinator.",
+        "details": "Checks the credential with GitHub from this machine (App: finds the installation and its repositories; refuses Workflows/Administration/Secrets permissions and an installation on all repositories; warns about selected repositories beyond --expect-repos or not granted to any cloud Session (tokens are only ever minted for the calling Session's granted repositories); prints a WARNING listing any other permission beyond Contents/Issues/Pull requests write, Metadata read and Checks/Commit statuses/Actions read, which the broker never requests; PAT: refuses classic ghp_/gho_ tokens and checks write access), uploads it to the coordinator through the provider's files API into ~/.config/runpane-cloud-coordinator/github/ (0600), rewrites the coordinator config and restarts it, then asks the broker whether it loaded. The credential is never printed, never on a command line and never saved on this machine. Cloud Sessions then push only cloud/<host>/ branches in the repositories granted to them and open draft PRs, issues and comments through the coordinator.",
         "requiresPaneDaemon": false,
         "mutates": true,
         "arguments": [
@@ -15315,6 +15316,11 @@
             "name": "--installation-id",
             "required": false,
             "description": "Which installation, when the App has several."
+          },
+          {
+            "name": "--expect-repos",
+            "required": false,
+            "description": "App mode: warn when the installation reaches any repository not in this comma-separated owner/name list (or not granted to any cloud Session)."
           },
           {
             "name": "--pat-file",

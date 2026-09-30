@@ -1,10 +1,11 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import type { JsonObject } from '../boundaryDecoder';
+import { boundary, decodeBoundary, type JsonObject } from '../boundaryDecoder';
+import { RemoteDaemonClient } from '../remote/remoteDaemonClient';
 import { createBoatProvider } from './boat';
 import { cloudHostname, provisionSandbox, waitForDaemonHealth } from './bootstrap';
 import { runCoordinatorCommand } from './coordinator';
-import type { CloudDeps } from './commands';
+import type { CloudDeps, CloudSafeToStopAnswer } from './commands';
 import { callCoordinator, readClientConfig } from './coordinator/client';
 import { NO_COORDINATOR, type CoordinatorPushResult } from './coordinatorSync';
 import { defaultDesktopDir } from './desktop';
@@ -64,6 +65,7 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
     defaultDesktopDir: defaultDesktopDir(env),
     runCoordinator: (argv) => runCoordinatorCommand(argv),
     pushCoordinatorDirectory: (directory) => pushToCoordinator(path.join(store.dir, 'coordinator.json'), directory),
+    safeToStop: (profile) => askSafeToStop(profile),
   };
 }
 
@@ -80,6 +82,30 @@ async function pushToCoordinator(clientConfigPath: string, directory: JsonObject
   }
   const sessions = directory.sessions;
   return { pushed: true, sessions: Array.isArray(sessions) ? sessions.length : 0 };
+}
+
+const safeToStopAnswerSchema = boundary.object({
+  safe: boundary.boolean,
+  blockers: boundary.array(boundary.object({ condition: boundary.string, message: boundary.string })),
+  flush: boundary.nullable(boundary.json),
+});
+
+/** `runpane:cloud:safe-to-stop {flush: "always"}` over the host's paired token, for `cloud stop`. */
+async function askSafeToStop(profile: { baseUrl: string; token: string }): Promise<CloudSafeToStopAnswer> {
+  const client = new RemoteDaemonClient({
+    profile: { id: 'runpane-cloud-stop', label: 'runpane cloud stop', baseUrl: profile.baseUrl, token: profile.token },
+    runtimeId: 'runpane-cloud-stop',
+    clientLabel: 'runpane cloud',
+  });
+  const result = decodeBoundary(
+    await client.invoke('runpane:cloud:safe-to-stop', [{ flush: 'always' }], { timeoutMs: 60_000 }),
+    safeToStopAnswerSchema,
+  );
+  return {
+    safe: result.safe,
+    blockers: result.blockers.map((blocker) => ({ condition: blocker.condition, message: blocker.message })),
+    flushed: result.flush !== null,
+  };
 }
 
 /** Reads a secret from a file, or from stdin for "-". Secrets never come from argv (visible in `ps`). */

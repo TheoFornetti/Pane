@@ -15,6 +15,8 @@ interface CloudJson {
   ok: boolean;
   status?: string;
   flushed?: boolean;
+  flushedBy?: string;
+  blockers?: { condition: string; message: string }[];
   resumed?: boolean;
   alreadyStopped?: boolean;
   sameTailnetNode?: boolean;
@@ -159,7 +161,9 @@ test('stop flushes, stops and waits; wake resumes and waits for /health on the s
   const stopped = lastJson(harness);
   assert.equal(stopped.status, 'asleep');
   assert.equal(stopped.flushed, true);
-  assert.ok(harness.world.scripts.some((entry) => entry.script.includes('sync')));
+  assert.equal(stopped.flushedBy, 'safe-to-stop');
+  assert.ok(harness.world.calls.includes(`safe-to-stop ${record.profile.baseUrl}`));
+  assert.ok(!harness.world.scripts.some((entry) => entry.script.includes('sync')));
   assert.equal(harness.world.sandboxes.get(record.profile.cloud.sandboxId)?.state, 'stopped');
 
   assert.equal(await run(harness, ['status', hostname, '--json']), 0);
@@ -182,6 +186,24 @@ test('wake of an awake host does not resume it again', async () => {
   assert.equal(await run(harness, ['wake', hostname, '--json']), 0);
   assert.equal(lastJson(harness).resumed, false);
   assert.ok(!harness.world.calls.some((call) => call.startsWith('resume ')));
+});
+
+test('stop warns about what is still running but stops, and falls back to sync when the daemon cannot answer', async () => {
+  const busy = await createTestHarness();
+  const busyHost = await newHost(busy);
+  busy.world.safeToStop = { safe: false, blockers: [{ condition: 'agent-working', message: 'Agent in panel p1 is working' }] };
+  assert.equal(await run(busy, ['stop', busyHost, '--yes', '--json']), 0);
+  const stopped = lastJson(busy);
+  assert.equal(stopped.status, 'asleep');
+  assert.deepEqual(stopped.blockers, [{ condition: 'agent-working', message: 'Agent in panel p1 is working' }]);
+  assert.ok(busy.err.some((line) => line.includes('agent-working')), busy.err.join('\n'));
+
+  const old = await createTestHarness();
+  const oldHost = await newHost(old);
+  old.world.safeToStop = 'unreachable';
+  assert.equal(await run(old, ['stop', oldHost, '--yes', '--json']), 0);
+  assert.equal(lastJson(old).flushedBy, 'sync');
+  assert.ok(old.world.scripts.some((entry) => entry.script.includes('sync')));
 });
 
 test('stop of a stopped host is a no-op', async () => {

@@ -41,6 +41,18 @@ export interface CloudDeps {
    * coordinator is configured; `runpane cloud` is the directory's single writer.
    */
   pushCoordinatorDirectory(directory: JsonObject): Promise<CoordinatorPushResult>;
+  /**
+   * Asks the host's daemon `runpane:cloud:safe-to-stop` with `flush: "always"` over its paired
+   * token: SQLite's WAL is checkpointed and files fsynced, and the answer lists what is still busy.
+   * Rejects when the daemon can't answer (an older daemon, or it is down).
+   */
+  safeToStop?(profile: { baseUrl: string; token: string }): Promise<CloudSafeToStopAnswer>;
+}
+
+export interface CloudSafeToStopAnswer {
+  safe: boolean;
+  blockers: { condition: string; message: string }[];
+  flushed: boolean;
 }
 
 /**
@@ -453,16 +465,33 @@ async function runStop(args: CloudArgs, deps: CloudDeps): Promise<number> {
     return 0;
   }
 
-  // boat's stop is a hard power-off about 1 s after a live snapshot, with no SIGTERM (M0), so flush
-  // the page cache first. m2's safe-to-stop API will replace this with a real checkpoint.
+  // boat's stop is a hard power-off about 1 s after a live snapshot, with no SIGTERM (M0), so make the
+  // daemon's state durable first: its safe-to-stop checkpoints the WAL and fsyncs. The user asked for
+  // this stop, so blockers are reported, not obeyed. A daemon that can't answer gets a plain sync.
   let flushed = false;
+  let flushedBy: 'safe-to-stop' | 'sync' | undefined;
+  let blockers: CloudSafeToStopAnswer['blockers'] = [];
   const timings: Record<string, number> = {};
   if (!args.force && sandbox.state === 'running') {
-    try {
-      const result = await provider.handle(sandboxId).runScript('sync; sleep 0.2; sync', { timeoutSeconds: 30 });
-      flushed = result.exitCode === 0;
-    } catch (error) {
-      deps.stderr(`runpane cloud: could not flush ${hostname} before stopping (${error instanceof Error ? error.message : String(error)}); stopping anyway.`);
+    const answer = record.profile.baseUrl && deps.safeToStop
+      ? await deps.safeToStop({ baseUrl: record.profile.baseUrl, token: record.profile.token }).catch(() => null)
+      : null;
+    if (answer) {
+      blockers = answer.blockers;
+      flushed = answer.flushed;
+      if (flushed) flushedBy = 'safe-to-stop';
+      if (blockers.length > 0) {
+        deps.stderr(`runpane cloud: stopping ${hostname} while it is busy: ${blockers.map((blocker) => `${blocker.condition} (${blocker.message})`).join('; ')}`);
+      }
+    }
+    if (!flushed) {
+      try {
+        const result = await provider.handle(sandboxId).runScript('sync; sleep 0.2; sync', { timeoutSeconds: 30 });
+        flushed = result.exitCode === 0;
+        if (flushed) flushedBy = 'sync';
+      } catch (error) {
+        deps.stderr(`runpane cloud: could not flush ${hostname} before stopping (${error instanceof Error ? error.message : String(error)}); stopping anyway.`);
+      }
     }
     timings.flushMs = deps.now() - started;
   }
@@ -474,7 +503,7 @@ async function runStop(args: CloudArgs, deps: CloudDeps): Promise<number> {
   report(
     args,
     deps,
-    { ok: true, host: hostname, status: final ? 'asleep' : 'stopping', flushed, timings: { ...timings, totalMs: elapsedMs } },
+    { ok: true, host: hostname, status: final ? 'asleep' : 'stopping', flushed, flushedBy, blockers, timings: { ...timings, totalMs: elapsedMs } },
     final ? `${hostname} is asleep (${(elapsedMs / 1000).toFixed(1)} s). Wake it with: runpane cloud wake ${hostname}` : `${hostname} is stopping.`,
   );
   return 0;

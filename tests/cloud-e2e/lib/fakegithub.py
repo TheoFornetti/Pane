@@ -263,7 +263,7 @@ class Denied(Exception):
 # endpoint -> required permission (resource, level). Order matters: first match wins.
 REST_PERMS = [
     (r"^/repos/[^/]+/[^/]+$", "metadata", "read"),
-    (r"^/repos/[^/]+/[^/]+/(branches|git/ref|git/refs|compare|commits(?!/[^/]+/(status|statuses|check-runs)))", "contents", None),
+    (r"^/repos/[^/]+/[^/]+/(branches|git/ref|git/refs|git/matching-refs|compare|commits(?!/[^/]+/(status|statuses|check-runs)))", "contents", None),
     (r"^/repos/[^/]+/[^/]+/commits/[^/]+/(status|statuses)$", "statuses", None),
     (r"^/repos/[^/]+/[^/]+/commits/[^/]+/check-runs$", "checks", None),
     (r"^/repos/[^/]+/[^/]+/actions/", "actions", None),
@@ -615,6 +615,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if mb.group(1) == "branches":
                 return self._send(200, {"name": mb.group(2), "commit": {"sha": sha}, "protected": False})
             return self._send(200, {"ref": f"refs/heads/{mb.group(2)}", "object": {"sha": sha, "type": "commit"}})
+        mm = re.match(r"^/git/matching-refs/heads/(.*)$", rest)
+        if mm and method == "GET":
+            out = git(rp, "for-each-ref", "--format=%(refname) %(objectname)", f"refs/heads/{mm.group(1)}").splitlines()
+            out = [l for l in out if l.split(" ")[0].startswith(f"refs/heads/{mm.group(1)}")]
+            return self._send(200, [{"ref": l.split(" ")[0], "object": {"sha": l.split(" ")[1], "type": "commit"}} for l in out])
+        md = re.match(r"^/git/refs/heads/(.+)$", rest)
+        if md and method == "DELETE":
+            if not git(rp, "rev-parse", "--verify", "-q", f"refs/heads/{md.group(1)}", check=False):
+                raise Denied(422, "Reference does not exist")
+            git(rp, "update-ref", "-d", f"refs/heads/{md.group(1)}")
+            self.entry["deletedRef"] = md.group(1)
+            return self._send(204, b"")
         mc = re.match(r"^/compare/(.+)\.\.\.(.+)$", rest)
         if mc and method == "GET":
             a_, b_ = (git(rp, "rev-parse", "--verify", "-q", x, check=False) for x in (mc.group(1), mc.group(2)))

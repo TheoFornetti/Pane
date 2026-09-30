@@ -175,8 +175,8 @@ Do exactly this, then stop:
 1. Create a branch named p3-agent-proof. Add the file notes/p3-proof.md containing one line: "written by a cloud agent".
    Commit it with the message "p3: agent proof".
 2. Push it: \`runpane cloud agent github push --path /home/user/app --branch p3-agent-proof\`. Note the ref and compare URL it prints.
-3. Open a GitHub issue: \`gh issue create --title "[runpane-cloud test] agent proof issue" --body "Opened by the P3 gate agent."\`.
-4. Open a DRAFT pull request from that branch: \`gh pr create --draft --title "[runpane-cloud test] agent proof PR" --body "Refs the proof issue." --head p3-agent-proof\`.
+3. Open a GitHub issue: \`gh issue create --title "[runpane-cloud TEST] agent proof issue" --body "Opened by the P3 gate agent."\`.
+4. Open a DRAFT pull request from that branch: \`gh pr create --draft --title "[runpane-cloud TEST] agent proof PR" --body "Refs the proof issue." --head p3-agent-proof\`.
 5. Comment on the issue with the PR's URL: \`gh issue comment <issue-number> --body "PR: <url>"\`.
 Do not try to push to master or merge anything. When done, reply with exactly one line:
 RESULT issue=<issue-number> pr=<pr-number> ref=<pushed ref>
@@ -201,7 +201,7 @@ SH
 import json, sys
 st = json.loads(sys.argv[1]); r = st["repos"][sys.argv[2]]
 pulls = [i for i in r["issues"] if i["pull"] and (i["head"] or {}).get("ref", "").endswith("/p3-agent-proof")]
-issues = [i for i in r["issues"] if not i["pull"] and i["title"].startswith("[runpane-cloud test]")]
+issues = [i for i in r["issues"] if not i["pull"] and i["title"].startswith("[runpane-cloud TEST]")]
 sys.exit(0 if pulls and issues and any(i["comments"] for i in issues) else 1)
 PY
       sleep 20
@@ -212,7 +212,7 @@ PY
 import json, sys
 st = json.loads(sys.argv[1]); r = st["repos"][sys.argv[2]]; pfx = sys.argv[3]
 pulls = [i for i in r["issues"] if i["pull"] and (i["head"] or {}).get("ref") == pfx + "p3-agent-proof"]
-issues = [i for i in r["issues"] if not i["pull"] and i["title"].startswith("[runpane-cloud test]")]
+issues = [i for i in r["issues"] if not i["pull"] and i["title"].startswith("[runpane-cloud TEST]")]
 ref = r["refs"].get("refs/heads/" + pfx + "p3-agent-proof")
 p = pulls[0] if pulls else {}
 print(json.dumps({"ref": ref, "pr": p.get("number"), "draft": p.get("draft"), "prMarker": p.get("marker"), "prUser": p.get("user"),
@@ -258,7 +258,7 @@ try: d = json.load(open(sys.argv[1]))
 except Exception as e: print(f"unparsable: {e}"); sys.exit(1)
 it = d[0] if isinstance(d, list) and len(d) == 1 else None
 ok = bool(it) and it["number"] == int(sys.argv[2]) and it["isDraft"] is True and it["state"] == "OPEN" \
-     and it["url"].endswith(f"/pull/{sys.argv[2]}") and it["title"].startswith("[runpane-cloud test]") and "runpane-cloud:" in it["body"]
+     and it["url"].endswith(f"/pull/{sys.argv[2]}") and it["title"].startswith("[runpane-cloud TEST]") and "runpane-cloud:" in it["body"]
 print(json.dumps({k: it.get(k) for k in ("number", "state", "isDraft", "url", "title")}) if it else json.dumps(d)[:300]); sys.exit(0 if ok else 1)
 PY
 ) && rec gh-compat.pr-list PASS "gh pr list --head p3-agent-proof --state all --json ... --limit 1 -> $v" "$E2E_RUN_DIR/gh-pr-list.json" \

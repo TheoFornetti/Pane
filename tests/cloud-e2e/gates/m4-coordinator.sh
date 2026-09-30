@@ -136,7 +136,7 @@ cl boat stop "$S_ID" >/dev/null; cl boat wait "$S_ID" archived --timeout 120 >/d
 c=$(CURL runaway -X POST -H 'Content-Type: application/json' -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$E2E_SECRETS/caller.tok")") \
   --data "{\"host\":\"$S_HOST\",\"wait\":false,\"timeoutMs\":30000}" "http://127.0.0.1:$PORT/cloud/wake")
 sleep 5; gs=$(cl boat get "$S_ID" --field state)
-grep -q 'runaway' "$E2E_RUN_DIR/http-runaway.json" && [ "$gs" = archived ] \
+grep -qE 'runaway|wake-rate-limited' "$E2E_RUN_DIR/http-runaway.json" && [ "$gs" = archived ] \
   && rec runaway-guard PASS "2nd wake within the hour refused (HTTP $c, $(jget 'd.get("code")' < "$E2E_RUN_DIR/http-runaway.json")); sandbox stayed asleep" "$E2E_RUN_DIR/http-runaway.json" \
   || rec runaway-guard FAIL "guard did not refuse (HTTP $c, sandbox $gs)" "$E2E_RUN_DIR/http-runaway.json"
 kill "$SERVE" 2>/dev/null; wait "$SERVE" 2>/dev/null

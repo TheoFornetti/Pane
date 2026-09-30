@@ -223,11 +223,93 @@ Later panels in that repository, including new worktrees, start without the dial
 The sandbox has no git identity, so an agent's `git commit` fails with "Author identity unknown" until you
 set one: `git config --global user.name ...` and `user.email ...` in a terminal in the Session.
 
+### Secrets from Doppler, with no laptop in the path (`.runpane/secrets.json`)
+
+If your team keeps secrets in Doppler, let the coordinator hold **read-only Doppler service tokens** and let
+each repository say which names its Sessions get. Every new Session on that repository then has them at
+creation, and gets a fresh copy at every wake, without your laptop.
+
+**Once, on your machine** (logged in to Doppler with `doppler login`):
+
+```bash
+# mint one read-only service token per config with your doppler CLI; each goes 0600 onto the coordinator
+runpane cloud coordinator doppler set --project my-app --all-configs          # or --config dev [--config stg ...]
+runpane cloud coordinator doppler status --check                              # each config: token loaded, N names readable
+# optional: what the coordinator withholds (per user; the default is the built-in deny-list below)
+runpane cloud coordinator doppler policy --allow-all                          # everything the manifest names, production included
+```
+
+**Once per repository**, commit `.runpane/secrets.json` (names, never values):
+
+```json
+{
+  "version": 1,
+  "doppler": [
+    { "project": "my-app", "config": "dev", "names": "all" },
+    { "project": "my-app", "config": "dev_personal", "names": ["OPENROUTER_API_KEY", "R2_*"] }
+  ]
+}
+```
+
+`names` is `"all"` or a list of names and `*` patterns. The first entry is what `doppler run` uses without
+`-p`/`-c`. Put the file on the branch Sessions start from (the default branch unless you pass `new --ref`).
+
+**Then every Session on it just works:**
+
+```bash
+runpane cloud new --repo https://github.com/<owner>/<repo> --github --yes
+#   - secrets done: doppler stand-in installed; my-app/dev 91 names, my-app/dev_personal 2 names from <owner>/<repo>:.runpane/secrets.json
+```
+
+Inside the Session, agents (and you) use Doppler as the repository's docs already say:
+
+```bash
+doppler run -- bun test                        # the config's secrets in that command's environment only
+doppler run -p my-app -c dev_personal -- node x.js
+doppler secrets get OPENROUTER_API_KEY --plain  # one value, when a tool needs it on stdin
+doppler secrets --only-names                   # names only
+doppler status                                 # which manifest (repo, ref, sha), fetched when, what was withheld
+doppler refresh                                # fetch again now (after a manifest or Doppler change)
+```
+
+`doppler` in a Session is a stand-in (`~/.local/bin/doppler`, which runs `runpane cloud agent doppler`); the
+Session holds no Doppler token and needs no `doppler login`. It serves `run` (`-p/--project`, `-c/--config`,
+`--command`, `--preserve-env`), `secrets get` (`--plain`, `--json`), `secrets download --no-file --format
+json|env`, `secrets --only-names`, `refresh`, `status` and `configs`; `setup` and `login` are no-ops. Anything
+else exits 2.
+
+- **How values travel:** the Session asks the coordinator (`POST /cloud/secrets/fetch`, its own caller token
+  plus its tailnet node, like the GitHub broker). The coordinator reads `.runpane/secrets.json` from GitHub
+  with the broker's credential, at the ref the Session was created from, reads each config from Doppler with
+  its service token, applies your policy and answers over the tailnet. The Session keeps the set in
+  `~/.runpane-cloud/doppler/secrets.json` (0600, 0700 directory). Values reach a process only as the
+  environment of the child of `doppler run`, or on stdout for `doppler secrets get`: never a shell rc file,
+  the daemon's environment, boat metadata, a command line or a log. They never pass through your laptop.
+- **When it refreshes:** at every boot, which includes every wake (a user unit,
+  `runpane-cloud-secrets.service`, runs `doppler refresh --boot`); on `doppler refresh`; and before a
+  `doppler` command when the copy is over an hour old. If the coordinator or Doppler is briefly away, the
+  Session keeps its copy. A decision clears it: the manifest removed or invalid, the service turned off,
+  the Session removed from the directory. Removing a name from the manifest removes it at the next refresh.
+- **Policy (per user, on your coordinator):** `default` withholds `PRODUCTION_*`, `CLOUDFLARE_*`,
+  `SHOPIFY_ADMIN*`, `VERCEL_*`, `NEON_*`, `DOPPLER_*`, `*_MANAGEMENT_*` and refuses `stg`/`prd`-style
+  configs; `allow-all` delivers every name the manifest lists (your call: production credentials then reach
+  your agents); `--deny-names A,B_* --deny-configs prd` is a custom list. Shell and Pane variables (`PATH`,
+  `LD_*`, `PANE_*`, ...) are never delivered. `doppler status` in the Session lists what was withheld and why.
+- **Manifest safety:** the coordinator refuses a manifest read from the Session's own `cloud/<host>/`
+  namespace (the Session could push it and widen its own grant): keep it on a branch people review.
+- **Audit:** `runpane cloud coordinator doppler audit` shows every fetch: Session, node, manifest (repo, ref,
+  sha), and the names delivered or withheld. Never values.
+- **Existing Sessions:** `runpane cloud secrets enable <host>` installs the stand-in and fetches once
+  (it needs a Session whose Pane has `cloud agent doppler`); `runpane cloud secrets disable <host>` removes it
+  and shreds the copy.
+- **Disconnect:** `runpane cloud coordinator doppler unset --all --yes` shreds the tokens on the coordinator
+  and revokes (in Doppler) the ones your machine minted. Sessions drop their copy at their next refresh.
+
 ### Other secrets for agents (`cloud secrets`)
 
-Agents often need more keys than the sign-in: a model router, a test service, a read-only token. Give them
-to one Session with `runpane cloud secrets`. Values are read **on your machine**, so nothing else ever has
-to hold them:
+Agents often need more keys than the sign-in: a model router, a test service, a read-only token. Without a
+Doppler-backed coordinator (above), give them to one Session with `runpane cloud secrets`. Values are read
+**on your machine**, so nothing else ever has to hold them:
 
 ```bash
 # from Doppler, through your local doppler CLI (dev configs only)
@@ -687,6 +769,13 @@ Session (wake it first). Run it once on Sessions created with an older `runpane`
 | `new`, `destroy` or `sync` warns "Retry with: runpane cloud sync" | The coordinator was unreachable. The change itself succeeded; run `runpane cloud sync` when it is back |
 | An agent panel doesn't see a secret you just set | The panel was open before `secrets set`; open a new panel. Check the name with `runpane cloud secrets list <host>`; a login shell other than bash or zsh does not read the loader |
 | `secrets set` says "Refusing ...: it matches the deny-list pattern" | On purpose: that family of credentials never enters a Session. Use a narrower, non-production key under another name only if it really is not a production credential |
+| `doppler ...` in a Session says "No runpane cloud coordinator is configured here" | The Session's peers list names no coordinator: `runpane cloud github connect <host> --repo <owner>/<repo> --broker` from the laptop |
+| `doppler run` says "no Doppler secrets are delivered to this Session: ... has no .runpane/secrets.json" | Commit the manifest to the branch the Session started from, then `doppler refresh` in the Session |
+| `doppler refresh` fails with `manifest-invalid` | The manifest is not `{"version": 1, "doppler": [{"project", "config", "names"}]}`; the message names the problem. The Session's copy is cleared until it is fixed |
+| `doppler refresh` fails with `manifest-ref-writable` | The Session was created from a `cloud/<its host>/` branch, which it can push to itself. Recreate it from a reviewed branch (`new --ref <branch>`) |
+| `doppler run -c prd` says "not delivered: the coordinator's secrets policy (default) refuses config prd" | The default policy. Change it with `runpane cloud coordinator doppler policy` (your call), then `doppler refresh` |
+| `doppler secrets get NAME` says "Could not find requested secret" | NAME is not in the manifest's names, not in Doppler, or withheld by policy (`doppler status` lists withheld names and why) |
+| `coordinator doppler set` says "doppler could not create a read-only service token" | Log in (`doppler login`) as someone who can manage that project's service tokens, or pass `--token-file` with a token you made |
 
 To check a daemon by hand: `curl https://rp-<id>.<your-tailnet>.ts.net/health` returns its version and
 readiness (`readiness.state`: `starting`, `ready` or `degraded`).
@@ -698,6 +787,8 @@ readiness (`readiness.state`: `starting`, `ready` or `degraded`).
 | `~/.config/runpane-cloud/credentials.json` | boat key, Tailscale OAuth client, Anthropic key (0600). Override the directory with `RUNPANE_CLOUD_DIR` |
 | `~/.config/runpane-cloud/settings.json` | golden image, default size, name prefix, runaway guard, `secretsDenyList`, `boatOrg` (the wallet new sandboxes bill) |
 | `~/.runpane-cloud/secrets.env`, `secrets.json` (in the sandbox) | agent secrets from `runpane cloud secrets` (0600); loaded by a block at the top of `~/.bashrc` and `~/.zshenv` |
+| `~/.runpane-cloud/doppler/secrets.json` (in the sandbox) | the Doppler set the coordinator delivered for the repository's `.runpane/secrets.json` (0600, 0700 dir); read by the `doppler` stand-in (`~/.local/bin/doppler`) and refreshed by the user unit `runpane-cloud-secrets.service` at every boot and wake |
+| `.runpane/secrets.json` (in your repository) | which Doppler configs and names Sessions on the repository get; names only, safe to commit |
 | `~/.config/runpane-cloud/hosts/<host>.json`, `.pairing` | one saved cloud Session and its pairing code (0600) |
 | `~/.config/runpane-cloud/coordinator.json` | the coordinator's address and your caller token (0600) |
 | `~/.config/runpane-cloud/hosts/<host>.json` (`meta.github`) | the Session's GitHub connections: repository, deploy key id and fingerprint (no secrets) |

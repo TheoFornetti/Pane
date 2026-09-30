@@ -152,7 +152,7 @@ export class SecretsService {
         case 'POST fetch': {
           if (!entry || !node) throw new SecretsError('forbidden', 'only cloud Sessions fetch secrets (the user reads names with runpane cloud coordinator doppler status)');
           const body = await this.fetch(entry, audit);
-          this.record(call, entry, node, 'fetch', audit, 'ok', 200, started);
+          this.record(call, entry, node, route, audit, 'ok', 200, started);
           return { status: 200, body };
         }
         default:

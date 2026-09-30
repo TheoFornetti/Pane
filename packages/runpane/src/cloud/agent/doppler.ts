@@ -226,8 +226,9 @@ function chooseConfig(cache: SecretsCache, flags: ParsedFlags, deps: AgentDeps):
   const project = lastValue(flags, '--project') ?? deps.env.DOPPLER_PROJECT;
   const config = lastValue(flags, '--config') ?? deps.env.DOPPLER_CONFIG;
   if (cache.configs.length === 0) {
+    const noManifest = cache.manifest === null || cache.manifest.sha === null;
     throw new Error(`no Doppler secrets are delivered to this Session: ${cache.reason ?? 'the manifest lists none'}. `
-      + 'Add .runpane/secrets.json to the repository (see doppler --help), then doppler refresh.');
+      + (noManifest ? 'Add .runpane/secrets.json to the repository (see doppler --help), then doppler refresh.' : 'Run doppler refresh once that is fixed.'));
   }
   const first = cache.configs[0];
   const wantedProject = project ?? first.project;

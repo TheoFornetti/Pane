@@ -77,14 +77,15 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
     },
     bootstrap,
     readSecretFile,
-    stdout: (line) => process.stdout.write(`${line}\n`),
-    stderr: (line) => process.stderr.write(`${line}\n`),
+    stdout: (line) => writeLine(process.stdout, line),
+    stderr: (line) => writeLine(process.stderr, line),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now: () => Date.now(),
     env,
     defaultDesktopDir: defaultDesktopDir(env),
     runCoordinator: (argv) => runCoordinatorCommand(argv),
     pushCoordinatorDirectory: (directory) => pushToCoordinator(store.coordinatorClientPath, directory),
+    wakeViaCoordinator: (sessionId, timeoutMs) => wakeViaCoordinator(store.coordinatorClientPath, sessionId, timeoutMs),
     packCoordinatorApp,
     probeCoordinatorHealth,
     async invokeDaemon(profile, channel, args, timeoutMs) {
@@ -143,5 +144,35 @@ async function probeCoordinatorHealth(baseUrl: string): Promise<{ ok: boolean; s
     return { ok: body.ok, status: response.status, version: body.version };
   } catch {
     return { ok: false };
+  }
+}
+
+/** A reader that closed early (`runpane cloud list | head -1`) must not crash the command mid-change. */
+function writeLine(stream: NodeJS.WriteStream, line: string): void {
+  if (stream.listenerCount('error') === 0) {
+    stream.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EPIPE') throw error;
+    });
+  }
+  stream.write(`${line}\n`);
+}
+
+const coordinatorWakeSchema = boundary.object({
+  status: boundary.optional(boundary.string),
+  code: boundary.optional(boundary.string),
+  version: boundary.optional(boundary.nullable(boundary.string)),
+  detail: boundary.optional(boundary.nullable(boundary.string)),
+  message: boundary.optional(boundary.string),
+});
+
+async function wakeViaCoordinator(clientConfigPath: string, sessionId: string, timeoutMs: number) {
+  try {
+    const client = readClientConfig(clientConfigPath);
+    if (!client) return null;
+    const result = await callCoordinator(client, 'POST', '/cloud/wake', { host: sessionId, wait: true, timeoutMs }, timeoutMs + 30_000);
+    const body = decodeBoundary(result.body, coordinatorWakeSchema);
+    return { status: body.status ?? body.code ?? `HTTP ${result.status}`, version: body.version ?? null, detail: body.detail ?? body.message ?? null };
+  } catch {
+    return null;
   }
 }

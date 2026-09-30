@@ -292,6 +292,8 @@ interface RepairOptions {
   hostname: string;
   tailscale: TailscaleApi;
   oldNodeId?: string;
+  /** False for a node without a Pane daemon behind Tailscale Serve (the coordinator). */
+  restoreServe?: boolean;
   sandboxHome?: string;
 }
 
@@ -314,6 +316,7 @@ export async function repairTailnetIfLoggedOut(sandbox: SandboxHandle, options: 
     hostname: options.hostname,
     tailscale: options.tailscale,
     oldNodeId: options.oldNodeId,
+    restoreServe: options.restoreServe,
     sandboxHome: home,
   });
   return { reenrolled: true, previousBackendState: backendState, ...result };

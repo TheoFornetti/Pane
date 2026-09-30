@@ -44,12 +44,23 @@ export interface CloudDeps {
    * coordinator is configured; `runpane cloud` is the directory's single writer.
    */
   pushCoordinatorDirectory(directory: JsonObject): Promise<CoordinatorPushResult>;
+  /**
+   * POST /cloud/wake on the configured coordinator and wait. Resolves null when no coordinator is
+   * configured or it cannot be reached; never throws.
+   */
+  wakeViaCoordinator(sessionId: string, timeoutMs: number): Promise<CoordinatorWakeResult | null>;
   /** Packs this CLI's own package (dist + package.json) as a base64 .tar.gz, for the coordinator sandbox. */
   packCoordinatorApp(): Promise<{ archiveBase64: string; version: string }>;
   /** GET <coordinator>/health; never throws. */
   probeCoordinatorHealth(baseUrl: string): Promise<{ ok: boolean; status?: number; version?: string }>;
   /** Calls a cloud host's daemon over the tailnet with the saved (full) client token. */
   invokeDaemon(profile: CloudHostProfile, channel: string, args: JsonObject[], timeoutMs: number): Promise<JsonValue | undefined>;
+}
+
+interface CoordinatorWakeResult {
+  status: string;
+  version?: string | null;
+  detail?: string | null;
 }
 
 /**
@@ -535,8 +546,21 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     throw new Error(`${hostname} is lost: the provider reports ${sandbox.providerState} for ${sandboxId}.`);
   }
   if (sandbox.state === 'stopping') sandbox = await waitForSandbox(provider, sandboxId, 'stopped', STOP_TIMEOUT_MS, deps);
-  const resumed = sandbox.state === 'stopped';
-  if (resumed) {
+  // With a coordinator, wake through it: it applies the pinned Pane version and gives the Session its
+  // idle-stop grace. A resize, or a coordinator that is down or refuses, falls back to a direct resume.
+  let coordinator: CoordinatorWakeResult | null = null;
+  if (sandbox.state === 'stopped' && !args.size) {
+    if (!args.json) deps.stdout(`runpane cloud: waking ${hostname} through the coordinator...`);
+    coordinator = await deps.wakeViaCoordinator(record.profile.cloud.sessionId, timeoutMs);
+    if (coordinator?.status === 'awake') {
+      timings.coordinatorWakeMs = deps.now() - started;
+      sandbox = await provider.get(sandboxId);
+    } else if (coordinator && !args.json) {
+      deps.stdout(`runpane cloud: the coordinator answered ${coordinator.status}${coordinator.detail ? ` (${coordinator.detail})` : ''}; resuming directly.`);
+    }
+  }
+  const resumed = coordinator?.status === 'awake' || sandbox.state === 'stopped';
+  if (sandbox.state === 'stopped') {
     if (!args.json) deps.stdout(`runpane cloud: waking ${hostname}...`);
     await provider.resume(sandboxId, args.size ? { size: args.size } : undefined);
     timings.resumeCallMs = deps.now() - started;
@@ -585,6 +609,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     sameTailnetNode: sameNode,
     nodeIds: devices.map((device) => device.nodeId),
     version: health.version ?? null,
+    coordinator,
     repaired,
     peersFile,
     timings,

@@ -277,3 +277,32 @@ test('wake leaves a running node alone when only the daemon is slow', async () =
   assert.ok(harness.world.calls.some((call) => call.startsWith('repair ')));
   assert.equal((await harness.deps.store.listHosts())[0].profile.cloud.version, 1);
 });
+
+test('wake goes through the coordinator when one is configured, and resumes directly otherwise', async () => {
+  const harness = await createTestHarness();
+  const hostname = await newHost(harness, 'Alpha');
+  assert.equal(await run(harness, ['stop', hostname, '--yes', '--json']), 0);
+  harness.world.coordinatorWakes = true;
+  assert.equal(await run(harness, ['wake', hostname, '--json']), 0);
+  assert.ok(harness.world.calls.some((call) => call.startsWith('coordinator-wake ')));
+  assert.ok(!harness.world.calls.some((call) => call.startsWith('resume ')), 'no direct resume after the coordinator woke it');
+
+  assert.equal(await run(harness, ['stop', hostname, '--yes', '--json']), 0);
+  harness.world.coordinatorWakes = false;
+  assert.equal(await run(harness, ['wake', hostname, '--json']), 0);
+  assert.ok(harness.world.calls.some((call) => call.startsWith('resume ')));
+});
+
+test('coordinator start re-enrols a node that came back logged out and reinstalls its config', async () => {
+  const harness = await createTestHarness();
+  await harness.deps.store.writeSettings({ namePrefix: 'rp-test' });
+  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json']), 0);
+  assert.equal(await run(harness, ['coordinator', 'stop', '--yes', '--json']), 0);
+  harness.world.loggedOut.add('rp-test-coord');
+  harness.world.coordinatorHealthy = false;
+  const installsBefore = harness.world.scripts.filter((entry) => entry.script.includes('install-service')).length;
+  assert.equal(await run(harness, ['coordinator', 'start', '--json']), 0);
+  assert.equal(lastJson(harness).state, 'running');
+  assert.equal(harness.world.scripts.filter((entry) => entry.script.includes('install-service')).length, installsBefore + 1);
+  assert.match((await harness.deps.store.readSettings()).coordinator?.deployment?.nodeId ?? '', /NEW$/u);
+});

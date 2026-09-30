@@ -40,6 +40,8 @@ interface FakeWorld {
   createdByKey: Map<string, string>;
   /** Hosts whose tailnet node comes back logged out after a resume (healthy again once repaired). */
   loggedOut: Set<string>;
+  /** When true, a coordinator is configured and `wake` goes through it. */
+  coordinatorWakes?: boolean;
   /** When set, scoped keys longer than this many days are refused like boat does. */
   maxKeyTtlDays?: number;
 }
@@ -175,6 +177,7 @@ function createFakeBootstrap(world: FakeWorld): BootstrapPort {
       world.calls.push(`repair ${sandbox.id} ${request.hostname}`);
       if (!world.loggedOut.has(request.hostname)) return { reenrolled: false, backendState: 'Running' };
       world.loggedOut.delete(request.hostname);
+      if (request.hostname.endsWith('-coord')) world.coordinatorHealthy = true;
       world.devices = world.devices.filter((device) => device.hostname !== request.hostname);
       const nodeId = `n${request.hostname.replace(/-/g, '')}NEW`;
       world.devices.push({ nodeId, hostname: request.hostname, name: `${request.hostname}.tailtest.ts.net`, online: true });
@@ -272,6 +275,15 @@ export async function createTestHarness(): Promise<TestHarness> {
       world.pushedDirectories.push(directory);
       const sessions = directory.sessions;
       return { pushed: true, sessions: Array.isArray(sessions) ? sessions.length : 0 };
+    },
+    async wakeViaCoordinator(sessionId) {
+      if (!world.coordinatorWakes) return null;
+      world.calls.push(`coordinator-wake ${sessionId}`);
+      const sandbox = [...world.sandboxes.values()].find((candidate) => candidate.name.endsWith(sessionId.slice(0, 8)));
+      if (!sandbox || sandbox.state !== 'stopped') return { status: 'lost' };
+      sandbox.state = 'running';
+      sandbox.pending = [];
+      return { status: 'awake', version: '2.4.141-pinned', detail: 'upgraded to pinned 2.4.141-pinned' };
     },
     async packCoordinatorApp() {
       return { archiveBase64: 'ZmFrZQ==', version: '2.4.141-test' };

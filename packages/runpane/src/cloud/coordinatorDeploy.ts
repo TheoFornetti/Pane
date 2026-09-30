@@ -30,6 +30,7 @@ const COORDINATOR_APP = `${SANDBOX_HOME}/.local/share/runpane-cloud-coordinator/
 const READY_TIMEOUT_MS = 180_000;
 const HEALTH_TIMEOUT_MS = 60_000;
 const POLL_MS = 1_500;
+const START_REPAIR_CHECK_MS = 30_000;
 
 /** Subcommands handled here; every other `cloud coordinator <sub>` goes to m4's coordinator CLI. */
 const LIFECYCLE = new Set(['deploy', 'stop', 'start', 'destroy']);
@@ -427,10 +428,31 @@ async function start(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
   const resumed = sandbox.state === 'stopped';
   if (resumed) await provider.resume(deployment.sandboxId);
   await waitForState(provider, deployment.sandboxId, 'running', READY_TIMEOUT_MS, deps);
-  // The unit is enabled with lingering, and the tailnet identity survives a stop (M0), so it comes back by itself.
-  const health = await waitForCoordinatorHealth(deployment.baseUrl, deps);
+  // The unit is enabled with lingering, so the service comes back by itself once the node is on the tailnet.
+  let health = await waitForCoordinatorHealth(deployment.baseUrl, deps, START_REPAIR_CHECK_MS);
+  let reenrolled: string | null = null;
+  if (!health.ok) {
+    // Seen live on boat: a resume can bring the node back logged out. Re-enrol it under the same name,
+    // then reinstall the config, whose listen address is the (new) tailnet IP.
+    const { credentials } = await loadProvider(deps);
+    if (!credentials.tailscale) throw new Error('No Tailscale OAuth client saved; cannot repair the coordinator\'s tailnet node.');
+    const repair = await deps.bootstrap.repairTailnet(provider.handle(deployment.sandboxId),
+      { hostname: deployment.hostname, oldNodeId: deployment.nodeId, restoreServe: false }, credentials.tailscale);
+    if (repair.reenrolled) {
+      reenrolled = repair.nodeId;
+      if (!args.json) deps.stdout(`runpane cloud: the coordinator's tailnet node came back logged out (${repair.previousBackendState}); re-enrolled it as ${repair.nodeId}.`);
+      const next: CoordinatorDeployment = { ...deployment, nodeId: repair.nodeId };
+      const secret = await deps.store.readSecretText('coordinator-secret');
+      if (!secret) throw new Error('The coordinator caller secret is missing locally; run runpane cloud coordinator deploy --yes.');
+      const app = await deps.packCoordinatorApp();
+      next.appVersion = app.version;
+      await installCoordinator(provider, next, { archiveBase64: app.archiveBase64, secret });
+      await saveDeployment(deps, next);
+    }
+    health = await waitForCoordinatorHealth(deployment.baseUrl, deps);
+  }
   const elapsed = deps.now() - started;
-  report(args, deps, { ok: health.ok, state: health.ok ? 'running' : 'service-down', hostname: deployment.hostname, resumed, version: health.version ?? null, elapsedMs: elapsed },
+  report(args, deps, { ok: health.ok, state: health.ok ? 'running' : 'service-down', hostname: deployment.hostname, resumed, reenrolledNodeId: reenrolled, version: health.version ?? null, elapsedMs: elapsed },
     health.ok
       ? `coordinator ${deployment.hostname} is running at ${deployment.baseUrl} (${(elapsed / 1000).toFixed(1)} s).`
       : `coordinator ${deployment.hostname} is up but its service did not answer /health; run runpane cloud coordinator deploy --yes to reinstall it.`);
@@ -523,8 +545,8 @@ function userCallerId(env: NodeJS.ProcessEnv): string {
   return `user:${name}`;
 }
 
-async function waitForCoordinatorHealth(baseUrl: string, deps: CloudDeps): Promise<{ ok: boolean; version?: string }> {
-  const deadline = deps.now() + HEALTH_TIMEOUT_MS;
+async function waitForCoordinatorHealth(baseUrl: string, deps: CloudDeps, timeoutMs = HEALTH_TIMEOUT_MS): Promise<{ ok: boolean; version?: string }> {
+  const deadline = deps.now() + timeoutMs;
   for (;;) {
     const health = await deps.probeCoordinatorHealth(baseUrl);
     if (health.ok || deps.now() >= deadline) return health;

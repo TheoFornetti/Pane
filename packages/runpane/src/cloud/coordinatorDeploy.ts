@@ -301,8 +301,14 @@ interface InstallOptions {
 }
 
 /** Unset timings fall back to the coordinator's defaults (check every 300 s, 600 s grace after a wake). */
-function idleStopConfig(deployment: CoordinatorDeployment): { enabled: true; intervalSeconds?: number; wakeGraceSeconds?: number } {
-  const config: { enabled: true; intervalSeconds?: number; wakeGraceSeconds?: number } = { enabled: true };
+interface IdleStopConfig {
+  enabled: true;
+  intervalSeconds?: number;
+  wakeGraceSeconds?: number;
+}
+
+function idleStopConfig(deployment: CoordinatorDeployment): IdleStopConfig {
+  const config: IdleStopConfig = { enabled: true };
   if (deployment.idleCheckSeconds) config.intervalSeconds = deployment.idleCheckSeconds;
   if (deployment.wakeGraceSeconds) config.wakeGraceSeconds = deployment.wakeGraceSeconds;
   return config;

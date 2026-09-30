@@ -2,6 +2,8 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { boundary, decodeBoundary, type BoundarySchema, type JsonObject } from '../../boundaryDecoder';
+import { RemoteDaemonClient, type RemoteHttpTransport } from '../../remote/remoteDaemonClient';
+import { decodePairingCode } from '../pairing';
 import { CLOUD_SESSION_TAG, type TailscaleApi } from '../tailscale';
 import { cloudBootstrapAssets, type CloudBootstrapAssetName } from './generated/assets';
 import { waitForDaemonHealth } from './health';
@@ -31,13 +33,22 @@ interface ProvisionOptions {
   pairingOutputPath: string;
   /**
    * Further paired clients (e.g. label "runpane-cloud-coordinator"); each client's pane-remote:// code
-   * is written to its local outputPath with mode 0600.
+   * is written to its local outputPath with mode 0600. `scope: 'coordinator'` pairs a client that may
+   * only call runpane:cloud:* channels (needs a Pane daemon that knows `--client-scope`).
    */
-  extraClients?: { label: string; outputPath: string }[];
+  extraClients?: { label: string; outputPath: string; scope?: 'coordinator' }[];
   tags?: string[];
+  /**
+   * TCP ports other tailnet nodes may open on this sandbox (default [443], Tailscale Serve in front of
+   * the daemon). The tailnet policy lets rp-session nodes reach each other on every port; the host
+   * firewall narrows that. A coordinator box adds its API port.
+   */
+  tailnetTcpPorts?: number[];
   healthTimeoutMs?: number;
   sandboxHome?: string;
   fetchImpl?: typeof fetch;
+  /** HTTP transport for the paired /invoke call that registers the repo; tests pass a fake. */
+  remoteTransport?: RemoteHttpTransport;
   onStep?: (step: ProvisionStep) => void;
 }
 
@@ -106,7 +117,8 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     return value;
   };
   const runner = new StepRunner(sandbox, home);
-  const { identity, tailnet, deletedStaleNodeIds } = await prepareAndJoin(sandbox, runner, options, hostname, tags, home, step);
+  const { identity, tailnet, deletedStaleNodeIds } = await prepareAndJoin(sandbox, runner, options, hostname, tags, home, step,
+    options.tailnetTcpPorts ?? [443]);
 
   const runpaneSpec = options.paneSource.kind === 'runpane-npm' ? options.paneSource.spec : '';
   const install = await step('install-pane', () => runner.run('install-pane', [
@@ -117,9 +129,11 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     options.label,
   ], installStepSchema, { timeoutSeconds: 600 }), (value) => value.version ?? 'installed');
 
-  await step('pairing', async () => {
+  const pairingCode = await step('pairing', async () => {
     const pairing = await runner.run('pairing-read', [], pairingStepSchema);
-    writeSecretFile(options.pairingOutputPath, requirePairingCode(pairing.code));
+    const code = requirePairingCode(pairing.code);
+    writeSecretFile(options.pairingOutputPath, code);
+    return code;
   });
 
   const extraClientPaths: string[] = [];
@@ -127,7 +141,7 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     await step('extra-clients', async () => {
       for (const client of options.extraClients ?? []) {
         const slug = clientSlug(client.label);
-        await runner.run('add-client', [slug, client.label], envelopeSchema, { timeoutSeconds: 180 });
+        await runner.run('add-client', [slug, client.label, client.scope ?? ''], envelopeSchema, { timeoutSeconds: 180 });
         const pairing = await runner.run('pairing-read', [slug], pairingStepSchema);
         writeSecretFile(client.outputPath, requirePairingCode(pairing.code));
         extraClientPaths.push(client.outputPath);
@@ -136,6 +150,7 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
   }
 
   let repoDir: string | undefined;
+  const repoName = options.repo ? repoNameFromUrl(options.repo.url) : undefined;
   if (options.repo) {
     const repo = options.repo;
     const dir = repo.dir ?? path.posix.join(home, repoNameFromUrl(repo.url));
@@ -157,6 +172,13 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     }
     return result;
   }, (value) => `${value.elapsedMs} ms`);
+
+  if (repoDir && repoName) {
+    const dir = repoDir;
+    // A clone alone is invisible to Pane: register it so `panes create --repo <name>` works. Idempotent on re-run.
+    await step('register-repo', () => registerRepo(pairingCode, dir, repoName, options.remoteTransport),
+      () => repoName);
+  }
 
   return {
     ...tailnet,
@@ -186,6 +208,7 @@ async function prepareAndJoin(
   tags: string[],
   home: string,
   step: StepFn,
+  tailnetTcpPorts: number[],
 ): Promise<{ identity: { reset?: boolean }; tailnet: TailnetIdentity; deletedStaleNodeIds: string[] }> {
   await step('upload-scripts', () => uploadScripts(sandbox, home));
   const identity = await step('identity', () => runner.run('identity', [options.sessionId], identityStepSchema),
@@ -203,6 +226,9 @@ async function prepareAndJoin(
       return check;
     }, (value) => `${String(value.passed)} passed`);
   }
+
+  await step('firewall', () => runner.run('firewall', [tailnetTcpPorts.join(',')], firewallStepSchema, { timeoutSeconds: 300 }),
+    (value) => `tailnet tcp ${(value.allowedTcp ?? tailnetTcpPorts).join(',')} only`);
 
   const deletedStaleNodeIds: string[] = [];
   const tailnet = await step('tailscale-join', async () => {
@@ -225,6 +251,8 @@ interface JoinOnlyOptions {
   /** Keys the one-time identity reset, like a cloud Session id does in provisionSandbox. */
   sessionId: string;
   hostname: string;
+  /** The only tcp ports this node accepts from the tailnet (the coordinator: its API port). */
+  tailnetTcpPorts: number[];
   tailscale: TailscaleApi;
   tags?: string[];
   sandboxHome?: string;
@@ -247,7 +275,8 @@ export async function joinSandboxToTailnet(sandbox: SandboxHandle, options: Join
     return value;
   };
   const runner = new StepRunner(sandbox, home);
-  const { tailnet } = await prepareAndJoin(sandbox, runner, options, hostname, options.tags ?? [CLOUD_SESSION_TAG], home, step);
+  const { tailnet } = await prepareAndJoin(sandbox, runner, options, hostname, options.tags ?? [CLOUD_SESSION_TAG], home, step,
+    options.tailnetTcpPorts);
   return tailnet;
 }
 
@@ -322,6 +351,21 @@ export async function repairTailnetIfLoggedOut(sandbox: SandboxHandle, options: 
   return { reenrolled: true, previousBackendState: backendState, ...result };
 }
 
+async function registerRepo(pairingCode: string, dir: string, name: string, transport?: RemoteHttpTransport): Promise<void> {
+  const pairing = decodePairingCode(pairingCode);
+  const client = new RemoteDaemonClient({
+    profile: { id: 'runpane-cloud-bootstrap', label: pairing.label, baseUrl: pairing.baseUrl, token: pairing.token },
+    runtimeId: 'runpane-cloud-bootstrap',
+    clientLabel: 'runpane cloud',
+    transport,
+  });
+  try {
+    await client.invoke('runpane:repos:add', [{ path: dir, name }], { timeoutMs: 60_000 });
+  } catch (error) {
+    throw new BootstrapError('register-repo', `could not register ${dir} with the Pane daemon: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function joinTailnet(
   sandbox: SandboxHandle,
   runner: StepRunner,
@@ -386,6 +430,7 @@ const checkStepSchema = boundary.object({
 const installStepSchema = boundary.object({ version: boundary.optional(boundary.nullable(boundary.string)) });
 const pairingStepSchema = boundary.object({ code: boundary.nonEmptyString });
 const cloneStepSchema = boundary.object({ head: boundary.optional(boundary.string) });
+const firewallStepSchema = boundary.object({ allowedTcp: boundary.optional(boundary.array(boundary.number)) });
 
 type TailnetStepResult = ReturnType<typeof tailnetStepSchema.decode>;
 

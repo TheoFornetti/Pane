@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { boundary, decodeBoundary } from '../../boundaryDecoder';
 import type { Clock, ProviderSandbox } from './types';
 import { isLiveState } from './types';
 
@@ -54,16 +57,26 @@ export class SandboxActivity {
 
 export type GuardVerdict = { ok: true } | { ok: false; code: 'runaway-guard' | 'wake-rate-limited'; message: string };
 
+interface ResumeRecord {
+  sandboxId: string;
+  at: number;
+}
+
+const resumeHistorySchema = boundary.array(boundary.object({ sandboxId: boundary.string, at: boundary.number }));
+
 /**
  * Runaway guard: caps live cloud sandboxes (final-plan §4: 25 per user by default) and how often the
  * coordinator may resume, per sandbox and overall, so a wake loop can't burn money unnoticed.
+ * With `historyFile`, the last hour's resumes live in that file, so the service, each
+ * `coordinator wake --local` run and a restarted service all count the same resumes.
  */
 export class RunawayGuard {
-  private resumes: Array<{ sandboxId: string; at: number }> = [];
+  private resumes: ResumeRecord[] = [];
 
   constructor(
     private readonly clock: Clock,
     private readonly limits: { maxLiveSandboxes: number; maxResumesPerSandboxPerHour: number; maxResumesPerHour: number },
+    private readonly historyFile?: string,
   ) {}
 
   countLive(managed: readonly ProviderSandbox[]): number {
@@ -92,6 +105,7 @@ export class RunawayGuard {
         message: `refusing to wake: ${live} cloud sandboxes are already live (limit ${this.limits.maxLiveSandboxes})`,
       };
     }
+    this.load();
     this.prune();
     const forSandbox = this.resumes.filter((entry) => entry.sandboxId === sandboxId).length;
     if (forSandbox >= this.limits.maxResumesPerSandboxPerHour) {
@@ -112,7 +126,28 @@ export class RunawayGuard {
   }
 
   recordResume(sandboxId: string): void {
+    this.load();
+    this.prune();
     this.resumes.push({ sandboxId, at: this.clock.now() });
+    this.save();
+  }
+
+  /** Another process may have resumed since: the file wins. Missing or unreadable means no history. */
+  private load(): void {
+    if (!this.historyFile) return;
+    try {
+      this.resumes = decodeBoundary(JSON.parse(fs.readFileSync(this.historyFile, 'utf8')), resumeHistorySchema);
+    } catch {
+      // No file yet, or a torn/foreign one: keep what this process knows.
+    }
+  }
+
+  private save(): void {
+    if (!this.historyFile) return;
+    fs.mkdirSync(path.dirname(this.historyFile), { recursive: true, mode: 0o700 });
+    const temporary = `${this.historyFile}.${process.pid}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify(this.resumes), { mode: 0o600 });
+    fs.renameSync(temporary, this.historyFile);
   }
 
   private prune(): void {

@@ -20,13 +20,19 @@ It runs on a tiny sandbox of its own (boat `small`), joined to the tailnet as `t
   47300.
 - **The systemd unit.** It runs as the user unit `runpane-cloud-coordinator.service` with linger enabled.
   It never uses `pane-remote-daemon`.
+- **Its token on each Session.** `runpane cloud new` pairs the coordinator as a `scope: 'coordinator'`
+  client (`pane --remote-setup --client-scope coordinator`). That token may call only
+  `runpane:cloud:safe-to-stop` and `runpane:cloud:upgrade` (403 `ERR_COORDINATOR_CHANNEL_FORBIDDEN`
+  otherwise); `/events` and WebSocket upgrades are refused. A leaked directory can't reach panels or shells.
 - **The provider key.** It holds a scoped boat key with `sandbox.read`, `sandbox.stop` and
   `sandbox.resume` only (`POST /api-keys/scoped`). There is no create, fork or delete: `runpane cloud new`
   and `destroy` run on the laptop with the unscoped key. Scope the key to the Sessions' sandbox ids when
   you can. The provider interface also has no delete method, so the code can't destroy a sandbox either.
 - **State.** The coordinator keeps no state that must persist (v4 I15). The provider and the directory
-  are the truth. What it keeps in memory (wake times, safe-to-stop streaks, resume counts) only makes it
-  more cautious after a restart.
+  are the truth. Wake times and safe-to-stop streaks live in memory; losing them only makes it more
+  cautious after a restart. The runaway guard's resume history (last hour) is kept in
+  `<stateDir>/resumes.json`, so the service, a restarted service and `coordinator wake --local` all count
+  the same resumes.
 
 ## What it does
 
@@ -34,8 +40,10 @@ It runs on a tiny sandbox of its own (boat `small`), joined to the tailnet as `t
 
 For each Session in the directory whose sandbox is running, the coordinator checks, in order:
 
-1. **Recently woken?** Skip it for `wakeGraceSeconds` (default 600) after a wake. This includes any wake
-   request, even for a host that was already awake, so a peer about to submit isn't raced.
+1. **Recently woken?** Skip it for `wakeGraceSeconds` (default 600) after a wake that resumed the
+   sandbox. Asking to wake a host that is already awake doesn't start the grace, so a peer can't keep a
+   host up by asking again and again. A user's wake of an awake host restarts the safe streak (step 4); a
+   peer's does not.
 2. **Daemon ready?** `GET /health` must answer and report ready. If the daemon is down, don't stop the
    sandbox; raise a `daemon-down` alert instead.
 3. **Safe to stop?** Call `POST /invoke runpane:cloud:safe-to-stop` with the coordinator's own paired-client
@@ -111,7 +119,7 @@ Every `/cloud/*` call needs `Authorization: Bearer rpc1.<callerId>.<mac>`, where
 |---|---|---|
 | `GET /health` | anyone (no auth) | liveness and the coordinator's version |
 | `GET /cloud/status?host=<id\|label\|tailnet name>` | peer, user | status **without** waking (for `workspace:wait` and `panels:list`) |
-| `POST /cloud/wake {host, wait=true, timeoutMs}` | peer, user | wake (for `panels:submit` only) |
+| `POST /cloud/wake {host, wait=true, timeoutMs}` | peer, user | wake (for `panels:submit` only). A peer may not wake its own sandbox (403 `peer-wake-refused`) and may cause at most 2 resumes per hour (429 `wake-rate-limited`) |
 | `POST /cloud/reconcile {dryRun}` | user | run a reconcile pass now |
 | `POST /cloud/idle-check {dryRun}` | user | run an idle-stop pass now |
 | `GET /cloud/alerts?limit=` | user | recent alerts |

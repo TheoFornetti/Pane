@@ -183,7 +183,9 @@ export class RemoteDaemonClient {
         const message = payload?.ok
           ? `Remote request failed with ${response.status}`
           : failure?.message ?? `Remote request failed with ${response.status}`;
-        if (!isRetryableResponse(response.status)) {
+        // The daemon's own error envelope means it ran the request and said no; only a response
+        // without it (a proxy's error page) leaves a mutation's outcome unknown.
+        if (!isRetryableResponse(response.status) || (failure?.code && !retryableRead)) {
           throw new RemoteRequestError(message, response.status, failure?.code ?? null);
         }
         lastError = new Error(message);

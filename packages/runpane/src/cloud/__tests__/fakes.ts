@@ -44,6 +44,11 @@ interface FakeWorld {
   coordinatorWakes?: boolean;
   /** When set, scoped keys longer than this many days are refused like boat does. */
   maxKeyTtlDays?: number;
+  /** boat names sandboxes only through a later PATCH: create returns them unnamed when set. */
+  createUnnamed?: boolean;
+  /** What the daemon's safe-to-stop answers `cloud stop`; 'unreachable' makes the call fail. */
+  safeToStop?: { safe: boolean; blockers: { condition: string; message: string }[] } | 'unreachable';
+  failRename?: string;
 }
 
 export interface FakeDaemon {
@@ -99,7 +104,7 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       world.sandboxCounter += 1;
       const sandbox: FakeSandbox = {
         id: `bx_fake${String(world.sandboxCounter).padStart(4, '0')}`,
-        name: request.name,
+        name: world.createUnnamed ? '' : request.name,
         state: 'starting',
         providerState: 'provisioning',
         size: request.size,
@@ -121,6 +126,8 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       return [...world.sandboxes.values()].map(snapshot);
     },
     async rename(id, name) {
+      world.calls.push(`rename ${id} ${name}`);
+      if (world.failRename) throw new Error(world.failRename);
       need(id).name = name;
     },
     async stop(id) {
@@ -269,6 +276,12 @@ export async function createTestHarness(): Promise<TestHarness> {
     now: () => clock,
     env: {},
     defaultDesktopDir: path.join(root, 'no-desktop-here'),
+    async safeToStop(profile) {
+      world.calls.push(`safe-to-stop ${profile.baseUrl}`);
+      const answer = world.safeToStop ?? { safe: true, blockers: [] };
+      if (answer === 'unreachable') throw new Error('connect ECONNREFUSED');
+      return { ...answer, flushed: true };
+    },
     async pushCoordinatorDirectory(directory) {
       if (!world.pushedDirectories) return { pushed: false, reason: NO_COORDINATOR };
       if (world.failPush) throw new Error(world.failPush);

@@ -186,6 +186,8 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
       const joined = await deps.bootstrap.joinTailnet(provider.handle(sandbox.id), {
         sessionId: `coord${randomBytes(4).toString('hex')}`,
         hostname,
+        // Over the tailnet the coordinator answers only its API port.
+        tailnetTcpPorts: [COORDINATOR_PORT],
         onStep: (step) => progress(`  - ${step}`),
       }, tailscale);
       timings.joinedMs = deps.now() - started;

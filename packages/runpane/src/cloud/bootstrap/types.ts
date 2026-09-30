@@ -39,12 +39,14 @@ export type ProvisionStepName =
   | 'identity'
   | 'tailscale-install'
   | 'check'
+  | 'firewall'
   | 'tailscale-join'
   | 'install-pane'
   | 'pairing'
   | 'extra-clients'
   | 'clone'
-  | 'health';
+  | 'health'
+  | 'register-repo';
 
 export interface ProvisionStep {
   step: ProvisionStepName;

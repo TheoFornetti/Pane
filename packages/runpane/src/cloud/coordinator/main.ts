@@ -122,7 +122,7 @@ async function runLocal(args: ParsedCoordinatorArgs, configPath: string): Promis
       if (!host) throw new Error(`${args.command} needs a host`);
       const result = args.command === 'status'
         ? await parts.api.status(host)
-        : await parts.api.wake(host, { wait: !args.flags.has('--no-wait'), timeoutMs: timeout ? Number(timeout) : undefined });
+        : await parts.api.wake(host, { wait: !args.flags.has('--no-wait'), timeoutMs: timeout ? Number(timeout) : undefined }, { role: 'user', id: 'user:local-cli' });
       printJson(result);
       return result.ok ? 0 : 1;
     }

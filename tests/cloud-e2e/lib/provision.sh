@@ -53,7 +53,10 @@ set -e
 $(_rp_shim_script)
 if [ -n "${E2E_RUNPANE_TGZ_URL:-}" ]; then mkdir -p /home/user/rcl/runpane && cd /home/user/rcl/runpane && npm init -y >/dev/null && npm i --no-audit --no-fund '${E2E_RUNPANE_TGZ_URL:-}' >/home/user/rcl/runpane-install.log 2>&1; cd /home/user; fi
 umask 077
-timeout 240 bash -c "$(printf %q "$install")" > /home/user/rcl/install.log 2>&1 || { echo "INSTALL FAILED"; sed -E 's#pane-remote://[A-Za-z0-9_=-]+#pane-remote://<redacted>#g' /home/user/rcl/install.log | tail -40; exit 1; }
+cat > /home/user/rcl/install.sh <<'INSTALL'
+$install
+INSTALL
+timeout 240 bash /home/user/rcl/install.sh > /home/user/rcl/install.log 2>&1 || { echo "INSTALL FAILED"; sed -E 's#pane-remote://[A-Za-z0-9_=-]+#pane-remote://<redacted>#g' /home/user/rcl/install.log | tail -40; exit 1; }
 grep -oE 'pane-remote://[A-Za-z0-9_=-]+' /home/user/rcl/install.log | tail -1 > /home/user/rcl/pairing.txt
 chmod 600 /home/user/rcl/pairing.txt
 test -s /home/user/rcl/pairing.txt || { echo "NO PAIRING CODE"; exit 1; }

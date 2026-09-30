@@ -42,7 +42,7 @@ export interface ProvisionOutcome {
   baseUrl: string;
   pairingPath: string;
   daemonVersion?: string;
-  timings: Record<string, number>;
+  timings: Partial<Record<string, number>>;
 }
 
 export interface HealthResult {

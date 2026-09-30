@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { createBoatProvider } from './boat';
-import { cloudHostname, provisionSandbox, waitForDaemonHealth, type ProvisionStepName } from './bootstrap';
+import { cloudHostname, provisionSandbox, waitForDaemonHealth } from './bootstrap';
 import type { CloudDeps } from './commands';
 import { defaultDesktopDir } from './desktop';
 import type { BootstrapPort } from './ports';
@@ -37,7 +37,7 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
         baseUrl: result.baseUrl,
         pairingPath: result.pairingPath,
         daemonVersion: result.daemonVersion,
-        timings: stepTimings(result.timings),
+        timings: result.timings,
       };
     },
   };
@@ -57,14 +57,6 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
     env,
     defaultDesktopDir: defaultDesktopDir(env),
   };
-}
-
-function stepTimings(timings: Partial<Record<ProvisionStepName, number>>): Record<string, number> {
-  const flat: Record<string, number> = {};
-  for (const [step, ms] of Object.entries(timings)) {
-    if (ms !== undefined) flat[step] = ms;
-  }
-  return flat;
 }
 
 /** Reads a secret from a file, or from stdin for "-". Secrets never come from argv (visible in `ps`). */

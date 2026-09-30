@@ -175,7 +175,9 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const namePrefix = args.namePrefix ?? settings.namePrefix ?? DEFAULT_NAME_PREFIX;
   const size: CloudSize = args.size ?? settings.size ?? 'default';
   const fromSnapshot = args.noGolden ? undefined : args.fromSnapshot ?? settings.goldenSnapshot;
-  const paneSource = paneSourceFromArgs(args) ?? settings.paneSource ?? DEFAULT_PANE_SOURCE;
+  // A golden image already carries the Pane .deb (m2-dist); a plain image needs it installed.
+  const paneSource = paneSourceFromArgs(args) ?? settings.paneSource
+    ?? (fromSnapshot ? { kind: 'preinstalled' } : DEFAULT_PANE_SOURCE);
   const maxLive = settings.maxLiveSandboxes ?? DEFAULT_MAX_LIVE_SANDBOXES;
   const progress = (line: string) => (args.json ? deps.stderr(line) : deps.stdout(line));
 

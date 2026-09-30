@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { boundary, decodeBoundary, type BoundarySchema } from '../boundaryDecoder';
+import { boundary, decodeBoundary, type BoundarySchema, type JsonValue } from '../boundaryDecoder';
 import {
   CLOUD_SIZES,
   CloudProviderError,
@@ -59,7 +59,7 @@ interface BoatRequest {
 
 interface BoatResponse {
   status: number;
-  body: unknown;
+  body: JsonValue | undefined;
 }
 
 const optionalText = boundary.optional(boundary.nullable(boundary.string));
@@ -109,12 +109,10 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
     let lastError: Error | undefined;
     for (let attempt = 0; attempt < attempts; attempt++) {
       if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt - 1] ?? 4_000);
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${options.apiKey}`,
-        Accept: 'application/json',
-        ...request.headers,
-      };
-      if (request.body) headers['Content-Type'] = 'application/json';
+      const headers = new Headers(request.headers);
+      headers.set('Authorization', `Bearer ${options.apiKey}`);
+      headers.set('Accept', 'application/json');
+      if (request.body) headers.set('Content-Type', 'application/json');
       try {
         const response = await fetchImpl(`${baseUrl}${request.path}`, {
           method: request.method,
@@ -134,13 +132,13 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
     throw lastError ?? new Error(`boat ${request.method} ${request.path} failed`);
   }
 
-  async function call(request: BoatRequest, okStatuses: readonly number[] = [200, 201, 202]): Promise<unknown> {
+  async function call(request: BoatRequest, okStatuses: readonly number[] = [200, 201, 202]): Promise<JsonValue | undefined> {
     const response = await send(request);
     if (!okStatuses.includes(response.status)) throw boatError(request, response.status, response.body);
     return response.body;
   }
 
-  function decode<Value>(body: unknown, schema: BoundarySchema<Value>, request: Pick<BoatRequest, 'method' | 'path'>): Value {
+  function decode<Value>(body: JsonValue | undefined, schema: BoundarySchema<Value>, request: Pick<BoatRequest, 'method' | 'path'>): Value {
     try {
       return decodeBoundary(body, schema);
     } catch (error) {
@@ -152,7 +150,7 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
   }
 
   /** boat wraps a sandbox as `{ sandbox }` on most calls, and returns it bare on some. */
-  function decodeSandbox(body: unknown, request: Pick<BoatRequest, 'method' | 'path'>): CloudSandbox {
+  function decodeSandbox(body: JsonValue | undefined, request: Pick<BoatRequest, 'method' | 'path'>): CloudSandbox {
     const envelope = decode(body, sandboxEnvelopeSchema, request);
     return toCloudSandbox(envelope.sandbox ?? decode(body, sandboxSchema, request));
   }
@@ -246,8 +244,7 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
       await call({ method: 'POST', path: `/sandboxes/${encodeId(sandboxId)}/stop`, body: {} });
     },
     async resume(sandboxId, resumeOptions) {
-      const body: { type?: CloudSize } = {};
-      if (resumeOptions?.size) body.type = resumeOptions.size;
+      const body = resumeOptions?.size ? { type: resumeOptions.size } : {};
       await call({ method: 'POST', path: `/sandboxes/${encodeId(sandboxId)}/resume`, body });
     },
     async destroy(sandboxId) {
@@ -301,7 +298,7 @@ function goneSandbox(sandboxId: string): CloudSandbox {
   return { id: sandboxId, name: '', state: 'gone', providerState: 'not_found' };
 }
 
-function boatError(request: Pick<BoatRequest, 'method' | 'path'>, status: number, body: unknown): CloudProviderError {
+function boatError(request: Pick<BoatRequest, 'method' | 'path'>, status: number, body: JsonValue | undefined): CloudProviderError {
   let code: string | undefined;
   let message = '';
   try {
@@ -318,10 +315,10 @@ function boatError(request: Pick<BoatRequest, 'method' | 'path'>, status: number
   );
 }
 
-function parseJson(text: string): unknown {
+function parseJson(text: string): JsonValue | undefined {
   if (!text.trim()) return undefined;
   try {
-    return JSON.parse(text);
+    return decodeBoundary(JSON.parse(text), boundary.json);
   } catch {
     return undefined;
   }

@@ -62,11 +62,18 @@ runpane cloud setup \
   --boat-key-file <($D BOAT_DEV_API_KEY) \
   --tailscale-client-id krreHuCr3M11CNTRL \
   --tailscale-secret-file <($D TAILSCALE_OAUTH_SECRET) \
+  --claude-token-file <($D <Claude token secret name>) \
   --golden <golden snapshot name> \
+  --name-prefix rp-red \
   --size large
 ```
 
-- Add `--anthropic-key-file <($D ANTHROPIC_API_KEY)` to store an Anthropic key as well.
+- Agent sign-in for cloud Sessions (see [Agents in a cloud Session](#agents-in-a-cloud-session)):
+  `--claude-token-file` takes a Claude subscription token (from `claude setup-token`);
+  `--anthropic-key-file <($D ANTHROPIC_API_KEY)` takes an Anthropic API key instead. Both are optional.
+- `--name-prefix` names your sandboxes and tailnet hosts `<prefix>-<id>` (default `rp`). The coordinator
+  manages every sandbox whose name starts with `<prefix>-`, so pick a prefix no other sandboxes in the
+  boat account use: the build loop's boxes are all `rp-loop-*`, which `rp-` would match.
 - `--golden` names the image new Sessions start from: a boat named snapshot with the Pane daemon, Tailscale
   and Playwright's Chromium preinstalled. It makes `new` about a minute faster. Without it (`--no-golden`)
   each `new` installs everything onto the plain image. Fork builds make goldens named
@@ -168,8 +175,10 @@ runpane cloud wake "api work"         # resumes and returns once the daemon answ
   tailnet name and its pairing. Wake takes about 10 to 13 seconds to `/health`.
 - After a wake, panels come back: submitting to a panel restarts it if needed, and a Claude panel resumes
   the same conversation.
-- boat's stop is a hard power-off after a live snapshot, with no shutdown signal. `stop` runs `sync` in
-  the sandbox first so recent writes are kept. `--force` skips that; avoid it.
+- boat's stop is a hard power-off after a live snapshot, with no shutdown signal. So `stop` first asks
+  the daemon to flush (it checkpoints Pane's database and syncs the disk; an older daemon just gets
+  `sync`). If an agent is still working or a terminal is busy, `stop` warns but stops anyway, because you
+  asked. `--force` skips the flush; avoid it.
 - `~/.cache`, `/tmp` and `/var/tmp` are not kept across a stop.
 - Every wake counts against boat's start limit; see [Costs](#costs).
 - `wake --size large` resumes onto a bigger machine (about 11 s); the disk is kept.

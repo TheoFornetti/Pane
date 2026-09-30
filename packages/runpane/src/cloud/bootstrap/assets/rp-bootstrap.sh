@@ -65,8 +65,8 @@ pane_listen_port() {
   python3 - "$HOME/.pane_remote/config.json" <<'PY' 2>/dev/null || echo 42137
 import json, sys
 d = json.load(open(sys.argv[1]))
-host = (d.get("remoteDaemon") or {}).get("host") or {}
-print(host.get("listenPort") or 42137)
+config = ((d.get("remoteDaemon") or {}).get("host") or {}).get("config") or {}
+print(config.get("listenPort") or 42137)
 PY
 }
 
@@ -187,6 +187,8 @@ step_install_pane() {
     *) fail "unknown pane source $mode" ;;
   esac
   sudo loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
+  # Pane's setup runs `tailscale serve` as this user; make it the node's operator (no other rights).
+  sudo tailscale set --operator="$(id -un)" >/dev/null 2>&1 || fail "tailscale set --operator failed"
   npx --yes --package="$spec" runpane install daemon --format deb --prefer-tunnel tailscale --auto-listen-port \
     --label "$label" >"$RP_STATE/install.log" 2>&1 || rc=$?
   code="$(awk '/^Connection code:/{getline; print; exit}' "$RP_STATE/install.log" | tr -d '\r')"
@@ -205,8 +207,9 @@ step_install_pane() {
 step_add_client() {
   local slug="$1" label="$2" rc=0 code log="$RP_STATE/client-$1.log"
   [ -x /opt/Pane/pane ] || fail "Pane is not installed"
+  # Keep the running daemon's port: --auto-listen-port would see it busy and move the daemon.
   /opt/Pane/pane --ozone-platform=headless --disable-gpu --remote-setup --label "$label" --prefer-tunnel tailscale \
-    --no-install-service --auto-listen-port >"$log" 2>&1 || rc=$?
+    --no-install-service --listen-port "$(pane_listen_port)" >"$log" 2>&1 || rc=$?
   code="$(awk '/^Connection code:/{getline; print; exit}' "$log" | tr -d '\r')"
   sed -i -E 's#pane-remote://[^[:space:]]*#<pairing-redacted>#g' "$log"
   [ "$rc" -eq 0 ] || fail "pane --remote-setup exited $rc: $(tail -5 "$log" | tr '\n' ' ')"

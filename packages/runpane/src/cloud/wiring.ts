@@ -1,8 +1,12 @@
 import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+import type { JsonObject } from '../boundaryDecoder';
 import { createBoatProvider } from './boat';
 import { cloudHostname, provisionSandbox, waitForDaemonHealth } from './bootstrap';
 import { runCoordinatorCommand } from './coordinator';
 import type { CloudDeps } from './commands';
+import { callCoordinator, readClientConfig } from './coordinator/client';
+import { NO_COORDINATOR, type CoordinatorPushResult } from './coordinatorSync';
 import { defaultDesktopDir } from './desktop';
 import type { BootstrapPort } from './ports';
 import { createCloudStore } from './store';
@@ -10,6 +14,7 @@ import { createTailscaleApi } from './tailscale';
 
 /** The real dependencies behind `runpane cloud`: boat REST, m1-bootstrap, the Tailscale API, local files. */
 export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): CloudDeps {
+  const store = createCloudStore();
   const bootstrap: BootstrapPort = {
     cloudHostname,
     createTailnet: (credentials) => createTailscaleApi(credentials),
@@ -44,7 +49,7 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
   };
 
   return {
-    store: createCloudStore(),
+    store,
     createProvider: (credentials) => {
       if (!credentials.boat) throw new Error('No boat API key saved. Run: runpane cloud setup --boat-key-file <path|->');
       return createBoatProvider({ apiKey: credentials.boat.apiKey });
@@ -58,7 +63,23 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
     env,
     defaultDesktopDir: defaultDesktopDir(env),
     runCoordinator: (argv) => runCoordinatorCommand(argv),
+    pushCoordinatorDirectory: (directory) => pushToCoordinator(path.join(store.dir, 'coordinator.json'), directory),
   };
+}
+
+/**
+ * PUT /cloud/directory on the coordinator named by `<cloud dir>/coordinator.json` ({baseUrl, token},
+ * written by `runpane cloud coordinator mint-token --client-config`). No file means no coordinator.
+ */
+async function pushToCoordinator(clientConfigPath: string, directory: JsonObject): Promise<CoordinatorPushResult> {
+  const client = readClientConfig(clientConfigPath);
+  if (!client) return { pushed: false, reason: NO_COORDINATOR };
+  const result = await callCoordinator(client, 'PUT', '/cloud/directory', directory, 60_000);
+  if (result.status < 200 || result.status >= 300) {
+    return { pushed: false, reason: `coordinator answered HTTP ${result.status}` };
+  }
+  const sessions = directory.sessions;
+  return { pushed: true, sessions: Array.isArray(sessions) ? sessions.length : 0 };
 }
 
 /** Reads a secret from a file, or from stdin for "-". Secrets never come from argv (visible in `ps`). */

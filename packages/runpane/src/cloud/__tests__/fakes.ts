@@ -1,7 +1,9 @@
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { JsonObject } from '../../boundaryDecoder';
 import type { CloudDeps } from '../commands';
+import { NO_COORDINATOR } from '../coordinatorSync';
 import { encodePairingCode } from '../pairing';
 import type { BootstrapPort, ProvisionRequest, TailnetDevice, TailnetPort } from '../ports';
 import type { CloudProvider, CloudSandbox, CloudSize, CreateSandboxRequest, SandboxHandle } from '../provider';
@@ -20,6 +22,9 @@ interface FakeSandbox extends CloudSandbox {
 
 interface FakeWorld {
   sandboxes: Map<string, FakeSandbox>;
+  /** Directories pushed to the coordinator, oldest first; undefined = no coordinator configured. */
+  pushedDirectories?: JsonObject[];
+  failPush?: string;
   devices: TailnetDevice[];
   calls: string[];
   scripts: { sandboxId: string; script: string }[];
@@ -156,6 +161,16 @@ function createFakeBootstrap(world: FakeWorld): BootstrapPort {
       });
       await fs.mkdir(path.dirname(request.pairingOutputPath), { recursive: true });
       await fs.writeFile(request.pairingOutputPath, `${code}\n`, { mode: 0o600 });
+      for (const extra of request.extraClients ?? []) {
+        const extraCode = encodePairingCode({
+          v: 1,
+          label: extra.label,
+          baseUrl: `https://${magicDnsName}`,
+          token: `coordinator-token-${request.sessionId}`,
+          transport: 'http+sse',
+        });
+        await fs.writeFile(extra.outputPath, `${extraCode}\n`, { mode: 0o600 });
+      }
       return {
         hostname: request.hostname,
         magicDnsName,
@@ -202,6 +217,13 @@ export async function createTestHarness(): Promise<TestHarness> {
     now: () => clock,
     env: {},
     defaultDesktopDir: path.join(root, 'no-desktop-here'),
+    async pushCoordinatorDirectory(directory) {
+      if (!world.pushedDirectories) return { pushed: false, reason: NO_COORDINATOR };
+      if (world.failPush) throw new Error(world.failPush);
+      world.pushedDirectories.push(directory);
+      const sessions = directory.sessions;
+      return { pushed: true, sessions: Array.isArray(sessions) ? sessions.length : 0 };
+    },
   };
   return { deps, world, out, err, root, desktopDir: path.join(root, 'desktop') };
 }

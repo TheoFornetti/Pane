@@ -1349,7 +1349,7 @@ export const RUNPANE_CONTRACT = {
       "name": "cloud destroy",
       "summary": "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host.",
       "usage": [
-        "runpane cloud destroy <host> [--desktop-dir <path>] --yes [--json]"
+        "runpane cloud destroy <host> [--desktop-dir <path>|--no-import] --yes [--json]"
       ],
       "mutates": true,
       "wrappers": [
@@ -3161,13 +3161,14 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud destroy": [
         "Usage:",
-        "  runpane cloud destroy <host> [--desktop-dir <path>] --yes [--json]",
+        "  runpane cloud destroy <host> [--desktop-dir <path>|--no-import] --yes [--json]",
         "",
         "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host.",
         "",
         "Options:",
         "  <host>                 Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
         "  --desktop-dir <path>   Desktop Pane data directory whose saved remote hosts to update (default $RUNPANE_CLOUD_DESKTOP_DIR, else ~/.pane; $PANE_DIR is ignored).",
+        "  --no-import            Leave Pane desktop's saved remote hosts untouched.",
         "  --yes                  Confirm this change; required because it costs money or deletes data.",
         "  --json                 Print machine-readable output."
       ],
@@ -4353,7 +4354,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud destroy": [
         "Usage:",
-        "  runpane cloud destroy <host> [--desktop-dir <path>] --yes [--json]",
+        "  runpane cloud destroy <host> [--desktop-dir <path>|--no-import] --yes [--json]",
         "",
         "`runpane cloud destroy` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud destroy"
@@ -14103,6 +14104,11 @@ export const RUNPANE_CONTRACT = {
             "value": "<path>",
             "required": false,
             "description": "Desktop Pane data directory whose saved remote hosts to update (default $RUNPANE_CLOUD_DESKTOP_DIR, else ~/.pane; $PANE_DIR is ignored)."
+          },
+          {
+            "name": "--no-import",
+            "required": false,
+            "description": "Leave Pane desktop's saved remote hosts untouched."
           },
           {
             "name": "--yes",

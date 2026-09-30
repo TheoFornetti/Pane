@@ -337,7 +337,8 @@ async function runList(args: CloudArgs, deps: CloudDeps): Promise<number> {
     };
   });
   const known = new Set(records.map((record) => record.profile.cloud.sandboxId));
-  const prefixes = new Set([DEFAULT_NAME_PREFIX, ...records.map((record) => record.meta.namePrefix)]);
+  const settings = await deps.store.readSettings();
+  const prefixes = new Set([settings.namePrefix ?? DEFAULT_NAME_PREFIX, ...records.map((record) => record.meta.namePrefix)]);
   const unmanaged = sandboxes
     .filter((sandbox) => !known.has(sandbox.id) && [...prefixes].some((prefix) => sandbox.name.startsWith(`${prefix}-`)))
     .map((sandbox) => ({ sandboxId: sandbox.id, name: sandbox.name, state: sandbox.state }));
@@ -378,11 +379,18 @@ async function runStatus(args: CloudArgs, deps: CloudDeps): Promise<number> {
     deps.stdout(`${record.profile.cloud.hostname}: ${report.status}`);
     deps.stdout(`  sandbox ${record.profile.cloud.sandboxId}: ${report.sandbox.providerState}${report.sandbox.size ? ` (${report.sandbox.size})` : ''}`);
     const device = report.tailnet.devices[0];
-    deps.stdout(`  tailnet: ${device ? `${device.name ?? device.hostname} ${device.online ? 'online' : 'offline'}${device.lastSeen ? `, last seen ${device.lastSeen}` : ''}` : 'no device'}${report.tailnet.sameNode === false ? ' (node id changed!)' : ''}`);
+    deps.stdout(`  tailnet: ${device ? describeDevice(device) : 'no device'}${report.tailnet.sameNode === false ? ' (node id changed!)' : ''}`);
     deps.stdout(`  daemon: ${report.health ? `${report.health.ok ? 'healthy' : `not answering${report.health.status ? ` (HTTP ${report.health.status})` : ''}`}${report.health.version ? `, version ${report.health.version}` : ''}` : 'not checked (sandbox not running)'}`);
     deps.stdout(`  url: ${record.profile.baseUrl || '-'}`);
   }
   return report.status === 'lost' ? 1 : 0;
+}
+
+function describeDevice(device: TailnetDevice): string {
+  const parts = [device.name ?? device.hostname, device.nodeId];
+  if (device.online !== undefined) parts.push(device.online ? 'online' : 'offline');
+  if (device.lastSeen) parts.push(`last seen ${device.lastSeen}`);
+  return parts.join(', ');
 }
 
 async function hostStatus(record: CloudHostRecord, provider: CloudProvider, tailnet: TailnetPort, deps: CloudDeps): Promise<HostStatusReport> {
@@ -435,6 +443,7 @@ async function runStop(args: CloudArgs, deps: CloudDeps): Promise<number> {
   // boat's stop is a hard power-off about 1 s after a live snapshot, with no SIGTERM (M0), so flush
   // the page cache first. m2's safe-to-stop API will replace this with a real checkpoint.
   let flushed = false;
+  const timings: Record<string, number> = {};
   if (!args.force && sandbox.state === 'running') {
     try {
       const result = await provider.handle(sandboxId).runScript('sync; sleep 0.2; sync', { timeoutSeconds: 30 });
@@ -442,16 +451,17 @@ async function runStop(args: CloudArgs, deps: CloudDeps): Promise<number> {
     } catch (error) {
       deps.stderr(`runpane cloud: could not flush ${hostname} before stopping (${error instanceof Error ? error.message : String(error)}); stopping anyway.`);
     }
+    timings.flushMs = deps.now() - started;
   }
   await provider.stop(sandboxId);
-  const stopCallMs = deps.now() - started;
+  timings.stopAcceptedMs = deps.now() - started;
   let final: CloudSandbox | undefined;
   if (!args.noWait) final = await waitForSandbox(provider, sandboxId, 'stopped', STOP_TIMEOUT_MS, deps);
   const elapsedMs = deps.now() - started;
   report(
     args,
     deps,
-    { ok: true, host: hostname, status: final ? 'asleep' : 'stopping', flushed, timings: { stopCallMs, totalMs: elapsedMs } },
+    { ok: true, host: hostname, status: final ? 'asleep' : 'stopping', flushed, timings: { ...timings, totalMs: elapsedMs } },
     final ? `${hostname} is asleep (${(elapsedMs / 1000).toFixed(1)} s). Wake it with: runpane cloud wake ${hostname}` : `${hostname} is stopping.`,
   );
   return 0;

@@ -17,11 +17,13 @@ cli_resolve || { rec cli BLOCKED "runpane CLI under test not installable"; exit 
 E2E_TARGET="${E2E_TARGET_OVERRIDE:-${E2E_CLI_SOURCE##*/}}"; export E2E_TARGET
 
 CH="$E2E_SECRETS/coord"; CFG="$CH/config.json"; (umask 077; mkdir -p "$CH")
-coord() { rpc cloud coordinator "$@" --config "$CFG"; }
+coord() {  # in-process (--local) for the commands that act against a coordinator; init/serve/mint-token as-is
+  case "$1" in status|wake|reconcile|idle-check|alerts) rpc cloud coordinator "$@" --local --config "$CFG" ;;
+    *) rpc cloud coordinator "$@" --config "$CFG" ;; esac; }
 if coord help 2>&1 | grep -qiE 'not available|unknown cloud command'; then
   main=$(find "$(dirname "$(dirname "$(readlink -f "${RUNPANE_CMD[0]}")")")" -path '*coordinator/main.js' 2>/dev/null | head -1)
   [ -n "$main" ] || { rec coordinator BLOCKED "no coordinator in this runpane build ($E2E_CLI_SOURCE)"; exit 0; }
-  coord() { node "$main" "$@" --config "$CFG"; }
+  coord() { case "$1" in status|wake|reconcile|idle-check|alerts) node "$main" "$@" --local --config "$CFG" ;; *) node "$main" "$@" --config "$CFG" ;; esac; }
 fi
 KEYF="$E2E_SECRETS/boat.key"
 (umask 077; sed -E 's/^[^:]*:[[:space:]]*(Bearer[[:space:]]+)?//' "${CLOUDLAB_BOAT_AUTH_HEADER_FILE:-$HOME/rc-loop/secrets/boat.hdr}" | tr -d '\r\n' > "$KEYF")

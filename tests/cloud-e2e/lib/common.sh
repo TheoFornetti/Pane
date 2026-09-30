@@ -33,6 +33,7 @@ e2e_init() {
   exec > >(tee -a "$E2E_RUN_DIR/gate.log") 2>&1
   log "run $E2E_RUN_ID gate=$E2E_GATE target=$E2E_TARGET evidence=$E2E_RUN_DIR"
   trap e2e_finish EXIT
+  trap 'exit 143' TERM INT
 }
 
 # rec <check> <PASS|FAIL|XFAIL|SKIP|BLOCKED|INFO> <detail> [evidence-file] [k=v ...]
@@ -108,6 +109,8 @@ e2e_cleanup() {
 
 e2e_finish() {
   local rc=$?
+  # teardown must survive a dead tee (e.g. the run was stopped with its children): no SIGPIPE, log to file
+  trap '' PIPE; exec >>"$E2E_RUN_DIR/gate.log" 2>&1
   e2e_cleanup
   [ "${E2E_NO_MATRIX:-0}" = 1 ] || cl matrix >/dev/null 2>&1 || true
   # redact defensively: no pairing code or bearer token may survive in evidence

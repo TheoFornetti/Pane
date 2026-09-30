@@ -162,6 +162,33 @@ describe('invokeRemote wake policy', () => {
     assert.equal(invokes, 3);
   });
 
+  it('reports a command error the daemon answered as that error, not as unconfirmed', async () => {
+    const answered = (status: number, message: string, code: string) => async (): Promise<RemoteHttpResponse> => ({
+      status,
+      body: JSON.stringify({ ok: false, error: { message, code } }),
+    });
+    await assert.rejects(
+      invokeRemote(cloudTarget(), 'runpane:panes:create', [{ repo: 'nope' }], {
+        ...fast, transport: answered(500, 'No Pane repo found for "nope"', 'ERR_REMOTE_DAEMON_REQUEST_FAILED'),
+      }),
+      { name: 'RemoteTargetError', code: 'ERR_REMOTE_DAEMON_REQUEST_FAILED', message: 'No Pane repo found for "nope"' },
+    );
+    // A rate-limited peer submit was refused before delivery: the caller may resend later.
+    await assert.rejects(
+      invokeRemote(cloudTarget(), 'runpane:panels:submit', [{ panelId: 'x', input: 'hi' }], {
+        ...fast, transport: answered(429, 'This peer is sending too many messages', 'ERR_PEER_RATE_LIMITED'),
+      }),
+      { name: 'RemoteTargetError', code: 'ERR_PEER_RATE_LIMITED' },
+    );
+    // Without the daemon's envelope (a proxy error page) nobody knows whether it ran.
+    await assert.rejects(
+      invokeRemote(cloudTarget(), 'runpane:panes:create', [{ repo: 'r' }], {
+        ...fast, transport: async () => ({ status: 502, body: 'bad gateway' }),
+      }),
+      { name: 'RemoteTargetError', code: 'ERR_RUNPANE_REMOTE_UNCONFIRMED' },
+    );
+  });
+
   it('passes a peer policy refusal through with its code', async () => {
     const transport = async (): Promise<RemoteHttpResponse> => ({
       status: 403,

@@ -189,7 +189,7 @@ For `panes create --wait-ready`, `initialInput.delivery` says where the prompt w
 
 On a headless daemon, `panels submit`, `panels input`, `panels submit-composer` and `panels wait` start a terminal panel that is not running (resuming an agent's conversation, or a fresh shell) before delivering input. When a panel cannot run (its Pane is archived, or the desktop app has not opened it), they fail with code `ERR_PANEL_NOT_RUNNING` and details `{ panelId, paneId, runState, resumable }`.
 
-When a command run with `--json` fails, stdout carries one object `{ "ok": false, "code": "...", "message": "...", "details": { ... } }` (details only when the daemon sent them), the message also goes to stderr, and the exit code is 1. `code` is the daemon's code (for example `ERR_PANEL_NOT_RUNNING`, `ERR_DAEMON_REQUEST_FAILED`, `ERR_RUNPANE_DAEMON_CONNECT_FAILED`) or `ERR_RUNPANE_COMMAND_FAILED` for a CLI-side failure. `watch` and `mcp` keep their own error formats.
+When a command run with `--json` fails, stdout carries one object `{ "ok": false, "code": "...", "message": "...", "details": { ... } }` (details only when the daemon sent them), the message also goes to stderr, and the exit code is 1. `code` is the daemon's code (for example `ERR_PANEL_NOT_RUNNING`, `ERR_DAEMON_REQUEST_FAILED`, `ERR_RUNPANE_DAEMON_CONNECT_FAILED`) or `ERR_RUNPANE_COMMAND_FAILED` for a CLI-side failure. `watch` keeps its own error format, and `runpane mcp` tool errors carry only the message.
 
 `runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.
 

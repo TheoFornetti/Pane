@@ -18,7 +18,13 @@ const PAIRING = encodePairingCode({
   token: PAIRING_TOKEN,
   transport: 'http+sse',
 });
-const COORD_PAIRING = 'pane-remote://FAKE-coordinator-pairing';
+const COORD_PAIRING = encodePairingCode({
+  v: 1,
+  label: 'runpane-cloud-coordinator',
+  baseUrl: 'https://rp-k3j9x0q2.tailnet-example.ts.net',
+  token: 'FAKE-coordinator-token',
+  transport: 'http+sse',
+});
 const AUTH_KEY = 'tskey-fake-kSECRETSECRET-abcdef';
 
 interface FakeState {

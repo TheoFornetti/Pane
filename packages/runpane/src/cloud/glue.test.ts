@@ -98,6 +98,15 @@ test('coordinator deploy creates a small tailnet sandbox, a scoped key, and wire
   assert.doesNotMatch(printed, /scoped-secret-value|rpc1\./u);
 });
 
+test('coordinator deploy steps the scoped key lifetime down when the account key expires sooner', async () => {
+  const harness = await createTestHarness();
+  harness.world.maxKeyTtlDays = 100;
+  await harness.deps.store.writeSettings({ namePrefix: 'rp-test' });
+  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json']), 0);
+  assert.equal((await harness.deps.store.readSettings()).coordinator?.deployment?.scopedKeyTtl, '90d');
+  assert.equal(harness.world.calls.filter((call) => call.startsWith('scoped-key ')).length, 1);
+});
+
 test('coordinator deploy again updates in place: no new sandbox or key, pin applied', async () => {
   const harness = await createTestHarness();
   await harness.deps.store.writeSettings({ namePrefix: 'rp-test' });

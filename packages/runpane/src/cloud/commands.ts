@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import type { CloudArgs } from './args';
 import type { JsonObject, JsonValue } from '../boundaryDecoder';
 import { placeAgentCredentials } from './agentCredentials';
-import { isCoordinatorLifecycleCommand, runCoordinatorLifecycle } from './coordinatorDeploy';
+import { COORDINATOR_LIFECYCLE_USAGE, isCoordinatorLifecycleCommand, runCoordinatorLifecycle } from './coordinatorDeploy';
 import { NO_COORDINATOR, pushDirectory, type CoordinatorPushResult } from './coordinatorSync';
 import { syncDesktopProfiles, type DesktopImportResult } from './desktop';
 import { decodePairingCode } from './pairing';
@@ -80,6 +80,7 @@ export async function runCloudCommand(args: CloudArgs, deps: CloudDeps): Promise
     case 'sync': return runSync(args, deps);
     case 'coordinator':
       if (isCoordinatorLifecycleCommand(args.passthrough)) return runCoordinatorLifecycle(args.passthrough, deps);
+      if (['help', '--help', '-h', undefined].includes(args.passthrough[0])) deps.stdout(`${COORDINATOR_LIFECYCLE_USAGE}\n`);
       if (!deps.runCoordinator) throw new Error('runpane cloud coordinator is not available in this build.');
       return deps.runCoordinator(args.passthrough);
     case 'peers': return runPeersCommand(args.passthrough, deps);

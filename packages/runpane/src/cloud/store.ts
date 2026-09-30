@@ -49,6 +49,8 @@ export interface CoordinatorDeployment {
   baseUrl: string;
   /** The scoped provider key (read/stop/resume only) the coordinator holds; revoked on destroy. */
   scopedKeyId: string;
+  /** The lifetime the provider accepted, e.g. "360d" (it cannot outlive the account key). */
+  scopedKeyTtl?: string;
   /** Sandboxes whose name starts with this are the coordinator's to idle-stop and reconcile. */
   managedPrefix: string;
   reconcile: boolean;

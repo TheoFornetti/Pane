@@ -6,7 +6,7 @@ import type { CloudDeps } from '../commands';
 import { NO_COORDINATOR } from '../coordinatorSync';
 import { encodePairingCode } from '../pairing';
 import type { BootstrapPort, ProvisionRequest, TailnetDevice, TailnetPort } from '../ports';
-import type { CloudProvider, CloudSandbox, CloudSize, CreateSandboxRequest, SandboxHandle } from '../provider';
+import { CloudProviderError, type CloudProvider, type CloudSandbox, type CloudSize, type CreateSandboxRequest, type SandboxHandle } from '../provider';
 import { createCloudStore } from '../store';
 
 /**
@@ -38,6 +38,8 @@ interface FakeWorld {
   /** Shared by every fake provider instance, so ids stay unique across `createProvider` calls. */
   sandboxCounter: number;
   createdByKey: Map<string, string>;
+  /** When set, scoped keys longer than this many days are refused like boat does. */
+  maxKeyTtlDays?: number;
 }
 
 export interface FakeDaemon {
@@ -139,6 +141,9 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
     },
     handle,
     async createScopedKey(request) {
+      if (world.maxKeyTtlDays !== undefined && Number.parseInt(request.ttl, 10) > world.maxKeyTtlDays) {
+        throw new CloudProviderError('boat POST /api-keys/scoped failed with HTTP 403 (api_key_action_forbidden): A delegated key cannot outlive its parent.', 403, 'api_key_action_forbidden');
+      }
       world.calls.push(`scoped-key ${request.name} ${request.actions.join(',')}`);
       return { id: 'sak_fake1', secret: 'scoped-secret-value' };
     },

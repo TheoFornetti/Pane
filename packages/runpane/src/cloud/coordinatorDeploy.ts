@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { CloudDeps } from './commands';
 import { createCallerSecret, mintCallerToken } from './coordinator/callerAuth';
 import { pushDirectory } from './coordinatorSync';
-import type { CloudProvider, CloudSize } from './provider';
+import { CloudProviderError, type CloudProvider, type CloudSize } from './provider';
 import { refreshPeersFiles } from './peers';
 import {
   DEFAULT_NAME_PREFIX,
@@ -58,7 +58,7 @@ interface CoordinatorArgs {
   keyTtl: string;
 }
 
-const USAGE = `Usage:
+export const COORDINATOR_LIFECYCLE_USAGE = `On this machine (create and manage the coordinator sandbox):
   runpane cloud coordinator deploy --yes [--name <host>] [--size small|default|large] [--from <snapshot>|--no-golden]
         [--no-reconcile|--reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>]
         [--pin-version <v> --pin-deb-url <url> --pin-deb-sha256 <hex> | --no-pin] [--key-ttl <90d>] [--json]
@@ -70,7 +70,7 @@ const USAGE = `Usage:
 export function parseCoordinatorArgs(argv: readonly string[]): CoordinatorArgs {
   const [sub, ...rest] = argv;
   if (sub !== 'deploy' && sub !== 'status' && sub !== 'stop' && sub !== 'start' && sub !== 'destroy') {
-    throw new Error(USAGE);
+    throw new Error(COORDINATOR_LIFECYCLE_USAGE);
   }
   const args: CoordinatorArgs = { sub, json: false, yes: false, noGolden: false, noPin: false, keyTtl: '365d' };
   const value = (index: number, flag: string): string => {
@@ -110,7 +110,7 @@ export function parseCoordinatorArgs(argv: readonly string[]): CoordinatorArgs {
       case '--pin-deb-sha256': deployOnly(); args.pin = { ...args.pin, sha256: value(index++, flag) }; break;
       case '--no-pin': deployOnly(); args.noPin = true; break;
       case '--key-ttl': deployOnly(); args.keyTtl = value(index++, flag); break;
-      default: throw new Error(`Unknown option for runpane cloud coordinator ${sub}: ${flag}\n\n${USAGE}`);
+      default: throw new Error(`Unknown option for runpane cloud coordinator ${sub}: ${flag}\n\n${COORDINATOR_LIFECYCLE_USAGE}`);
     }
   }
   if (args.name !== undefined && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(args.name)) {
@@ -165,7 +165,7 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
   }
 
   const tailnet = deps.bootstrap.createTailnet(tailscale);
-  let scopedKey: { id: string; secret: string } | undefined;
+  let scopedKey: { id: string; secret: string; ttl: string } | undefined;
   if (!deployment) {
     const hostname = args.name ?? `${namePrefix}-coord`;
     const fromSnapshot = args.noGolden ? undefined : args.fromSnapshot ?? settings.goldenSnapshot;
@@ -188,17 +188,15 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
         onStep: (step) => progress(`  - ${step}`),
       }, tailscale);
       timings.joinedMs = deps.now() - started;
-      scopedKey = await provider.createScopedKey({
-        name: `runpane-cloud-coordinator ${hostname}`,
-        ttl: args.keyTtl,
-        actions: SCOPED_KEY_ACTIONS,
-      });
+      scopedKey = await createScopedKey(provider, `runpane-cloud-coordinator ${hostname}`, args.keyTtl);
+      progress(`  - scoped provider key ${scopedKey.id} (${SCOPED_KEY_ACTIONS.join(', ')}; expires in ${scopedKey.ttl})`);
       deployment = {
         sandboxId: sandbox.id,
         hostname,
         nodeId: joined.nodeId,
         baseUrl: `http://${joined.magicDnsName}:${COORDINATOR_PORT}`,
         scopedKeyId: scopedKey.id,
+        scopedKeyTtl: scopedKey.ttl,
         managedPrefix: `${namePrefix}-`,
         reconcile: true,
         deployedAt: new Date(started).toISOString(),
@@ -282,7 +280,7 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
   } else {
     deps.stdout(`runpane cloud: coordinator ${next.hostname} is ${created ? 'up' : 'updated'} at ${next.baseUrl} (${Math.round(timings.totalMs / 1000)} s, version ${summary.coordinator.version}).`);
     deps.stdout(`  manages sandboxes named ${next.managedPrefix}*; idle-stop on; reconcile ${next.reconcile ? 'on (stop + alert only)' : 'off'}.`);
-    deps.stdout(`  holds a provider key scoped to ${SCOPED_KEY_ACTIONS.join(', ')}; this machine's caller token is in ${deps.store.coordinatorClientPath} (0600).`);
+    deps.stdout(`  holds a provider key scoped to ${SCOPED_KEY_ACTIONS.join(', ')}${next.scopedKeyTtl ? ` (lifetime ${next.scopedKeyTtl} from ${next.deployedAt.slice(0, 10)}; destroy and redeploy before it expires)` : ''}; this machine's caller token is in ${deps.store.coordinatorClientPath} (0600).`);
     if (next.pin) deps.stdout(`  pinned Pane ${next.pin.version}: Sessions are upgraded to it when they wake.`);
     deps.stdout(`  directory: ${coordinator.pushed ? `${coordinator.sessions} cloud Session${coordinator.sessions === 1 ? '' : 's'}` : `not pushed (${coordinator.reason})`}.`);
     if (withoutClient.length > 0) {
@@ -481,6 +479,25 @@ async function removeCoordinator(
 }
 
 // ---------------------------------------------------------------- helpers
+
+/** Shorter lifetimes to fall back to, longest first, when the provider refuses the requested one. */
+const FALLBACK_KEY_TTLS = ['360d', '180d', '90d', '30d', '7d', '1d'];
+
+/**
+ * boat refuses a delegated key that outlives the account key creating it ("cannot outlive its
+ * parent"), so step down to the longest lifetime it accepts. The effective TTL is reported and saved.
+ */
+async function createScopedKey(provider: CloudProvider, name: string, ttl: string): Promise<{ id: string; secret: string; ttl: string }> {
+  for (const candidate of [ttl, ...FALLBACK_KEY_TTLS.filter((fallback) => fallback !== ttl)]) {
+    try {
+      const key = await provider.createScopedKey({ name, ttl: candidate, actions: SCOPED_KEY_ACTIONS });
+      return { ...key, ttl: candidate };
+    } catch (error) {
+      if (!(error instanceof CloudProviderError && error.status === 403 && /outlive/iu.test(error.message))) throw error;
+    }
+  }
+  throw new Error('The provider refused every scoped key lifetime down to 1 day; the account key is about to expire. Create a new account key and rerun runpane cloud setup.');
+}
 
 async function loadProvider(deps: CloudDeps): Promise<{ credentials: CloudCredentials; provider: CloudProvider }> {
   const credentials = await deps.store.readCredentials();

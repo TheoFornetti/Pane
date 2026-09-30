@@ -38,6 +38,17 @@ describe('runpane:peers:* commands', () => {
       .toMatchObject({ ok: true, peers: [{ label: 'Session A', allowedSessionIds: [] }] });
   });
 
+  it('takes the positional strings a contract daemonAction sends', async () => {
+    const { registry, config } = setup();
+    const minted = await registry.invoke('runpane:peers:mint', ['Session A']);
+    expect(minted).toMatchObject({ ok: true, peer: { label: 'Session A', allowedSessionIds: [] } });
+    expect(await registry.invoke('runpane:peers:allow', ['Session A', 'Session B']))
+      .toMatchObject({ ok: true, peer: { allowedSessionIds: ['session-b'] } });
+    expect(await registry.invoke('runpane:peers:list', [])).toMatchObject({ ok: true, peers: [{ label: 'Session A' }] });
+    await registry.invoke('runpane:peers:revoke', ['Session A']);
+    expect(config().host.clients).toEqual([]);
+  });
+
   it('refuses an unknown Session when minting', async () => {
     const { registry, config } = setup();
     await expect(registry.invoke('runpane:peers:mint', [{ label: 'A', sessions: ['nope'] }])).rejects.toThrow(/not found/);

@@ -4,7 +4,7 @@ import {
   type RemoteDaemonConfig,
   type RemoteDaemonHostAccess,
 } from '../../../../shared/types/remoteDaemon';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../../shared/validation/boundaryDecoder';
 import {
   listPeers,
   mintPeerRecord,
@@ -67,6 +67,18 @@ const revokeRequestSchema = boundary.object({
   peer: boundary.nonEmptyString,
 });
 
+// Each channel takes one request object, or the positional strings a contract
+// `daemonAction` sends (`runpane peers mint --name <label>` passes the label).
+function readRequest<Value>(
+  args: readonly PaneCommandValue[],
+  schema: BoundarySchema<Value>,
+  positional: readonly string[],
+): Value {
+  const [first] = args;
+  if (decodeOptionalBoundary(first, boundary.string) === undefined) return decodeBoundary(first ?? {}, schema);
+  return decodeBoundary(Object.fromEntries(positional.map((key, index) => [key, args[index]])), schema);
+}
+
 /**
  * Peer management for full clients and the local socket. Peers themselves
  * never reach these: the HTTP peer gate allows only its own short list.
@@ -83,8 +95,8 @@ export function registerPeerCommands(registry: PaneCommandRegistry, deps: PeerCo
     await deps.writeRemoteConfig(normalizeRemoteDaemonConfig(next));
   };
 
-  registry.register('runpane:peers:mint', (request: PaneCommandValue): Promise<PeerMintResult> => serialize(async () => {
-    const input = decodeBoundary(request, mintRequestSchema);
+  registry.register('runpane:peers:mint', (...args: PaneCommandValue[]): Promise<PeerMintResult> => serialize(async () => {
+    const input = readRequest(args, mintRequestSchema, ['label']);
     const allowedSessionIds = await Promise.all((input.sessions ?? []).map(deps.resolveSessionId));
     const current = deps.readRemoteConfig();
     const access = await deps.resolveHostAccess(current);
@@ -93,15 +105,15 @@ export function registerPeerCommands(registry: PaneCommandRegistry, deps: PeerCo
     return { ok: true, peer: minted.peer, connectionCode: minted.connectionCode };
   }));
 
-  registry.register('runpane:peers:list', async (request: PaneCommandValue = {}): Promise<PeerListResult> => {
-    const input = decodeBoundary(request ?? {}, listRequestSchema);
+  registry.register('runpane:peers:list', async (...args: PaneCommandValue[]): Promise<PeerListResult> => {
+    const input = readRequest(args, listRequestSchema, ['session']);
     const sessionId = input.session ? await deps.resolveSessionId(input.session) : undefined;
     return { ok: true, peers: listPeers(deps.readRemoteConfig(), sessionId) };
   });
 
   const registerAccess = (channel: 'runpane:peers:allow' | 'runpane:peers:deny', allowed: boolean) => {
-    registry.register(channel, (request: PaneCommandValue): Promise<PeerUpdateResult> => serialize(async () => {
-      const input = decodeBoundary(request, accessRequestSchema);
+    registry.register(channel, (...args: PaneCommandValue[]): Promise<PeerUpdateResult> => serialize(async () => {
+      const input = readRequest(args, accessRequestSchema, ['peer', 'session']);
       const sessionId = await deps.resolveSessionId(input.session);
       const updated = setPeerSessionAccess(deps.readRemoteConfig(), input.peer, sessionId, allowed);
       await commit(updated.config);
@@ -111,8 +123,8 @@ export function registerPeerCommands(registry: PaneCommandRegistry, deps: PeerCo
   registerAccess('runpane:peers:allow', true);
   registerAccess('runpane:peers:deny', false);
 
-  registry.register('runpane:peers:revoke', (request: PaneCommandValue): Promise<PeerRevokeResult> => serialize(async () => {
-    const input = decodeBoundary(request, revokeRequestSchema);
+  registry.register('runpane:peers:revoke', (...args: PaneCommandValue[]): Promise<PeerRevokeResult> => serialize(async () => {
+    const input = readRequest(args, revokeRequestSchema, ['peer']);
     const revoked = revokePeer(deps.readRemoteConfig(), input.peer);
     await commit(revoked.config);
     return { ok: true, revoked: true, peerId: revoked.peerId };

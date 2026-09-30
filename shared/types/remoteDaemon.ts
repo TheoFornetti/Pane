@@ -63,7 +63,7 @@ export interface RemoteDaemonHostRuntimeState {
   updatedAt: string;
 }
 
-export type RemoteDaemonClientScope = 'peer';
+export type RemoteDaemonClientScope = 'peer' | 'coordinator';
 
 export interface RemoteDaemonClientRecord {
   id: string;
@@ -71,7 +71,10 @@ export interface RemoteDaemonClientRecord {
   createdAt: string;
   tokenHash: string;
   lastUsedAt?: string;
-  /** Absent means a full-access paired client. 'peer' is another Pane Session with narrow access. */
+  /**
+   * Absent means a full-access paired client. 'peer' is another Pane Session with narrow access;
+   * 'coordinator' is the Runpane Cloud coordinator, which may only ask runpane:cloud:* questions.
+   */
   scope?: RemoteDaemonClientScope;
   /** Peer records only: orchestration Session ids on this host whose orchestrator panel the peer may reach. */
   allowedSessionIds?: string[];
@@ -440,7 +443,7 @@ const remoteClientRecordSchema: BoundarySchema<RemoteDaemonClientRecord> = bound
   createdAt: boundary.nonEmptyString,
   tokenHash: boundary.nonEmptyString,
   lastUsedAt: boundary.optional(boundary.nonEmptyString),
-  scope: boundary.optional(boundary.literal('peer')),
+  scope: boundary.optional(boundary.enumeration('peer', 'coordinator')),
   allowedSessionIds: boundary.optional(boundary.array(boundary.nonEmptyString)),
 });
 const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportPayload['tunnel']>> = boundary.object({

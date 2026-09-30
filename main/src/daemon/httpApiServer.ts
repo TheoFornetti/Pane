@@ -17,6 +17,7 @@ import { isPaneDaemonEventChannel } from './server';
 import {
   createDefaultRemoteDaemonConfig,
   getRemoteDaemonHostConfigValidationError,
+  type RemoteDaemonClientScope,
   type RemoteDaemonConnectedClient,
   type RemoteDaemonConfig,
   type RemoteDaemonEventEnvelope,
@@ -30,6 +31,7 @@ import type { BoundarySchema, JsonValue } from '../../../shared/validation/bound
 import { serializeJsonTransport } from './jsonTransport';
 import { cloudDaemonHealth, type CloudHealthFields } from './cloud/readiness';
 import { commandOriginForClient, userClientActivity } from './cloud/clientActivity';
+import { isCoordinatorAllowedChannel, isCoordinatorClient } from './cloud/coordinatorScope';
 import {
   authorizePeerInvoke,
   isPeerAllowedChannel,
@@ -98,7 +100,7 @@ interface AuthenticatedRemoteClient {
   id: string;
   tokenHash: string;
   label: string;
-  scope?: 'peer';
+  scope?: RemoteDaemonClientScope;
   allowedSessionIds?: string[];
 }
 
@@ -388,6 +390,10 @@ export class PaneRemoteHttpApiServer {
       writeRawHttpError(socket, 403, 'Peers may not open WebSocket connections');
       return;
     }
+    if (auth.ok && isCoordinatorClient(auth.client)) {
+      writeRawHttpError(socket, 403, 'The cloud coordinator may not open WebSocket connections');
+      return;
+    }
 
     if (url.pathname !== VOICE_DEEPGRAM_STREAM_PATH) {
       socket.destroy();
@@ -561,6 +567,17 @@ export class PaneRemoteHttpApiServer {
       await this.handlePeerInvoke(invokeRequest, auth.client, request, response);
       return;
     }
+    if (isCoordinatorClient(auth.client) && !isCoordinatorAllowedChannel(invokeRequest.channel)) {
+      // The coordinator's always-on box holds this token: it must never reach panels or shells.
+      this.writeJson(response, 403, {
+        ok: false,
+        error: {
+          message: `The cloud coordinator may not call ${invokeRequest.channel}.`,
+          code: 'ERR_COORDINATOR_CHANNEL_FORBIDDEN',
+        },
+      } satisfies RemoteInvokeErrorPayload);
+      return;
+    }
 
     await this.invokeAndRespond(
       request,
@@ -711,6 +728,17 @@ export class PaneRemoteHttpApiServer {
         error: {
           message: 'Peers may not open the event stream; use runpane:workspace:wait.',
           code: 'ERR_PEER_EVENTS_FORBIDDEN',
+        },
+      } satisfies RemoteInvokeErrorPayload);
+      return;
+    }
+
+    if (isCoordinatorClient(auth.client)) {
+      this.writeJson(response, 403, {
+        ok: false,
+        error: {
+          message: 'The cloud coordinator may not open the event stream.',
+          code: 'ERR_COORDINATOR_EVENTS_FORBIDDEN',
         },
       } satisfies RemoteInvokeErrorPayload);
       return;

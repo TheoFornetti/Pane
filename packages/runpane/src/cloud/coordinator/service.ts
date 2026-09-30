@@ -76,7 +76,7 @@ export function buildCoordinator(
   });
   const api: CoordinatorApi = {
     status: (host) => wake.status(host),
-    wake: (host, request) => wake.wake(host, request),
+    wake: (host, request, caller) => wake.wake(host, request, caller),
     reconcile: (options) => reconciler.runOnce(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
     idleCheck: (options) => idle.runOnce(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
   };

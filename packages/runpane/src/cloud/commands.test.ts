@@ -121,6 +121,20 @@ test('a failed setup removes the tailnet device first, then the sandbox, and for
   assert.deepEqual(await harness.deps.store.listHosts(), []);
 });
 
+test('new records an unnamed sandbox before naming it, and removes it when naming fails', async () => {
+  const named = await createTestHarness();
+  named.world.createUnnamed = true;
+  await run(named, ['new', '--yes', '--no-import', '--name-prefix', 'rp-test']);
+  assert.deepEqual([...named.world.sandboxes.values()].map((sandbox) => sandbox.name.startsWith('rp-test-')), [true]);
+
+  const harness = await createTestHarness();
+  harness.world.createUnnamed = true;
+  harness.world.failRename = 'boat PATCH failed with HTTP 503';
+  await assert.rejects(run(harness, ['new', '--yes', '--no-import']), /PATCH failed/u);
+  assert.equal(harness.world.sandboxes.size, 0, harness.world.calls.join('\n'));
+  assert.deepEqual(await harness.deps.store.listHosts(), []);
+});
+
 test('--keep-on-failure leaves the sandbox for debugging', async () => {
   const harness = await createTestHarness();
   harness.world.failProvision = 'boom';

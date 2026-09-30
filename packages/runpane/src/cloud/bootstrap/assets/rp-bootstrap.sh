@@ -211,14 +211,37 @@ step_install_pane() {
 # `pane --remote-setup` upserts a new client record each run; the daemon is restarted to load it.
 # The code goes to $RP_STATE/client-<slug>.code (0600) and is read back with pairing-read <slug>.
 step_add_client() {
-  local slug="$1" label="$2" rc=0 code log="$RP_STATE/client-$1.log"
+  local slug="$1" label="$2" scope="${3:-}" rc=0 code log="$RP_STATE/client-$1.log"
+  local scope_args=()
   [ -x /opt/Pane/pane ] || fail "Pane is not installed"
+  # A scoped client (the coordinator) must never silently fall back to full access on an older Pane.
+  if [ -n "$scope" ]; then scope_args=(--client-scope "$scope"); fi
   # Keep the running daemon's port: --auto-listen-port would see it busy and move the daemon.
   /opt/Pane/pane --ozone-platform=headless --disable-gpu --remote-setup --label "$label" --prefer-tunnel tailscale \
-    --no-install-service --listen-port "$(pane_listen_port)" >"$log" 2>&1 || rc=$?
+    --no-install-service --listen-port "$(pane_listen_port)" "${scope_args[@]}" >"$log" 2>&1 || rc=$?
   code="$(awk '/^Connection code:/{getline; print; exit}' "$log" | tr -d '\r')"
   sed -i -E 's#pane-remote://[^[:space:]]*#<pairing-redacted>#g' "$log"
   [ "$rc" -eq 0 ] || fail "pane --remote-setup exited $rc: $(tail -5 "$log" | tr '\n' ' ')"
+  if [ -n "$scope" ] && ! python3 - "$HOME/.pane_remote/config.json" "$label" "$scope" <<'PY'
+import json, os, sys
+path, label, scope = sys.argv[1:4]
+doc = json.load(open(path))
+clients = doc["remoteDaemon"]["host"]["clients"]
+mine = [c for c in clients if c.get("label") == label]
+if mine and mine[-1].get("scope") == scope:
+    sys.exit(0)
+# An older Pane ignored --client-scope and paired a full-access client: take it back out.
+doc["remoteDaemon"]["host"]["clients"] = [c for c in clients if not (c.get("label") == label and c.get("scope") != scope)]
+tmp = path + ".rp-tmp"
+with open(tmp, "w") as out:
+    json.dump(doc, out, indent=2)
+os.chmod(tmp, 0o600)
+os.replace(tmp, path)
+sys.exit(1)
+PY
+  then
+    fail "this Pane build cannot pair a $scope-scoped client (it ignores --client-scope); removed the full-access $label record instead"
+  fi
   case "$code" in
     pane-remote://*) printf '%s' "$code" >"$RP_STATE/client-$slug.code"; chmod 600 "$RP_STATE/client-$slug.code" ;;
     *) fail "pane --remote-setup printed no connection code" ;;

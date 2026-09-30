@@ -2,6 +2,8 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { boundary, decodeBoundary, type BoundarySchema, type JsonObject } from '../../boundaryDecoder';
+import { RemoteDaemonClient, type RemoteHttpTransport } from '../../remote/remoteDaemonClient';
+import { decodePairingCode } from '../pairing';
 import { CLOUD_SESSION_TAG, type TailscaleApi } from '../tailscale';
 import { cloudBootstrapAssets, type CloudBootstrapAssetName } from './generated/assets';
 import { waitForDaemonHealth } from './health';
@@ -31,13 +33,16 @@ interface ProvisionOptions {
   pairingOutputPath: string;
   /**
    * Further paired clients (e.g. label "runpane-cloud-coordinator"); each client's pane-remote:// code
-   * is written to its local outputPath with mode 0600.
+   * is written to its local outputPath with mode 0600. `scope: 'coordinator'` pairs a client that may
+   * only call runpane:cloud:* channels (needs a Pane daemon that knows `--client-scope`).
    */
-  extraClients?: { label: string; outputPath: string }[];
+  extraClients?: { label: string; outputPath: string; scope?: 'coordinator' }[];
   tags?: string[];
   healthTimeoutMs?: number;
   sandboxHome?: string;
   fetchImpl?: typeof fetch;
+  /** HTTP transport for the paired /invoke call that registers the repo; tests pass a fake. */
+  remoteTransport?: RemoteHttpTransport;
   onStep?: (step: ProvisionStep) => void;
 }
 
@@ -148,9 +153,11 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     options.label,
   ], installStepSchema, { timeoutSeconds: 600 }), (value) => value.version ?? 'installed');
 
-  await step('pairing', async () => {
+  const pairingCode = await step('pairing', async () => {
     const pairing = await runner.run('pairing-read', [], pairingStepSchema);
-    writeSecretFile(options.pairingOutputPath, requirePairingCode(pairing.code));
+    const code = requirePairingCode(pairing.code);
+    writeSecretFile(options.pairingOutputPath, code);
+    return code;
   });
 
   const extraClientPaths: string[] = [];
@@ -158,7 +165,7 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     await step('extra-clients', async () => {
       for (const client of options.extraClients ?? []) {
         const slug = clientSlug(client.label);
-        await runner.run('add-client', [slug, client.label], envelopeSchema, { timeoutSeconds: 180 });
+        await runner.run('add-client', [slug, client.label, client.scope ?? ''], envelopeSchema, { timeoutSeconds: 180 });
         const pairing = await runner.run('pairing-read', [slug], pairingStepSchema);
         writeSecretFile(client.outputPath, requirePairingCode(pairing.code));
         extraClientPaths.push(client.outputPath);
@@ -167,6 +174,7 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
   }
 
   let repoDir: string | undefined;
+  const repoName = options.repo ? repoNameFromUrl(options.repo.url) : undefined;
   if (options.repo) {
     const repo = options.repo;
     const dir = repo.dir ?? path.posix.join(home, repoNameFromUrl(repo.url));
@@ -188,6 +196,13 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     }
     return result;
   }, (value) => `${value.elapsedMs} ms`);
+
+  if (repoDir && repoName) {
+    const dir = repoDir;
+    // A clone alone is invisible to Pane: register it so `panes create --repo <name>` works. Idempotent on re-run.
+    await step('register-repo', () => registerRepo(pairingCode, dir, repoName, options.remoteTransport),
+      () => repoName);
+  }
 
   return {
     ...tailnet,
@@ -238,6 +253,21 @@ export async function reenrolSandbox(sandbox: SandboxHandle, options: ReenrolOpt
     await runner.run('serve-restore', [], envelopeSchema);
   }
   return { ...identity, deletedNodeIds, elapsedMs: Date.now() - started };
+}
+
+async function registerRepo(pairingCode: string, dir: string, name: string, transport?: RemoteHttpTransport): Promise<void> {
+  const pairing = decodePairingCode(pairingCode);
+  const client = new RemoteDaemonClient({
+    profile: { id: 'runpane-cloud-bootstrap', label: pairing.label, baseUrl: pairing.baseUrl, token: pairing.token },
+    runtimeId: 'runpane-cloud-bootstrap',
+    clientLabel: 'runpane cloud',
+    transport,
+  });
+  try {
+    await client.invoke('runpane:repos:add', [{ path: dir, name }], { timeoutMs: 60_000 });
+  } catch (error) {
+    throw new BootstrapError('register-repo', `could not register ${dir} with the Pane daemon: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 async function joinTailnet(

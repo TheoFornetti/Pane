@@ -10,7 +10,7 @@ import type { CloudCredentials, PaneSource } from './store';
 export interface TailnetDevice {
   nodeId: string;
   hostname: string;
-  /** MagicDNS name, e.g. rp-abc12345.tail03bf19.ts.net */
+  /** MagicDNS name, e.g. rp-abc12345.tailnet-example.ts.net */
   name?: string;
   online?: boolean;
   lastSeen?: string;
@@ -30,7 +30,7 @@ export interface ProvisionRequest {
   repo?: { url: string; ref?: string };
   /** Local 0600 file that receives the pane-remote:// code. */
   pairingOutputPath: string;
-  extraClients?: { label: string; outputPath: string }[];
+  extraClients?: { label: string; outputPath: string; scope?: 'coordinator' }[];
   healthTimeoutMs?: number;
   onStep?: (step: string) => void;
 }

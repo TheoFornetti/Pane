@@ -30,6 +30,9 @@ interface FakeWorld {
   scripts: { sandboxId: string; script: string }[];
   healthy: Set<string>;
   failProvision?: string;
+  /** boat names sandboxes only through a later PATCH: create returns them unnamed when set. */
+  createUnnamed?: boolean;
+  failRename?: string;
 }
 
 function createFakeWorld(): FakeWorld {
@@ -74,7 +77,7 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       counter += 1;
       const sandbox: FakeSandbox = {
         id: `bx_fake${String(counter).padStart(4, '0')}`,
-        name: request.name,
+        name: world.createUnnamed ? '' : request.name,
         state: 'starting',
         providerState: 'provisioning',
         size: request.size,
@@ -96,6 +99,8 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       return [...world.sandboxes.values()].map(snapshot);
     },
     async rename(id, name) {
+      world.calls.push(`rename ${id} ${name}`);
+      if (world.failRename) throw new Error(world.failRename);
       need(id).name = name;
     },
     async stop(id) {

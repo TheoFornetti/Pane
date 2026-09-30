@@ -9,7 +9,7 @@ import type { DirectoryWriter } from './directory';
 import type { IdleCheckReport } from './idleStop';
 import type { ReconcileReport } from './reconciler';
 import type { AlertSink, Clock, CoordinatorAlert, SessionDirectory } from './types';
-import type { WakeResult } from './wake';
+import type { WakeCaller, WakeResult } from './wake';
 
 const MAX_BODY_BYTES = 256 * 1024;
 const PEER_REQUESTS_PER_MINUTE = 60;
@@ -24,7 +24,7 @@ const runBodySchema = boundary.object({ dryRun: boundary.optional(boundary.boole
 
 export interface CoordinatorApi {
   status(host: string): Promise<WakeResult>;
-  wake(host: string, request: { wait: boolean; timeoutMs?: number }): Promise<WakeResult>;
+  wake(host: string, request: { wait: boolean; timeoutMs?: number }, caller: WakeCaller): Promise<WakeResult>;
   reconcile(options: { dryRun?: boolean }): Promise<ReconcileReport>;
   idleCheck(options: { dryRun?: boolean }): Promise<IdleCheckReport>;
 }
@@ -60,6 +60,7 @@ const FAILURE_STATUS = {
   'directory-unreadable': 503,
   'runaway-guard': 429,
   'wake-rate-limited': 429,
+  'peer-wake-refused': 403,
   'provider-rate-limited': 429,
   'provider-error': 502,
 } as const;
@@ -125,7 +126,7 @@ export function createCoordinatorServer(options: CoordinatorServerOptions): http
       case 'POST /cloud/wake': {
         const body = decodeBoundary(await readJson(request), wakeBodySchema);
         log(`[coordinator] wake ${body.host} requested by ${caller.id}`);
-        writeWakeResult(response, await options.api.wake(body.host, { wait: body.wait ?? true, timeoutMs: body.timeoutMs }));
+        writeWakeResult(response, await options.api.wake(body.host, { wait: body.wait ?? true, timeoutMs: body.timeoutMs }, caller));
         return;
       }
       case 'GET /cloud/alerts': {

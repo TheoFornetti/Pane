@@ -3,11 +3,21 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { boundary, decodeBoundary } from '../../boundaryDecoder';
+import type { RemoteHttpRequest, RemoteHttpTransport } from '../../remote/remoteDaemonClient';
+import { encodePairingCode } from '../pairing';
 import type { MintAuthKeyOptions, TailscaleApi, TailscaleDevice } from '../tailscale';
 import { cloudHostname, parseStepResult, provisionSandbox, reenrolSandbox, redact } from './provision';
 import type { SandboxCommandResult, SandboxHandle } from './types';
 
-const PAIRING = 'pane-remote://FAKE-user-pairing';
+const PAIRING_TOKEN = 'FAKE-user-token';
+const PAIRING = encodePairingCode({
+  v: 1,
+  label: 'Cloud k3j9',
+  baseUrl: 'https://rp-k3j9x0q2.tailnet-example.ts.net',
+  token: PAIRING_TOKEN,
+  transport: 'http+sse',
+});
 const COORD_PAIRING = 'pane-remote://FAKE-coordinator-pairing';
 const AUTH_KEY = 'tskey-fake-kSECRETSECRET-abcdef';
 
@@ -48,7 +58,7 @@ class FakeSandbox implements SandboxHandle {
           backendState: 'Running',
           nodeId: 'nNEW11CNTRL',
           hostname: this.state.hostname,
-          magicDnsName: `${this.state.hostname}${this.state.dnsSuffix}.tail03bf19.ts.net`,
+          magicDnsName: `${this.state.hostname}${this.state.dnsSuffix}.tailnet-example.ts.net`,
           tailscaleIps: ['100.64.0.9'],
           tags: ['tag:rp-session'],
           runSsh: this.state.runSsh,
@@ -115,11 +125,22 @@ class FakeTailscale implements TailscaleApi {
 }
 
 function device(nodeId: string, hostname: string): TailscaleDevice {
-  return { nodeId, id: '1', hostname, name: `${hostname}.tail03bf19.ts.net`, addresses: [], tags: ['tag:rp-session'] };
+  return { nodeId, id: '1', hostname, name: `${hostname}.tailnet-example.ts.net`, addresses: [], tags: ['tag:rp-session'] };
 }
+
+const invokeBodySchema = boundary.object({ channel: boundary.string, args: boundary.array(boundary.json) });
 
 const healthyFetch: typeof fetch = async () =>
   new Response(JSON.stringify({ ok: true, status: 'ready', transport: 'http+sse', version: '2.4.141-rc.1' }), { status: 200 });
+
+function recordingInvoke() {
+  const requests: RemoteHttpRequest[] = [];
+  const transport: RemoteHttpTransport = async (request) => {
+    requests.push(request);
+    return { status: 200, body: JSON.stringify({ ok: true, result: { ok: true, created: true } }) };
+  };
+  return { transport, requests };
+}
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'rp-bootstrap-test-'));
@@ -138,6 +159,7 @@ test('provisionSandbox runs every step in order and writes the pairing file 0600
   const pairingOutputPath = path.join(dir, 'sub', 'pairing.code');
   const coordPath = path.join(dir, 'coord.code');
   const seen: string[] = [];
+  const invoke = recordingInvoke();
 
   const result = await provisionSandbox(sandbox, {
     sessionId: 'k3j9x0q2m1',
@@ -146,8 +168,9 @@ test('provisionSandbox runs every step in order and writes the pairing file 0600
     paneSource: { kind: 'deb-url', url: 'https://example.test/pane.deb', sha256: 'ff' },
     repo: { url: 'https://github.com/example/app.git', ref: 'main' },
     pairingOutputPath,
-    extraClients: [{ label: 'runpane-cloud-coordinator', outputPath: coordPath }],
+    extraClients: [{ label: 'runpane-cloud-coordinator', outputPath: coordPath, scope: 'coordinator' }],
     fetchImpl: healthyFetch,
+    remoteTransport: invoke.transport,
     onStep: (step) => seen.push(`${step.step}:${step.state}`),
   });
 
@@ -157,9 +180,10 @@ test('provisionSandbox runs every step in order and writes the pairing file 0600
   ]);
   assert.deepEqual(sandbox.steps[4].slice(2), ['rp-k3j9x0q2']);
   assert.deepEqual(sandbox.steps[5].slice(1), ['deb-url', 'https://example.test/pane.deb', 'ff', '', 'Cloud k3j9']);
+  assert.deepEqual(sandbox.steps[7].slice(1), ['runpane-cloud-coordinator', 'runpane-cloud-coordinator', 'coordinator']);
   assert.deepEqual(sandbox.steps[9].slice(1), ['https://github.com/example/app.git', 'main', '/home/user/app']);
-  assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tail03bf19.ts.net');
-  assert.equal(result.baseUrl, 'https://rp-k3j9x0q2.tail03bf19.ts.net');
+  assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tailnet-example.ts.net');
+  assert.equal(result.baseUrl, 'https://rp-k3j9x0q2.tailnet-example.ts.net');
   assert.equal(result.nodeId, 'nNEW11CNTRL');
   assert.equal(result.daemonVersion, '2.4.141-rc.1');
   assert.equal(result.runSsh, false);
@@ -168,6 +192,15 @@ test('provisionSandbox runs every step in order and writes the pairing file 0600
   assert.equal(fs.readFileSync(coordPath, 'utf8'), `${COORD_PAIRING}\n`);
   assert.equal(fs.statSync(coordPath).mode & 0o777, 0o600);
   assert.ok(seen.includes('health:done'));
+  // The clone is registered with the daemon once it is healthy, so `panes create --repo app` works.
+  assert.deepEqual(seen.slice(-4), ['health:start', 'health:done', 'register-repo:start', 'register-repo:done']);
+  assert.equal(invoke.requests.length, 1);
+  assert.equal(invoke.requests[0].url, 'https://rp-k3j9x0q2.tailnet-example.ts.net/invoke');
+  assert.equal(invoke.requests[0].headers.Authorization, `Bearer ${PAIRING_TOKEN}`);
+  const body = decodeBoundary(JSON.parse(invoke.requests[0].body ?? '{}'), invokeBodySchema);
+  assert.equal(body.channel, 'runpane:repos:add');
+  assert.deepEqual(body.args, [{ path: '/home/user/app', name: 'app' }]);
+  assert.equal(result.repoDir, '/home/user/app');
 
   // Single-use, tagged, pre-authorized key; the key never appears in a command line.
   assert.deepEqual(tailscale.minted[0].tags, ['tag:rp-session']);
@@ -248,7 +281,7 @@ test('reenrolSandbox deletes the old device before wiping state, and keeps the n
   assert.deepEqual(result.deletedNodeIds, ['nOLD11CNTRL']);
   assert.deepEqual(tailscale.log, ['delete nOLD11CNTRL', 'mint']);
   assert.deepEqual(sandbox.steps.map((step) => step[0]), ['tailscale-reset', 'tailscale-up', 'serve-restore']);
-  assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tail03bf19.ts.net');
+  assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tailnet-example.ts.net');
 });
 
 test('step results parse from the last RP_RESULT line and errors are redacted', () => {

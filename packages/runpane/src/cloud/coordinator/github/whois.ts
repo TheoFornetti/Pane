@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { boundary, decodeBoundary } from '../../../boundaryDecoder';
-import type { Clock } from '../types';
+import type { Clock, DirectoryEntry } from '../types';
 
 /** A tailnet node as `tailscale whois` reports it. */
 export interface TailnetNode {
@@ -72,5 +72,27 @@ export class TailscaleWhois implements WhoisResolver {
     });
     if (answer.cache) this.cache.set(ip, { at: this.clock.now(), node: answer.node });
     return answer.node;
+  }
+}
+
+/**
+ * A peer token alone is not enough: the request must come from that Session's own tailnet node.
+ * `tailscale whois` of the source address must name the directory entry's node (its StableID when the
+ * directory has one, and always its MagicDNS name) and carry tag:rp-session. Returns why not, or null.
+ */
+export function nodeMismatch(entry: DirectoryEntry, node: TailnetNode | null, remoteAddress: string): string | null {
+  const expectedName = hostnameOf(entry.baseUrl);
+  if (!node) return `${remoteAddress} is not a tailnet node tailscale can identify`;
+  if (!node.tags.includes('tag:rp-session')) return `node ${node.name} is not tagged tag:rp-session`;
+  if (entry.nodeId && node.stableId !== entry.nodeId) return `the request came from node ${node.stableId} (${node.name}), not ${entry.nodeId}`;
+  if (node.name !== expectedName) return `the request came from ${node.name}, not ${expectedName}`;
+  return null;
+}
+
+function hostnameOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return '';
   }
 }

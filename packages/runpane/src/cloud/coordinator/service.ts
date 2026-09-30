@@ -6,7 +6,7 @@ import type { CoordinatorConfig } from './config';
 import { readSecretFile } from './config';
 import { describeError, HttpDaemonProbe } from './daemonProbe';
 import { FileSessionDirectory } from './directory';
-import { JsonlGitHubAudit } from './github/audit';
+import { JsonlAuditLog, JsonlGitHubAudit } from './github/audit';
 import { GitHubBroker } from './github/broker';
 import { GitHubAppCredential, GitHubPatCredential } from './github/credentials';
 import type { GitHubCredential } from './github/credentials';
@@ -19,6 +19,9 @@ import type { DirectoryWriter } from './directory';
 import { RunawayGuard, SandboxActivity } from './guards';
 import { IdleStopper } from './idleStop';
 import { Reconciler } from './reconciler';
+import { createDopplerApi } from './secrets/doppler';
+import { configKey, SecretsService } from './secrets/service';
+import type { SecretsAuditEntry } from './secrets/service';
 import { createCoordinatorServer } from './server';
 import type { CoordinatorApi } from './server';
 import type { AlertSink, Clock, CoordinatorProvider, DaemonProbe, SessionDirectory } from './types';
@@ -35,12 +38,15 @@ export interface CoordinatorParts {
   alerts: AlertSink;
   api: CoordinatorApi;
   github: GitHubBroker;
+  secrets: SecretsService;
 }
 
 interface CoordinatorOverrides extends Partial<Pick<CoordinatorParts, 'clock' | 'directory' | 'provider' | 'probe' | 'alerts'>> {
   /** Test seams for the GitHub broker: who a tailnet address is, and GitHub's REST API. */
   whois?: WhoisResolver;
   githubFetch?: FetchLike;
+  /** Test seam for Doppler's REST API. */
+  dopplerFetch?: FetchLike;
 }
 
 /** The broker: off without a `github` config; a credential that fails to load is reported, not fatal. */
@@ -75,6 +81,49 @@ export function buildGitHubBroker(
     directory,
     whois: overrides.whois ?? new TailscaleWhois(clock),
     audit: new JsonlGitHubAudit(path.join(config.stateDir, 'github-audit.jsonl'), clock),
+    clock,
+  });
+}
+
+/**
+ * The secrets service: off without a `secrets` config. A token file that fails to load turns only
+ * that config off (reported in status and to Sessions asking for it); nothing here is fatal.
+ */
+export function buildSecretsService(
+  config: CoordinatorConfig,
+  clock: Clock,
+  directory: SessionDirectory,
+  github: GitHubBroker,
+  overrides: Pick<CoordinatorOverrides, 'whois' | 'dopplerFetch'> = {},
+): SecretsService {
+  const secrets = config.secrets;
+  const tokens = new Map<string, string>();
+  const tokenErrors = new Map<string, string>();
+  for (const token of secrets?.tokens ?? []) {
+    const key = configKey(token.project, token.config);
+    try {
+      tokens.set(key, readSecretFile(token.tokenFile));
+    } catch (error) {
+      tokenErrors.set(key, `the Doppler token for ${key} could not be loaded: ${describeError(error)}`);
+      console.error(`[coordinator] secrets: ${tokenErrors.get(key) ?? ''}`);
+    }
+  }
+  return new SecretsService({
+    settings: secrets
+      ? {
+          apiBaseUrl: secrets.apiBaseUrl,
+          configs: secrets.tokens.map((token) => ({ project: token.project, config: token.config })),
+          policy: secrets.policy,
+          fetchesPerSessionPerHour: secrets.fetchesPerSessionPerHour,
+        }
+      : null,
+    tokens,
+    tokenErrors,
+    doppler: createDopplerApi(secrets?.apiBaseUrl ?? 'https://api.doppler.com', overrides.dopplerFetch),
+    manifests: github,
+    directory,
+    whois: overrides.whois ?? new TailscaleWhois(clock),
+    audit: new JsonlAuditLog<SecretsAuditEntry>(path.join(config.stateDir, 'secrets-audit.jsonl'), clock),
     clock,
   });
 }
@@ -134,7 +183,8 @@ export function buildCoordinator(
     idleCheck: (options) => idle.runOnce(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
   };
   const github = buildGitHubBroker(config, clock, directory, overrides);
-  return { config, clock, directory, directoryWriter, provider, probe, alerts, api, github };
+  const secrets = buildSecretsService(config, clock, directory, github, overrides);
+  return { config, clock, directory, directoryWriter, provider, probe, alerts, api, github, secrets };
 }
 
 /** Runs `task` every `intervalMs`, never overlapping itself, until the returned stop function is called. */
@@ -178,10 +228,12 @@ export async function startCoordinator(
     version: options.version,
     log,
     github: parts.github,
+    secrets: parts.secrets,
   });
   await listenWithRetry(server, config.listenHost, config.listenPort, options.listenRetryMs ?? 120_000, log);
   log(`[coordinator] listening on http://${config.listenHost}:${config.listenPort}`);
   log(`[coordinator] github broker: ${config.github ? `${config.github.mode} mode, API ${config.github.apiBaseUrl}` : 'off'}`);
+  log(`[coordinator] secrets: ${config.secrets ? `Doppler ${config.secrets.tokens.map((token) => configKey(token.project, token.config)).join(', ') || '(no configs)'}, policy ${config.secrets.policy.mode}` : 'off'}`);
 
   const onError = (label: string) => (cause: unknown) => {
     alerts.emit({ level: 'error', code: `${label}-crashed`, message: describeError(cause) });

@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { boundary, decodeBoundary } from '../boundaryDecoder';
 import type { CloudDeps } from './commands';
+import { BUILT_IN_DENY_LIST, DENIED_DOPPLER_CONFIGS, isDeniedConfig, matchingPattern, reservedBy, SECRET_NAME_PATTERN } from './secretPolicy';
 import type { SandboxHandle } from './provider';
+import { coordinatorSecretsEnabled, describeSecretsOutcome, disableSessionSecrets, enableSessionSecrets } from './sessionSecrets';
 import { findHost, type CloudHostRecord } from './store';
 import { hostProvider } from './wallet';
 
@@ -24,29 +26,6 @@ const SCRIPT_TIMEOUT_SECONDS = 60;
 const DOPPLER_TIMEOUT_MS = 30_000;
 const OK_MARKER = 'RP_SECRETS';
 
-/**
- * Names that never enter a sandbox, whatever the source: production, infrastructure and admin
- * credentials, and secret-manager tokens. `*` matches any run of characters; matching ignores case.
- * Users add their own patterns in the cloud settings file (`secretsDenyList`).
- */
-const BUILT_IN_DENY_LIST = [
-  'PRODUCTION_*',
-  'CLOUDFLARE_*',
-  'SHOPIFY_ADMIN*',
-  'VERCEL_*',
-  'NEON_*',
-  'DOPPLER_TOKEN',
-  'DOPPLER_*',
-  '*_MANAGEMENT_*',
-] as const;
-
-/** Variables the shell or Pane itself owns; exporting them from a secrets file would break panels. */
-const RESERVED_NAMES = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'PWD', 'OLDPWD', 'IFS', 'TERM', 'LANG', 'ENV', 'BASH_ENV', 'PROMPT_COMMAND', 'PS1', 'PS2', 'PS4', 'LD_*', 'PANE_*', 'WORKTREE_PATH', 'RUNPANE_*'];
-
-/** Doppler configs that hold staging or production values: `--from-doppler` refuses them. */
-const DENIED_DOPPLER_CONFIGS = ['prd', 'prod', 'stg', 'stage', 'staging', 'production'];
-
-const NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 
 type SecretsSourceArg =
   | { kind: 'env'; variable?: string }
@@ -54,7 +33,7 @@ type SecretsSourceArg =
   | { kind: 'doppler'; project: string; config: string };
 
 interface SecretsArgs {
-  sub: 'set' | 'list' | 'rm';
+  sub: 'set' | 'list' | 'rm' | 'enable' | 'disable';
   host: string;
   names: string[];
   source: SecretsSourceArg;
@@ -69,11 +48,16 @@ const SECRETS_USAGE = `Usage:
       with the local doppler CLI (never prd/prod/stg/staging/production configs).
   runpane cloud secrets list <host> [--json]      names only; values are never shown
   runpane cloud secrets rm <host> NAME [NAME...] [--json]
-New agent panels load the change at once; panels already open keep their old environment.`;
+New agent panels load the change at once; panels already open keep their old environment.
+
+Laptop-free (the coordinator holds read-only Doppler tokens: runpane cloud coordinator doppler set):
+  runpane cloud secrets enable <host> [--json]     install the doppler stand-in in an existing Session and fetch
+                                                   its repository's .runpane/secrets.json names (new Sessions get it)
+  runpane cloud secrets disable <host> [--json]    remove the stand-in and shred the Session's copy`;
 
 export function parseSecretsArgs(argv: readonly string[]): SecretsArgs {
   const [sub, ...rest] = argv;
-  if (sub !== 'set' && sub !== 'list' && sub !== 'rm') throw new Error(SECRETS_USAGE);
+  if (sub !== 'set' && sub !== 'list' && sub !== 'rm' && sub !== 'enable' && sub !== 'disable') throw new Error(SECRETS_USAGE);
   let json = false;
   let source: SecretsSourceArg | undefined;
   const positionals: string[] = [];
@@ -104,8 +88,8 @@ export function parseSecretsArgs(argv: readonly string[]): SecretsArgs {
   }
   const [host, ...names] = positionals;
   if (!host) throw new Error(SECRETS_USAGE);
-  if (sub === 'list' && names.length > 0) throw new Error(SECRETS_USAGE);
-  if (sub !== 'list' && names.length === 0) throw new Error(`runpane cloud secrets ${sub} needs at least one NAME.\n\n${SECRETS_USAGE}`);
+  if ((sub === 'list' || sub === 'enable' || sub === 'disable') && names.length > 0) throw new Error(SECRETS_USAGE);
+  if (sub !== 'list' && sub !== 'enable' && sub !== 'disable' && names.length === 0) throw new Error(`runpane cloud secrets ${sub} needs at least one NAME.\n\n${SECRETS_USAGE}`);
   const resolved = source ?? { kind: 'env' };
   if ((resolved.kind === 'file' || (resolved.kind === 'env' && resolved.variable)) && names.length !== 1) {
     throw new Error(`--from-${resolved.kind} gives one value; set one NAME at a time with it.`);
@@ -115,32 +99,22 @@ export function parseSecretsArgs(argv: readonly string[]): SecretsArgs {
 
 // ---------------------------------------------------------------- policy
 
-function globToRegExp(pattern: string): RegExp {
-  const body = pattern.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/gu, '\\$&')).join('.*');
-  return new RegExp(`^${body}$`, 'iu');
-}
-
 /** The pattern that denies `name`, or null. Built-in patterns first, then the user's. */
 export function deniedBy(name: string, userDenyList: readonly string[] = []): string | null {
-  for (const pattern of [...BUILT_IN_DENY_LIST, ...userDenyList]) {
-    if (globToRegExp(pattern.trim()).test(name)) return pattern;
-  }
-  return null;
+  return matchingPattern(name, [...BUILT_IN_DENY_LIST, ...userDenyList]);
 }
 
 /** Refuses a bad or denied NAME (and, for --from-env/--from-doppler, the name read on this machine). */
 export function checkSecretName(name: string, userDenyList: readonly string[] = []): void {
-  if (!NAME_PATTERN.test(name)) throw new Error(`${name} is not a valid environment variable name (letters, digits and _; not starting with a digit).`);
+  if (!SECRET_NAME_PATTERN.test(name)) throw new Error(`${name} is not a valid environment variable name (letters, digits and _; not starting with a digit).`);
   const denied = deniedBy(name, userDenyList);
   if (denied) throw new Error(`Refusing ${name}: it matches the deny-list pattern ${denied}. Production, infrastructure and secret-manager credentials never enter a cloud Session.`);
-  const reserved = RESERVED_NAMES.find((pattern) => globToRegExp(pattern).test(name));
+  const reserved = reservedBy(name);
   if (reserved) throw new Error(`Refusing ${name}: the shell or Pane sets it (${reserved}); a secret must not override it.`);
 }
 
 export function checkDopplerConfig(config: string): void {
-  const lower = config.toLowerCase();
-  const root = lower.split(/[_-]/u)[0];
-  if (DENIED_DOPPLER_CONFIGS.includes(lower) || DENIED_DOPPLER_CONFIGS.includes(root)) {
+  if (isDeniedConfig(config, DENIED_DOPPLER_CONFIGS)) {
     throw new Error(`Refusing Doppler config ${config}: staging and production configs never feed a cloud Session. Use a dev config.`);
   }
 }
@@ -227,7 +201,7 @@ const LOADER_END = '# <<< runpane cloud secrets <<<';
  */
 function secretsScript(change: { stagedPath?: string; remove?: readonly string[] }): string {
   for (const name of change.remove ?? []) {
-    if (!NAME_PATTERN.test(name)) throw new Error(`invalid name ${name}`);
+    if (!SECRET_NAME_PATTERN.test(name)) throw new Error(`invalid name ${name}`);
   }
   const staged = change.stagedPath ? JSON.stringify(change.stagedPath.replace(/^\/home\/user\//u, '')) : 'None';
   const loader = [
@@ -335,13 +309,36 @@ export async function runSecretsCommand(argv: readonly string[], deps: CloudDeps
     }
   } else if (args.sub === 'rm') {
     for (const name of args.names) {
-      if (!NAME_PATTERN.test(name)) throw new Error(`${name} is not a valid environment variable name.`);
+      if (!SECRET_NAME_PATTERN.test(name)) throw new Error(`${name} is not a valid environment variable name.`);
     }
   }
 
   const record = findHost(await deps.store.listHosts(), args.host);
   const handle = await runningSandbox(record, deps);
   const host = record.profile.cloud.hostname;
+
+  if (args.sub === 'enable') {
+    if (!(await coordinatorSecretsEnabled(deps))) {
+      throw new Error('The coordinator has no Doppler secrets service yet: run runpane cloud coordinator doppler set --project <p> --config <c> first.');
+    }
+    if (!record.meta.brokerRepos?.length) {
+      deps.stderr(`runpane cloud: ${host} has no GitHub broker repository, so the coordinator has no manifest to read for it (runpane cloud github connect ${host} --repo <owner/name> --broker).`);
+    }
+    const outcome = await enableSessionSecrets(handle, host);
+    if (args.json) deps.stdout(JSON.stringify({ ok: outcome.ready && !outcome.fetchError, host, ...outcome }, null, 2));
+    else {
+      deps.stdout(`${host}: ${describeSecretsOutcome(outcome)}.`);
+      if (outcome.warning) deps.stderr(`runpane cloud: ${outcome.warning}`);
+    }
+    return outcome.ready && !outcome.fetchError ? 0 : 1;
+  }
+
+  if (args.sub === 'disable') {
+    await disableSessionSecrets(handle);
+    if (args.json) deps.stdout(JSON.stringify({ ok: true, host, removed: true }, null, 2));
+    else deps.stdout(`${host}: the doppler stand-in, its boot refresh and the Session's stored copy are removed.`);
+    return 0;
+  }
 
   if (args.sub === 'list') {
     const outcome = await runInSandbox(handle, secretsScript({}), 'Listing the secrets');

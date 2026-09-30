@@ -125,6 +125,7 @@ Every `/cloud/*` call needs `Authorization: Bearer rpc1.<callerId>.<mac>`, where
 | `GET /cloud/alerts?limit=` | user | recent alerts |
 | `PUT /cloud/directory` | user | replace the directory. The laptop CLI is its single writer. |
 | `/cloud/github/*` | peer (bound to its node); user: `status`, `audit` | the GitHub broker, below |
+| `/cloud/secrets/*` | peer (bound to its node): `fetch`, `status`; user: `status`, `audit` | the Doppler secrets service, below |
 
 Failure responses have the form `{ok:false, code, message}`:
 
@@ -158,6 +159,10 @@ The directory is a JSON file on the coordinator (0600), written through `PUT /cl
   condition, so the coordinator's own calls never keep a Session awake.
 - **`github.repos`.** An optional `"github": {"repos": ["owner/name", …]}` per Session is its GitHub broker
   allowlist. `runpane cloud` writes it from the host record's `meta.brokerRepos`; no repos means no broker access.
+- **`secretsManifest`.** An optional `"secretsManifest": {"repo": "owner/name", "ref": "<branch>|null"}` per
+  Session says where the secrets service reads its `.runpane/secrets.json`: the repository `new --repo` cloned
+  (when it is also a broker repository) at the `--ref` it started from (null: the default branch). Without
+  it, a Session with exactly one broker repository uses that repository's default branch.
 
 ## GitHub broker (`/cloud/github/*`)
 
@@ -297,6 +302,116 @@ or text. Refused calls record what was asked for. Read it with `runpane cloud co
 `runpane cloud coordinator github set` writes it; `null` or no `github` key means the broker is off. A
 credential that fails to load, such as a classic token in `patFile`, leaves the broker off; `status` shows
 the reason, and the rest of the coordinator keeps running.
+
+## Doppler secrets (`/cloud/secrets/*`)
+
+Cloud Sessions get the Doppler secrets their repository's manifest names **from the coordinator**, at
+creation and at every wake, with no laptop in the path. The code is in
+`packages/runpane/src/cloud/coordinator/secrets/` (Node standard library; Doppler's REST API, no Doppler CLI).
+It is off until you give the coordinator a token. User steps: [RUNPANE_CLOUD.md](RUNPANE_CLOUD.md#secrets-from-doppler-with-no-laptop-in-the-path-runpanesecretsjson).
+
+### Turning it on
+
+```sh
+runpane cloud coordinator doppler set --project <p> --all-configs [--policy default|allow-all]   # or --config <c> ...
+runpane cloud coordinator doppler set --project <p> --config <c> --token-file <file|->           # a token you made
+runpane cloud coordinator doppler status [--check]     # configs, token loaded, names readable (check), policy
+runpane cloud coordinator doppler policy --default | --allow-all | --deny-names A,B_* [--deny-configs prd]
+runpane cloud coordinator doppler audit                # recent fetches: Session, node, manifest, names
+runpane cloud coordinator doppler unset --all --yes    # shred on the coordinator, revoke in Doppler
+```
+
+- **The credential: one read-only service token per config.** Doppler scopes a service token to exactly one
+  config, and `set` mints each with the laptop's logged-in `doppler` CLI (`doppler configs tokens create
+  runpane-cloud-<coordinator> --access read --json`), keeping the token in memory only. A workplace with a
+  handful of configs (Montlake: `dev`, `dev_personal`, `stg`, `prd`) needs a handful of tokens; `--all-configs`
+  lists and mints them all. If any mint fails, the ones already minted are revoked and nothing is installed.
+  `--token-file` accepts a `dp.st.` service token or a `dp.sa.` service account token (give the account a
+  read-only role); personal (`dp.pt.`) and CLI (`dp.ct.`) tokens are refused, since they can write and reach
+  every project.
+- **On the coordinator:** each token goes through the provider's files API into the stage dir, then
+  `install -m 600` to `~/.config/runpane-cloud-coordinator/doppler/<project>.<config>.token` (0700 dir) and the
+  staged copy is shredded. Never a command line, the environment, provider metadata, a log or this machine's
+  settings (which keep only project, config, token name and slug, so `unset` can revoke). An in-place
+  `coordinator deploy` rebuilds the config from those settings and leaves the token files alone.
+- **Reading Doppler:** `GET https://api.doppler.com/v3/configs/config/secrets/download?format=json&project=
+  <p>&config=<c>` with the config's token. Naming the config also checks the token is the right one (Doppler
+  answers 400 for any other config). Values live in memory for the one request.
+
+### What a fetch does
+
+`POST /cloud/secrets/fetch` from a Session (its own peer token **and** its own tailnet node, exactly as for
+the GitHub broker: a copied token gets 403 `caller-node-mismatch` before GitHub or Doppler is asked):
+
+1. **Manifest source:** the directory's `secretsManifest` (repo and ref). A ref inside the caller's own
+   `cloud/<host>/` namespace is refused (403 `manifest-ref-writable`): the Session could push it itself.
+2. **Manifest:** `.runpane/secrets.json` read through the GitHub broker's credential with a one-repository
+   `contents:read` token (GitHub REST contents API). Absent: 200 with no configs (the Session clears its
+   copy). Invalid: 422 `manifest-invalid` naming the problem.
+3. **Per manifest entry:** a config the policy refuses, or one without a loaded token, is answered as
+   `refused` with the reason (and not read). Otherwise the config is downloaded and narrowed to the listed
+   names (`"all"`, names, `*` patterns; listed names Doppler lacks come back as `missing`), then to the
+   policy: denied names and shell/Pane variables come back as `withheld` with the reason.
+4. **Answer:** `{fetchedAt, manifest: {repo, ref, path, sha}, policy, configs: [{project, config, values,
+   withheld, missing, refused}], version}`. `version` is a 16-hex fingerprint of the manifest sha and every
+   delivered name and value together, so a Session can see that a refresh changed something.
+
+A Doppler or GitHub failure fails the whole fetch (502 `doppler-error` / `manifest-unreadable`), so the
+Session keeps its previous copy instead of losing configs. Limit: 120 fetches per Session per hour
+(`secrets.limits.fetchesPerSessionPerHour`; 429 `rate-limited`). `GET /cloud/secrets/status` answers users
+and peers (never a token or value; users can add `?check=1` for a names count per config). User callers may
+not fetch.
+
+### Policy (per user)
+
+A coordinator belongs to one user (BYOK), so its policy is that user's:
+
+| Mode | Withheld names | Refused configs |
+|---|---|---|
+| `default` (the product default) | `PRODUCTION_*`, `CLOUDFLARE_*`, `SHOPIFY_ADMIN*`, `VERCEL_*`, `NEON_*`, `DOPPLER_TOKEN`, `DOPPLER_*`, `*_MANAGEMENT_*` | `prd`, `prod`, `stg`, `stage`, `staging`, `production` and their branch configs |
+| `allow-all` (the user's explicit choice) | none | none |
+| `custom` | `deniedNames` | `deniedConfigs` |
+
+Shell and Pane variables (`PATH`, `HOME`, `LD_*`, `PANE_*`, `RUNPANE_*`, `BASH_ENV`, ...) are withheld in
+every mode.
+
+### Audit
+
+`<stateDir>/secrets-audit.jsonl` (0600): time, caller, label, node (name and StableID, or the source
+address), endpoint, repository, ref, manifest sha, outcome or error code, HTTP status, and per config the
+names delivered, withheld and missing, or why it was refused. **Never values or tokens.** The journal line
+per fetch has config names and counts only. Read it with `runpane cloud coordinator doppler audit`.
+
+### Config
+
+```json
+"secrets": { "doppler": { "apiBaseUrl": "https://api.doppler.com",
+                          "tokens": [ { "project": "montlake", "config": "dev", "tokenFile": "…/doppler/montlake.dev.token" } ] },
+             "policy": { "mode": "default" },
+             "limits": { "fetchesPerSessionPerHour": 120 } }
+```
+
+`runpane cloud coordinator doppler set|policy|unset` write it; no `secrets` key means the service is off (503
+`secrets-disabled`, which Sessions treat as "clear the copy"). A token file that fails to load (missing, or
+readable by group or others) turns only that config off, with the reason in `status` and in the fetch
+answer.
+
+### In the Session
+
+`new` (with a broker repository, when the service is on) and `runpane cloud secrets enable <host>` install:
+
+- `~/.local/bin/doppler` (and `/usr/local/bin/doppler` unless that name is taken): runs `runpane cloud
+  agent doppler`, the stand-in. It keeps the set in `~/.runpane-cloud/doppler/secrets.json` (0600, 0700 dir,
+  written in place, never renamed: a boat restore can truncate a freshly renamed file) and gives values only
+  to the child of `doppler run`, or to stdout for `doppler secrets get`.
+- `~/.config/systemd/user/runpane-cloud-secrets.service`, a oneshot enabled for `default.target` (linger is
+  on), which runs `doppler refresh --boot` at every boot: a boat wake is a boot. It retries for up to 3
+  minutes while the tailnet comes up.
+- A short "Secrets (Doppler)" note in `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`.
+
+Refresh rules: an outage (unreachable, 5xx) keeps the copy; a decision (`secrets-disabled`,
+`manifest-invalid`, `manifest-ref-writable`, `forbidden`, unknown or revoked caller) clears it; a copy over an
+hour old is refreshed before the next `doppler` command.
 
 ## Setting it up
 

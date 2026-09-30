@@ -22,6 +22,10 @@ const directoryFileSchema = boundary.object({
     github: boundary.optional(boundary.nullable(boundary.object({
       repos: boundary.optional(boundary.array(boundary.nonEmptyString)),
     }))),
+    secretsManifest: boundary.optional(boundary.nullable(boundary.object({
+      repo: boundary.nonEmptyString,
+      ref: boundary.optional(boundary.nullable(boundary.string)),
+    }))),
   })),
 });
 
@@ -47,6 +51,7 @@ export function parseDirectory(value: JsonValue): ParsedDirectory {
       coordinatorToken: session.coordinatorToken ?? null,
       org: session.org ?? null,
       githubRepos: session.github?.repos ?? [],
+      secretsManifest: session.secretsManifest ? { repo: session.secretsManifest.repo, ref: session.secretsManifest.ref || null } : null,
     };
   });
   return { generatedAt: decoded.generatedAt ?? null, entries };

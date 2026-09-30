@@ -36,6 +36,8 @@ test('new pushes a directory the coordinator accepts, with the new host in it', 
     org: 'personal',
     // No repos until the laptop grants some (GitHub broker allowlist).
     githubRepos: [],
+    // No repository, so no secrets manifest to read.
+    secretsManifest: null,
   });
   assert.match(harness.out.join('\n'), /coordinator: directory updated \(1 cloud Session\)/u);
 });

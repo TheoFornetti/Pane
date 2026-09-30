@@ -544,19 +544,27 @@
         "cloud coordinator github status",
         "cloud coordinator github audit",
         "cloud coordinator github unset",
+        "cloud coordinator doppler set",
+        "cloud coordinator doppler policy",
+        "cloud coordinator doppler status",
+        "cloud coordinator doppler audit",
+        "cloud coordinator doppler unset",
         "cloud peers allow",
         "cloud peers revoke",
         "cloud peers list",
         "cloud secrets set",
         "cloud secrets list",
         "cloud secrets rm",
+        "cloud secrets enable",
+        "cloud secrets disable",
         "cloud github connect",
         "cloud github disconnect",
         "cloud github list",
         "cloud git push",
         "cloud agent github",
         "cloud agent gh",
-        "cloud agent git-credential"
+        "cloud agent git-credential",
+        "cloud agent doppler"
       ],
       "properties": {
         "default": {
@@ -862,6 +870,21 @@
         "cloud coordinator github unset": {
           "$ref": "#/$defs/helpLines"
         },
+        "cloud coordinator doppler set": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator doppler policy": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator doppler status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator doppler audit": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator doppler unset": {
+          "$ref": "#/$defs/helpLines"
+        },
         "cloud peers allow": {
           "$ref": "#/$defs/helpLines"
         },
@@ -878,6 +901,12 @@
           "$ref": "#/$defs/helpLines"
         },
         "cloud secrets rm": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud secrets enable": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud secrets disable": {
           "$ref": "#/$defs/helpLines"
         },
         "cloud github connect": {
@@ -899,6 +928,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "cloud agent git-credential": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud agent doppler": {
           "$ref": "#/$defs/helpLines"
         }
       },

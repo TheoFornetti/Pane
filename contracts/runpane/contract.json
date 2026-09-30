@@ -1513,6 +1513,60 @@
       ]
     },
     {
+      "name": "cloud coordinator doppler set",
+      "summary": "Turn on the coordinator's Doppler secrets service: mint a read-only service token per Doppler config with this machine's logged-in doppler CLI (or install one you made) and install it 0600 on the coordinator. Sessions then get their repository's .runpane/secrets.json names at creation and every wake, with no laptop in the path.",
+      "usage": [
+        "runpane cloud coordinator doppler set --project <p> (--config <c> [--config <c>...] | --all-configs) [--policy default|allow-all] [--token-name <name>] [--api-base-url <url>] [--json]",
+        "runpane cloud coordinator doppler set --project <p> --config <c> --token-file <path|-> [--policy default|allow-all] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator doppler policy",
+      "summary": "Set what the coordinator withholds from every Session's manifest: the built-in deny-list (default), nothing but shell/Pane variables (allow-all), or your own name and config patterns.",
+      "usage": [
+        "runpane cloud coordinator doppler policy (--default | --allow-all | --deny-names <A,B_*> [--deny-configs <prd,stg>]) [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator doppler status",
+      "summary": "Show the coordinator's Doppler secrets service: the configs it holds tokens for, whether each loaded, and the policy. --check also reads each config (names count only). Never shows a token or value.",
+      "usage": [
+        "runpane cloud coordinator doppler status [--check] [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator doppler audit",
+      "summary": "Show recent secrets fetches by cloud Sessions: who, from which node, which manifest (repo, ref, sha), and which names were delivered or withheld. Never values.",
+      "usage": [
+        "runpane cloud coordinator doppler audit [--limit <n>] [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator doppler unset",
+      "summary": "Turn Doppler secrets off (or drop some configs): shred the tokens on the coordinator and revoke in Doppler the ones this machine minted.",
+      "usage": [
+        "runpane cloud coordinator doppler unset (--config <c>... | --all) --yes [--keep-tokens] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
       "name": "cloud peers allow",
       "summary": "Let one cloud Session message another: mints a peer record on the target, allowlisted to one of its Pane Sessions (orchestrator panel only), and writes it into the source's peers list. Nothing is allowed by default.",
       "usage": [
@@ -1574,6 +1628,28 @@
       ],
       "mutates": true,
       "idempotent": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud secrets enable",
+      "summary": "Install the doppler stand-in in an existing cloud Session (new Sessions get it automatically) and fetch its repository's .runpane/secrets.json names from the coordinator.",
+      "usage": [
+        "runpane cloud secrets enable <host> [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud secrets disable",
+      "summary": "Remove the doppler stand-in, its boot refresh and the Session's stored copy (shredded) from a cloud Session.",
+      "usage": [
+        "runpane cloud secrets disable <host> [--json]"
+      ],
+      "mutates": true,
       "wrappers": [
         "npm"
       ]
@@ -1656,6 +1732,19 @@
       "summary": "The git credential helper a cloud Session runs as ~/.local/bin/git-credential-runpane: answers git with the broker's read-only, one-repository token for https://github.com/<repo> (GitHub App mode).",
       "usage": [
         "runpane cloud agent git-credential get"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud agent doppler",
+      "summary": "The doppler stand-in a cloud Session runs as ~/.local/bin/doppler: doppler run [-p P -c C] -- cmd, doppler secrets get NAME --plain, doppler secrets download --no-file, doppler refresh and doppler status, from the values the coordinator delivered for the repository's .runpane/secrets.json.",
+      "usage": [
+        "runpane cloud agent doppler run [-p <project>] [-c <config>] [--preserve-env] -- <command> [args...]",
+        "runpane cloud agent doppler secrets get NAME [NAME...] [--plain|--json]",
+        "runpane cloud agent doppler refresh [--json]",
+        "runpane cloud agent doppler status [--json]"
       ],
       "wrappers": [
         "npm"
@@ -3615,6 +3704,69 @@
         "  --yes    Confirm.",
         "  --json   Print machine-readable output."
       ],
+      "cloud coordinator doppler set": [
+        "Usage:",
+        "  runpane cloud coordinator doppler set --project <p> (--config <c> [--config <c>...] | --all-configs) [--policy default|allow-all] [--token-name <name>] [--api-base-url <url>] [--json]",
+        "  runpane cloud coordinator doppler set --project <p> --config <c> --token-file <path|-> [--policy default|allow-all] [--json]",
+        "",
+        "Turn on the coordinator's Doppler secrets service: mint a read-only service token per Doppler config with this machine's logged-in doppler CLI (or install one you made) and install it 0600 on the coordinator. Sessions then get their repository's .runpane/secrets.json names at creation and every wake, with no laptop in the path.",
+        "",
+        "Options:",
+        "  --project <p>           The Doppler project.",
+        "  --config <c>            A config to serve (repeatable).",
+        "  --all-configs           Every config of the project.",
+        "  --policy <mode>         default (built-in deny-list) or allow-all (the user's call; production included).",
+        "  --token-name <name>     Name of the minted service tokens (default runpane-cloud-<coordinator>).",
+        "  --token-file <path|->   Install a service token (dp.st.*) or service account token (dp.sa.*) you made; personal and CLI tokens are refused.",
+        "  --api-base-url <url>    Doppler API base (tests and fakes only).",
+        "  --json                  Print machine-readable output."
+      ],
+      "cloud coordinator doppler policy": [
+        "Usage:",
+        "  runpane cloud coordinator doppler policy (--default | --allow-all | --deny-names <A,B_*> [--deny-configs <prd,stg>]) [--json]",
+        "",
+        "Set what the coordinator withholds from every Session's manifest: the built-in deny-list (default), nothing but shell/Pane variables (allow-all), or your own name and config patterns.",
+        "",
+        "Options:",
+        "  --default               Withhold PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*; refuse stg/prd configs.",
+        "  --allow-all             Deliver every name the manifest lists, production included.",
+        "  --deny-names <list>     Custom: withhold these name patterns (* matches any run).",
+        "  --deny-configs <list>   Custom: refuse these configs (and their branch configs).",
+        "  --json                  Print machine-readable output."
+      ],
+      "cloud coordinator doppler status": [
+        "Usage:",
+        "  runpane cloud coordinator doppler status [--check] [--json]",
+        "",
+        "Show the coordinator's Doppler secrets service: the configs it holds tokens for, whether each loaded, and the policy. --check also reads each config (names count only). Never shows a token or value.",
+        "",
+        "Options:",
+        "  --check   Ask Doppler through each token now and report how many names it reads.",
+        "  --json    Print machine-readable output."
+      ],
+      "cloud coordinator doppler audit": [
+        "Usage:",
+        "  runpane cloud coordinator doppler audit [--limit <n>] [--json]",
+        "",
+        "Show recent secrets fetches by cloud Sessions: who, from which node, which manifest (repo, ref, sha), and which names were delivered or withheld. Never values.",
+        "",
+        "Options:",
+        "  --limit <n>   How many entries (1-1000, default 50).",
+        "  --json        Print machine-readable output."
+      ],
+      "cloud coordinator doppler unset": [
+        "Usage:",
+        "  runpane cloud coordinator doppler unset (--config <c>... | --all) --yes [--keep-tokens] [--json]",
+        "",
+        "Turn Doppler secrets off (or drop some configs): shred the tokens on the coordinator and revoke in Doppler the ones this machine minted.",
+        "",
+        "Options:",
+        "  --config <c>    A config to drop (repeatable).",
+        "  --all           Every config: the service is off.",
+        "  --keep-tokens   Shred on the coordinator but do not revoke in Doppler.",
+        "  --yes           Confirm.",
+        "  --json          Print machine-readable output."
+      ],
       "cloud peers allow": [
         "Usage:",
         "  runpane cloud peers allow <from-host> <to-host> [--session <session>] [--json]",
@@ -3682,6 +3834,26 @@
         "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
         "  NAME                           Variable(s) to remove.",
         "  --json                         Print machine-readable output."
+      ],
+      "cloud secrets enable": [
+        "Usage:",
+        "  runpane cloud secrets enable <host> [--json]",
+        "",
+        "Install the doppler stand-in in an existing cloud Session (new Sessions get it automatically) and fetch its repository's .runpane/secrets.json names from the coordinator.",
+        "",
+        "Options:",
+        "  <host>   Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud secrets disable": [
+        "Usage:",
+        "  runpane cloud secrets disable <host> [--json]",
+        "",
+        "Remove the doppler stand-in, its boot refresh and the Session's stored copy (shredded) from a cloud Session.",
+        "",
+        "Options:",
+        "  <host>   Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --json   Print machine-readable output."
       ],
       "cloud": [
         "Usage:",
@@ -3791,6 +3963,21 @@
         "The git credential helper a cloud Session runs as ~/.local/bin/git-credential-runpane: answers git with the broker's read-only, one-repository token for https://github.com/<repo> (GitHub App mode).",
         "",
         "Configured by runpane cloud new --github or runpane cloud github connect --broker (App mode) for https://github.com only."
+      ],
+      "cloud agent doppler": [
+        "Usage:",
+        "  runpane cloud agent doppler run [-p <project>] [-c <config>] [--preserve-env] -- <command> [args...]",
+        "  runpane cloud agent doppler secrets get NAME [NAME...] [--plain|--json]",
+        "  runpane cloud agent doppler refresh [--json]",
+        "  runpane cloud agent doppler status [--json]",
+        "",
+        "The doppler stand-in a cloud Session runs as ~/.local/bin/doppler: doppler run [-p P -c C] -- cmd, doppler secrets get NAME --plain, doppler secrets download --no-file, doppler refresh and doppler status, from the values the coordinator delivered for the repository's .runpane/secrets.json.",
+        "",
+        "Options:",
+        "  run           Run a command with the config's secrets in its environment only.",
+        "  secrets get   Print a value (the only command that prints one).",
+        "  refresh       Fetch the current set from the coordinator now.",
+        "  status        Where the set came from, names and when."
       ]
     },
     "pip": {
@@ -5045,6 +5232,42 @@
         "`runpane cloud coordinator github unset` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud coordinator github unset"
       ],
+      "cloud coordinator doppler set": [
+        "Usage:",
+        "  runpane cloud coordinator doppler set --project <p> (--config <c> [--config <c>...] | --all-configs) [--policy default|allow-all] [--token-name <name>] [--api-base-url <url>] [--json]",
+        "  runpane cloud coordinator doppler set --project <p> --config <c> --token-file <path|-> [--policy default|allow-all] [--json]",
+        "",
+        "`runpane cloud coordinator doppler set` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator doppler set"
+      ],
+      "cloud coordinator doppler policy": [
+        "Usage:",
+        "  runpane cloud coordinator doppler policy (--default | --allow-all | --deny-names <A,B_*> [--deny-configs <prd,stg>]) [--json]",
+        "",
+        "`runpane cloud coordinator doppler policy` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator doppler policy"
+      ],
+      "cloud coordinator doppler status": [
+        "Usage:",
+        "  runpane cloud coordinator doppler status [--check] [--json]",
+        "",
+        "`runpane cloud coordinator doppler status` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator doppler status"
+      ],
+      "cloud coordinator doppler audit": [
+        "Usage:",
+        "  runpane cloud coordinator doppler audit [--limit <n>] [--json]",
+        "",
+        "`runpane cloud coordinator doppler audit` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator doppler audit"
+      ],
+      "cloud coordinator doppler unset": [
+        "Usage:",
+        "  runpane cloud coordinator doppler unset (--config <c>... | --all) --yes [--keep-tokens] [--json]",
+        "",
+        "`runpane cloud coordinator doppler unset` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator doppler unset"
+      ],
       "cloud peers allow": [
         "Usage:",
         "  runpane cloud peers allow <from-host> <to-host> [--session <session>] [--json]",
@@ -5086,6 +5309,20 @@
         "",
         "`runpane cloud secrets rm` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud secrets rm"
+      ],
+      "cloud secrets enable": [
+        "Usage:",
+        "  runpane cloud secrets enable <host> [--json]",
+        "",
+        "`runpane cloud secrets enable` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud secrets enable"
+      ],
+      "cloud secrets disable": [
+        "Usage:",
+        "  runpane cloud secrets disable <host> [--json]",
+        "",
+        "`runpane cloud secrets disable` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud secrets disable"
       ],
       "cloud": [
         "Usage:",
@@ -5150,6 +5387,16 @@
         "",
         "`runpane cloud agent git-credential` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud agent git-credential"
+      ],
+      "cloud agent doppler": [
+        "Usage:",
+        "  runpane cloud agent doppler run [-p <project>] [-c <config>] [--preserve-env] -- <command> [args...]",
+        "  runpane cloud agent doppler secrets get NAME [NAME...] [--plain|--json]",
+        "  runpane cloud agent doppler refresh [--json]",
+        "  runpane cloud agent doppler status [--json]",
+        "",
+        "`runpane cloud agent doppler` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud agent doppler"
       ]
     }
   },
@@ -15435,6 +15682,193 @@
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
         ]
       },
+      "cloud coordinator doppler set": {
+        "name": "cloud coordinator doppler set",
+        "summary": "Turn on the coordinator's Doppler secrets service: mint a read-only service token per Doppler config with this machine's logged-in doppler CLI (or install one you made) and install it 0600 on the coordinator. Sessions then get their repository's .runpane/secrets.json names at creation and every wake, with no laptop in the path.",
+        "details": "Each service token reads exactly one config (Doppler's scoping) and is read-only. Replacing a config's token revokes the one this machine minted before. Afterwards the coordinator is asked to read each config (names count only).",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--project",
+            "required": false,
+            "description": "The Doppler project."
+          },
+          {
+            "name": "--config",
+            "required": false,
+            "description": "A config to serve (repeatable)."
+          },
+          {
+            "name": "--all-configs",
+            "required": false,
+            "description": "Every config of the project."
+          },
+          {
+            "name": "--policy",
+            "required": false,
+            "description": "default (built-in deny-list) or allow-all (the user's call; production included)."
+          },
+          {
+            "name": "--token-name",
+            "required": false,
+            "description": "Name of the minted service tokens (default runpane-cloud-<coordinator>)."
+          },
+          {
+            "name": "--token-file",
+            "required": false,
+            "description": "Install a service token (dp.st.*) or service account token (dp.sa.*) you made; personal and CLI tokens are refused."
+          },
+          {
+            "name": "--api-base-url",
+            "required": false,
+            "description": "Doppler API base (tests and fakes only)."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator doppler set --project montlake --all-configs --policy allow-all"
+        ],
+        "notes": [
+          "Tokens go from this machine's doppler CLI straight into the provider files API (0600 on the coordinator, staged copy shredded): never printed, never on a command line, never saved on this machine. Values never pass through this machine: Sessions fetch them from the coordinator over the tailnet.",
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator doppler policy": {
+        "name": "cloud coordinator doppler policy",
+        "summary": "Set what the coordinator withholds from every Session's manifest: the built-in deny-list (default), nothing but shell/Pane variables (allow-all), or your own name and config patterns.",
+        "details": "The policy is per coordinator, which is per user (BYOK). Sessions pick it up at their next refresh (wake, or doppler refresh inside them).",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--default",
+            "required": false,
+            "description": "Withhold PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*; refuse stg/prd configs."
+          },
+          {
+            "name": "--allow-all",
+            "required": false,
+            "description": "Deliver every name the manifest lists, production included."
+          },
+          {
+            "name": "--deny-names",
+            "required": false,
+            "description": "Custom: withhold these name patterns (* matches any run)."
+          },
+          {
+            "name": "--deny-configs",
+            "required": false,
+            "description": "Custom: refuse these configs (and their branch configs)."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator doppler policy --allow-all"
+        ],
+        "notes": [
+          "Shell and Pane variables (PATH, HOME, LD_*, PANE_*, RUNPANE_*, ...) are never delivered, whatever the policy.",
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator doppler status": {
+        "name": "cloud coordinator doppler status",
+        "summary": "Show the coordinator's Doppler secrets service: the configs it holds tokens for, whether each loaded, and the policy. --check also reads each config (names count only). Never shows a token or value.",
+        "details": "Asks GET /cloud/secrets/status as this machine's user caller.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--check",
+            "required": false,
+            "description": "Ask Doppler through each token now and report how many names it reads."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator doppler status --check"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator doppler audit": {
+        "name": "cloud coordinator doppler audit",
+        "summary": "Show recent secrets fetches by cloud Sessions: who, from which node, which manifest (repo, ref, sha), and which names were delivered or withheld. Never values.",
+        "details": "Reads <stateDir>/secrets-audit.jsonl (0600) on the coordinator through GET /cloud/secrets/audit; Sessions cannot read it.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--limit",
+            "required": false,
+            "description": "How many entries (1-1000, default 50)."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator doppler audit --limit 20"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator doppler unset": {
+        "name": "cloud coordinator doppler unset",
+        "summary": "Turn Doppler secrets off (or drop some configs): shred the tokens on the coordinator and revoke in Doppler the ones this machine minted.",
+        "details": "Sessions keep their stored copy until their next refresh (wake or doppler refresh), which then clears it.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--config",
+            "required": false,
+            "description": "A config to drop (repeatable)."
+          },
+          {
+            "name": "--all",
+            "required": false,
+            "description": "Every config: the service is off."
+          },
+          {
+            "name": "--keep-tokens",
+            "required": false,
+            "description": "Shred on the coordinator but do not revoke in Doppler."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator doppler unset --all --yes"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
       "cloud peers allow": {
         "name": "cloud peers allow",
         "summary": "Let one cloud Session message another: mints a peer record on the target, allowlisted to one of its Pane Sessions (orchestrator panel only), and writes it into the source's peers list. Nothing is allowed by default.",
@@ -15626,6 +16060,56 @@
         ],
         "notes": [
           "Values are resolved on this machine and reach the sandbox only in a 0600 file written over the provider files API: never in sandbox metadata, env, command lines or logs. Production, infrastructure and secret-manager names (PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*, plus settings.json secretsDenyList) are refused.",
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud secrets enable": {
+        "name": "cloud secrets enable",
+        "summary": "Install the doppler stand-in in an existing cloud Session (new Sessions get it automatically) and fetch its repository's .runpane/secrets.json names from the coordinator.",
+        "details": "Writes ~/.local/bin/doppler (runs runpane cloud agent doppler), a user unit that refreshes at every boot and wake, and a note for agents; then runs doppler refresh in the Session, which prints names only. Needs the coordinator's Doppler service (coordinator doppler set) and the Session's GitHub broker repository.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud secrets enable rp-red-zd56pin5"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud secrets disable": {
+        "name": "cloud secrets disable",
+        "summary": "Remove the doppler stand-in, its boot refresh and the Session's stored copy (shredded) from a cloud Session.",
+        "details": "The coordinator keeps its tokens; remove those with coordinator doppler unset.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud secrets disable rp-red-zd56pin5"
+        ],
+        "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
         ]
       },
@@ -15908,6 +16392,41 @@
         ],
         "examples": [
           "git fetch origin"
+        ],
+        "notes": [
+          "Runs inside a cloud Session only; it needs the coordinator named in ~/.config/runpane-cloud/peers.json."
+        ]
+      },
+      "cloud agent doppler": {
+        "name": "cloud agent doppler",
+        "summary": "The doppler stand-in a cloud Session runs as ~/.local/bin/doppler: doppler run [-p P -c C] -- cmd, doppler secrets get NAME --plain, doppler secrets download --no-file, doppler refresh and doppler status, from the values the coordinator delivered for the repository's .runpane/secrets.json.",
+        "details": "Values are kept 0600 in ~/.runpane-cloud/doppler/secrets.json, refreshed at every boot/wake, on doppler refresh and when over an hour old; a coordinator outage keeps the stored copy, a policy or manifest decision clears it. runpane cloud agent secrets refresh|status are aliases.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "run",
+            "required": false,
+            "description": "Run a command with the config's secrets in its environment only."
+          },
+          {
+            "name": "secrets",
+            "required": false,
+            "description": "Print a value (the only command that prints one)."
+          },
+          {
+            "name": "refresh",
+            "required": false,
+            "description": "Fetch the current set from the coordinator now."
+          },
+          {
+            "name": "status",
+            "required": false,
+            "description": "Where the set came from, names and when."
+          }
+        ],
+        "examples": [
+          "doppler run -- sh -c 'test -n \"$OPENROUTER_API_KEY\" && echo present'"
         ],
         "notes": [
           "Runs inside a cloud Session only; it needs the coordinator named in ~/.config/runpane-cloud/peers.json."

@@ -69,6 +69,22 @@ export interface CoordinatorDeployment {
   wakeGraceSeconds?: number;
   /** The boat wallet the coordinator sandbox bills (fixed at create); its own boat calls default to it. */
   boatOrg?: BoatOrg;
+  /**
+   * The GitHub broker (`coordinator github set`). Only settings: the App key or PAT lives on the
+   * coordinator (0600) and never on this machine's disk. Kept so a redeploy rewrites the same config.
+   */
+  github?: CoordinatorGitHub;
+}
+
+export interface CoordinatorGitHub {
+  mode: 'app' | 'pat';
+  appId?: string;
+  installationId?: number;
+  allowReadyPulls: boolean;
+  /** Overrides for a fake GitHub (tests, the live proof without GitHub). */
+  apiBaseUrl?: string;
+  gitBaseUrl?: string;
+  setAt: string;
 }
 
 export interface PinnedPane {
@@ -122,6 +138,8 @@ interface CloudHostMeta {
   boatOrg?: BoatOrg;
   /** GitHub repositories this Session can reach (`runpane cloud github connect`). */
   github?: GitHubGrant[];
+  /** owner/name repos this Session may use through the coordinator's GitHub broker (directory `github.repos`). */
+  brokerRepos?: string[];
 }
 
 /** Where the laptop's GitHub credential came from, so disconnect and destroy can find it again. */

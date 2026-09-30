@@ -34,6 +34,8 @@ test('new pushes a directory the coordinator accepts, with the new host in it', 
     coordinatorToken: null,
     // The wallet boat billed at create (the fake account's active wallet is personal).
     org: 'personal',
+    // No repos until the laptop grants some (GitHub broker allowlist).
+    githubRepos: [],
   });
   assert.match(harness.out.join('\n'), /coordinator: directory updated \(1 cloud Session\)/u);
 });

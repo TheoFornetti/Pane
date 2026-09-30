@@ -19,6 +19,9 @@ const directoryFileSchema = boundary.object({
     pinnedVersion: boundary.optional(boundary.nullable(boundary.string)),
     coordinatorToken: boundary.optional(boundary.nullable(boundary.string)),
     org: boundary.optional(boundary.nullable(boundary.string)),
+    github: boundary.optional(boundary.nullable(boundary.object({
+      repos: boundary.optional(boundary.array(boundary.nonEmptyString)),
+    }))),
   })),
 });
 
@@ -43,6 +46,7 @@ export function parseDirectory(value: JsonValue): ParsedDirectory {
       pinnedVersion: session.pinnedVersion ?? null,
       coordinatorToken: session.coordinatorToken ?? null,
       org: session.org ?? null,
+      githubRepos: session.github?.repos ?? [],
     };
   });
   return { generatedAt: decoded.generatedAt ?? null, entries };

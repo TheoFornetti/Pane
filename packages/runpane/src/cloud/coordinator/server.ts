@@ -1,11 +1,13 @@
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { boundary, decodeBoundary } from '../../boundaryDecoder';
-import type { JsonValue } from '../../boundaryDecoder';
+import type { JsonObject, JsonValue } from '../../boundaryDecoder';
 import { authenticateCaller } from './callerAuth';
 import type { Caller } from './callerAuth';
 import { describeError } from './daemonProbe';
 import type { DirectoryWriter } from './directory';
+import type { GitHubBroker } from './github/broker';
+import { BrokerError } from './github/policy';
 import type { IdleCheckReport } from './idleStop';
 import type { ReconcileReport } from './reconciler';
 import type { AlertSink, Clock, CoordinatorAlert, SessionDirectory } from './types';
@@ -39,6 +41,8 @@ export interface CoordinatorServerOptions {
   revokedCallers: readonly string[];
   version: string;
   log?: (line: string) => void;
+  /** The GitHub broker behind /cloud/github/* (it answers "off" until a credential is configured). */
+  github?: GitHubBroker;
 }
 
 interface ErrorBody {
@@ -53,7 +57,8 @@ type ResponseBody =
   | { ok: true; service: string; version: string }
   | { ok: true; alerts: CoordinatorAlert[] }
   | { ok: true; report: ReconcileReport | IdleCheckReport }
-  | { ok: true; sessions: number };
+  | { ok: true; sessions: number }
+  | JsonObject;
 
 const FAILURE_STATUS = {
   'unknown-host': 404,
@@ -114,6 +119,23 @@ export function createCoordinatorServer(options: CoordinatorServerOptions): http
     if (!auth.ok) throw new HttpError(auth.status, auth.code, auth.message);
     const { caller } = auth;
     rateLimitPeer(caller);
+
+    if (url.pathname.startsWith('/cloud/github/') && options.github) {
+      // The broker binds peers to their tailnet node, applies its allowlist and audits every call.
+      const answer = await options.github.handle({
+        method: request.method ?? 'GET',
+        path: url.pathname.slice('/cloud/github/'.length),
+        query: url.searchParams,
+        caller,
+        remoteAddress: request.socket.remoteAddress ?? '',
+        readBody: (limitBytes) => readJson(request, limitBytes).catch((cause: unknown) => {
+          if (cause instanceof HttpError) throw new BrokerError('too-large', `the request body is larger than ${limitBytes} bytes`);
+          throw new BrokerError('bad-request', `the request body is not JSON: ${describeError(cause)}`);
+        }),
+      });
+      writeJson(response, answer.status, answer.body);
+      return;
+    }
 
     const route = `${request.method ?? 'GET'} ${url.pathname}`;
     switch (route) {
@@ -183,13 +205,13 @@ function writeJson(response: ServerResponse, status: number, body: ResponseBody)
   response.end(JSON.stringify(body));
 }
 
-async function readJson(request: IncomingMessage): Promise<JsonValue> {
+async function readJson(request: IncomingMessage, limitBytes = MAX_BODY_BYTES): Promise<JsonValue> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
     size += buffer.length;
-    if (size > MAX_BODY_BYTES) throw new HttpError(413, 'too-large', 'request body is too large');
+    if (size > limitBytes) throw new HttpError(413, 'too-large', 'request body is too large');
     chunks.push(buffer);
   }
   const text = Buffer.concat(chunks).toString('utf8').trim();

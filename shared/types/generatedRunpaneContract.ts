@@ -1471,6 +1471,50 @@ export const RUNPANE_CONTRACT = {
       ]
     },
     {
+      "name": "cloud coordinator github set",
+      "summary": "Turn on the coordinator's GitHub broker with your GitHub App (recommended) or fine-grained PAT: checks it with GitHub, uploads it to the coordinator (0600, never printed or kept on this machine), and restarts the coordinator. Classic ghp_/gho_ tokens are refused.",
+      "usage": [
+        "runpane cloud coordinator github set --app-id <id> --private-key-file <path|-> [--installation-id <id>] [--allow-ready-pulls] [--api-base-url <url> --git-base-url <url>] [--no-verify] [--json]",
+        "runpane cloud coordinator github set --pat-file <path|-> [--repo <owner/name>]... [--allow-ready-pulls] [--no-verify] [--json]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator github status",
+      "summary": "Show the GitHub broker: mode (app, pat or off), the App and the repositories it reaches, and cached token expiry. Never shows a token.",
+      "usage": [
+        "runpane cloud coordinator github status [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator github audit",
+      "summary": "Show recent GitHub broker calls from cloud Sessions: who, which repository and branch or number, and the outcome. The log never holds tokens or text.",
+      "usage": [
+        "runpane cloud coordinator github audit [--limit <n>] [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator github unset",
+      "summary": "Turn the GitHub broker off and shred its credential on the coordinator.",
+      "usage": [
+        "runpane cloud coordinator github unset --yes [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
       "name": "cloud peers allow",
       "summary": "Let one cloud Session message another: mints a peer record on the target, allowlisted to one of its Pane Sessions (orchestrator panel only), and writes it into the source's peers list. Nothing is allowed by default.",
       "usage": [
@@ -3485,6 +3529,54 @@ export const RUNPANE_CONTRACT = {
         "  --yes    Confirm; the command changes billed cloud resources.",
         "  --json   Print machine-readable output."
       ],
+      "cloud coordinator github set": [
+        "Usage:",
+        "  runpane cloud coordinator github set --app-id <id> --private-key-file <path|-> [--installation-id <id>] [--allow-ready-pulls] [--api-base-url <url> --git-base-url <url>] [--no-verify] [--json]",
+        "  runpane cloud coordinator github set --pat-file <path|-> [--repo <owner/name>]... [--allow-ready-pulls] [--no-verify] [--json]",
+        "",
+        "Turn on the coordinator's GitHub broker. Cloud Sessions then push cloud/<host>/ branches and open draft PRs, issues and comments through the coordinator, with no laptop at runtime. The credential is checked with GitHub, uploaded to the coordinator (0600) and never printed or kept on this machine.",
+        "",
+        "Options:",
+        "  --app-id <id>                 The GitHub App ID (recommended: tokens are minted per call, 1 h, one repository).",
+        "  --private-key-file <path|->   The App private key (.pem).",
+        "  --installation-id <id>        Which installation, when the App has several.",
+        "  --pat-file <path|->           A fine-grained PAT (github_pat_...) instead; classic ghp_/gho_ tokens are refused.",
+        "  --repo <owner/name>           PAT mode: also check the token can write this repository.",
+        "  --allow-ready-pulls           Let Sessions open ready (non-draft) PRs. Default: always drafts.",
+        "  --api-base-url <url>          GitHub API base (tests and fakes only).",
+        "  --git-base-url <url>          GitHub git base (tests and fakes only).",
+        "  --no-verify                   Skip the check with GitHub from this machine.",
+        "  --json                        Print machine-readable output."
+      ],
+      "cloud coordinator github status": [
+        "Usage:",
+        "  runpane cloud coordinator github status [--json]",
+        "",
+        "Show the coordinator's GitHub broker: mode (app, pat or off), the App and the repositories it reaches, and cached token expiry. Never shows a token.",
+        "",
+        "Options:",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud coordinator github audit": [
+        "Usage:",
+        "  runpane cloud coordinator github audit [--limit <n>] [--json]",
+        "",
+        "Show recent GitHub broker calls from cloud Sessions: who, which repository and branch or number, and the outcome. The log never holds tokens or text.",
+        "",
+        "Options:",
+        "  --limit <n>   How many calls (default 50, at most 1000).",
+        "  --json        Print machine-readable output."
+      ],
+      "cloud coordinator github unset": [
+        "Usage:",
+        "  runpane cloud coordinator github unset --yes [--json]",
+        "",
+        "Turn the GitHub broker off and shred its credential on the coordinator. The App or PAT itself still exists on GitHub.",
+        "",
+        "Options:",
+        "  --yes    Confirm.",
+        "  --json   Print machine-readable output."
+      ],
       "cloud peers allow": [
         "Usage:",
         "  runpane cloud peers allow <from-host> <to-host> [--session <session>] [--json]",
@@ -4839,6 +4931,35 @@ export const RUNPANE_CONTRACT = {
         "",
         "`runpane cloud coordinator destroy` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud coordinator destroy"
+      ],
+      "cloud coordinator github set": [
+        "Usage:",
+        "  runpane cloud coordinator github set --app-id <id> --private-key-file <path|-> [--installation-id <id>] [--allow-ready-pulls] [--api-base-url <url> --git-base-url <url>] [--no-verify] [--json]",
+        "  runpane cloud coordinator github set --pat-file <path|-> [--repo <owner/name>]... [--allow-ready-pulls] [--no-verify] [--json]",
+        "",
+        "`runpane cloud coordinator github set` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator github set"
+      ],
+      "cloud coordinator github status": [
+        "Usage:",
+        "  runpane cloud coordinator github status [--json]",
+        "",
+        "`runpane cloud coordinator github status` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator github status"
+      ],
+      "cloud coordinator github audit": [
+        "Usage:",
+        "  runpane cloud coordinator github audit [--limit <n>] [--json]",
+        "",
+        "`runpane cloud coordinator github audit` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator github audit"
+      ],
+      "cloud coordinator github unset": [
+        "Usage:",
+        "  runpane cloud coordinator github unset --yes [--json]",
+        "",
+        "`runpane cloud coordinator github unset` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator github unset"
       ],
       "cloud peers allow": [
         "Usage:",
@@ -15142,6 +15263,141 @@ export const RUNPANE_CONTRACT = {
         ],
         "examples": [
           "runpane cloud coordinator destroy --yes"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator github set": {
+        "name": "cloud coordinator github set",
+        "summary": "Turn on the coordinator's GitHub broker with your GitHub App (recommended) or fine-grained PAT.",
+        "details": "Checks the credential with GitHub from this machine (App: finds the installation and its repositories and refuses Workflows/Administration/Secrets permissions; PAT: refuses classic ghp_/gho_ tokens and checks write access), uploads it to the coordinator through the provider's files API into ~/.config/runpane-cloud-coordinator/github/ (0600), rewrites the coordinator config and restarts it, then asks the broker whether it loaded. The credential is never printed, never on a command line and never saved on this machine. Cloud Sessions then push only cloud/<host>/ branches in the repositories granted to them and open draft PRs, issues and comments through the coordinator.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--app-id",
+            "required": false,
+            "description": "The GitHub App ID."
+          },
+          {
+            "name": "--private-key-file",
+            "required": false,
+            "description": "The App private key (.pem), or - for stdin."
+          },
+          {
+            "name": "--installation-id",
+            "required": false,
+            "description": "Which installation, when the App has several."
+          },
+          {
+            "name": "--pat-file",
+            "required": false,
+            "description": "A fine-grained PAT (github_pat_...) instead of an App, or - for stdin."
+          },
+          {
+            "name": "--repo",
+            "required": false,
+            "description": "PAT mode: also check the token can write this repository (repeatable)."
+          },
+          {
+            "name": "--allow-ready-pulls",
+            "required": false,
+            "description": "Let Sessions open ready (non-draft) PRs; the default is always drafts."
+          },
+          {
+            "name": "--api-base-url",
+            "required": false,
+            "description": "GitHub API base URL (tests and fakes only)."
+          },
+          {
+            "name": "--git-base-url",
+            "required": false,
+            "description": "GitHub git base URL (tests and fakes only)."
+          },
+          {
+            "name": "--no-verify",
+            "required": false,
+            "description": "Skip the check with GitHub from this machine."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator github set --app-id 123456 --private-key-file ~/Downloads/runpane-cloud.pem"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator github status": {
+        "name": "cloud coordinator github status",
+        "summary": "Show the coordinator's GitHub broker without any secret.",
+        "details": "Asks the coordinator (GET /cloud/github/status) for the broker mode (app, pat or off), the App and the repositories it reaches, whether ready PRs are allowed, and the expiry of cached installation tokens, plus any credential error.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator github status"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator github audit": {
+        "name": "cloud coordinator github audit",
+        "summary": "Show recent GitHub broker calls from cloud Sessions.",
+        "details": "Reads the coordinator's github-audit.jsonl through its API: time, Session, node, endpoint, repository, branch or number, outcome, GitHub id or URL. It never holds tokens, titles or bodies.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--limit",
+            "required": false,
+            "description": "How many calls (default 50, at most 1000)."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator github audit --limit 20"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator github unset": {
+        "name": "cloud coordinator github unset",
+        "summary": "Turn the GitHub broker off and shred its credential on the coordinator.",
+        "details": "Rewrites the coordinator config without the broker, shreds the App key or PAT on the coordinator and restarts it. The App or PAT still exists on GitHub; revoke it there.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator github unset --yes"
         ],
         "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."

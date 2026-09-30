@@ -286,6 +286,7 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
       managedPrefix: next.managedPrefix,
       reconcile: next.reconcile,
       pin: next.pin ?? null,
+      github: next.github ? { mode: next.github.mode, appId: next.github.appId ?? null } : null,
     },
     directory: coordinator,
     peersFiles: peers,
@@ -299,6 +300,7 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     deps.stdout(`  manages sandboxes named ${next.managedPrefix}*; idle-stop on; reconcile ${next.reconcile ? 'on (stop + alert only)' : 'off'}.`);
     deps.stdout(`  holds a provider key scoped to ${SCOPED_KEY_ACTIONS.join(', ')}${next.scopedKeyTtl ? ` (lifetime ${next.scopedKeyTtl} from ${next.deployedAt.slice(0, 10)}; destroy and redeploy before it expires)` : ''}; this machine's caller token is in ${deps.store.coordinatorClientPath} (0600).`);
     if (next.pin) deps.stdout(`  pinned Pane ${next.pin.version}: Sessions are upgraded to it when they wake.`);
+    if (next.github) deps.stdout(`  GitHub broker kept (${next.github.mode === 'app' ? `App ${next.github.appId ?? '?'}` : 'fine-grained PAT'}); see runpane cloud coordinator github status.`);
     deps.stdout(`  directory: ${coordinator.pushed ? `${coordinator.sessions} cloud Session${coordinator.sessions === 1 ? '' : 's'}` : `not pushed (${coordinator.reason})`}.`);
     if (withoutClient.length > 0) {
       deps.stdout(`  note: ${withoutClient.join(', ')} were created before the coordinator and have no coordinator client, so idle-stop skips them. New Sessions get one automatically.`);
@@ -329,15 +331,32 @@ function idleStopConfig(deployment: CoordinatorDeployment): IdleStopConfig {
   return config;
 }
 
-/** Uploads the app, the config and the secrets (0600, never on a command line), then (re)starts the unit. */
-async function installCoordinator(provider: CloudProvider, deployment: CoordinatorDeployment, options: InstallOptions): Promise<void> {
-  const handle = provider.handle(deployment.sandboxId);
-  const prepared = await handle.runScript(`umask 077; mkdir -p ${STAGE_DIR} ${COORDINATOR_HOME}; chmod 700 ${STAGE_DIR} ${COORDINATOR_HOME}; tailscale ip -4 | head -1`, { timeoutSeconds: 60 });
-  const listenHost = prepared.stdout.trim().split('\n').pop()?.trim() ?? '';
-  if (prepared.exitCode !== 0 || !/^100\.\d+\.\d+\.\d+$/u.test(listenHost)) {
-    throw new Error(`Could not read the coordinator's tailnet address (exit ${String(prepared.exitCode)}).`);
+/** Where `coordinator github set` puts the App key or the PAT on the coordinator (0600, in a 0700 dir). */
+export const COORDINATOR_GITHUB_DIR = `${COORDINATOR_HOME}/github`;
+
+/** The broker section of the coordinator config: settings from this machine, credential paths on the box. */
+function githubConfig(deployment: CoordinatorDeployment): Record<string, string | number | boolean | null> | null {
+  const github = deployment.github;
+  if (!github) return null;
+  const config: Record<string, string | number | boolean | null> = {
+    mode: github.mode,
+    allowReadyPulls: github.allowReadyPulls,
+  };
+  if (github.mode === 'app') {
+    config.appId = github.appId ?? null;
+    config.privateKeyFile = `${COORDINATOR_GITHUB_DIR}/app.pem`;
+    config.installationId = github.installationId ?? null;
+  } else {
+    config.patFile = `${COORDINATOR_GITHUB_DIR}/pat`;
   }
-  const config = {
+  if (github.apiBaseUrl) config.apiBaseUrl = github.apiBaseUrl;
+  if (github.gitBaseUrl) config.gitBaseUrl = github.gitBaseUrl;
+  return config;
+}
+
+/** The whole coordinator config. This machine is its single writer, so a redeploy rebuilds it from the record. */
+function coordinatorConfig(deployment: CoordinatorDeployment, listenHost: string) {
+  return {
     version: 1,
     listenHost,
     listenPort: COORDINATOR_PORT,
@@ -357,7 +376,58 @@ async function installCoordinator(provider: CloudProvider, deployment: Coordinat
     pinnedDebSha256: deployment.pin?.sha256 ?? null,
     idleStop: idleStopConfig(deployment),
     reconcile: { enabled: deployment.reconcile },
+    github: githubConfig(deployment),
   };
+}
+
+async function coordinatorListenHost(handle: ReturnType<CloudProvider['handle']>): Promise<string> {
+  const prepared = await handle.runScript(`umask 077; mkdir -p ${STAGE_DIR} ${COORDINATOR_HOME}; chmod 700 ${STAGE_DIR} ${COORDINATOR_HOME}; tailscale ip -4 | head -1`, { timeoutSeconds: 60 });
+  const listenHost = prepared.stdout.trim().split('\n').pop()?.trim() ?? '';
+  if (prepared.exitCode !== 0 || !/^100\.\d+\.\d+\.\d+$/u.test(listenHost)) {
+    throw new Error(`Could not read the coordinator's tailnet address (exit ${String(prepared.exitCode)}).`);
+  }
+  return listenHost;
+}
+
+/**
+ * Rewrites the config (and optionally installs or removes the GitHub credential) without touching the
+ * app, then restarts the unit and waits for /health on the box. The credential goes through the files
+ * API into the stage dir, then `install -m 600` and `shred`: never a command line, env or metadata.
+ */
+export async function reconfigureCoordinator(
+  provider: CloudProvider,
+  deployment: CoordinatorDeployment,
+  options: { githubCredential?: { file: 'app.pem' | 'pat'; content: string }; removeGitHubCredentials?: boolean } = {},
+): Promise<void> {
+  const handle = provider.handle(deployment.sandboxId);
+  const listenHost = await coordinatorListenHost(handle);
+  await handle.writeFile(`${STAGE_DIR}/config.json`, `${JSON.stringify(coordinatorConfig(deployment, listenHost), null, 2)}\n`);
+  if (options.githubCredential) await handle.writeFile(`${STAGE_DIR}/github-credential`, options.githubCredential.content);
+  const target = options.githubCredential ? `${COORDINATOR_GITHUB_DIR}/${options.githubCredential.file}` : '';
+  const script = `set -e
+umask 077
+S=${STAGE_DIR}; C=${COORDINATOR_HOME}; G=${COORDINATOR_GITHUB_DIR}
+mkdir -p "$G"; chmod 700 "$G"
+${options.removeGitHubCredentials ? 'for f in "$G/app.pem" "$G/pat"; do [ -f "$f" ] && shred -u "$f"; done; true' : ''}
+${options.githubCredential ? `for f in "$G/app.pem" "$G/pat"; do [ -f "$f" ] && shred -u "$f"; done; install -m 600 "$S/github-credential" "${target}"; shred -u "$S/github-credential"` : ''}
+install -m 600 "$S/config.json" "$C/config.json"; rm -f "$S/config.json"
+systemctl --user restart runpane-cloud-coordinator.service
+for i in $(seq 1 30); do curl -fsS "http://${listenHost}:${COORDINATOR_PORT}/health" >/dev/null 2>&1 && { echo "RP_COORD ok"; exit 0; }; sleep 1; done
+echo "RP_COORD the service did not answer on ${listenHost}:${COORDINATOR_PORT}"; journalctl --user -u runpane-cloud-coordinator.service -n 5 --no-pager 2>&1 | tail -5; exit 4
+`;
+  const result = await handle.runScript(script, { timeoutSeconds: 120 });
+  if (result.exitCode !== 0) {
+    // Never echo the staged credential's path contents; only our own RP_COORD lines.
+    const reason = `${result.stdout}\n${result.stderr}`.split('\n').filter((line) => line.startsWith('RP_COORD ')).map((line) => line.slice(9)).pop();
+    throw new Error(`Reconfiguring the coordinator failed (exit ${String(result.exitCode)}): ${reason ?? 'see the coordinator journal'}`);
+  }
+}
+
+/** Uploads the app, the config and the secrets (0600, never on a command line), then (re)starts the unit. */
+async function installCoordinator(provider: CloudProvider, deployment: CoordinatorDeployment, options: InstallOptions): Promise<void> {
+  const handle = provider.handle(deployment.sandboxId);
+  const listenHost = await coordinatorListenHost(handle);
+  const config = coordinatorConfig(deployment, listenHost);
   await handle.writeFile(`${STAGE_DIR}/config.json`, `${JSON.stringify(config, null, 2)}\n`);
   await handle.writeFile(`${STAGE_DIR}/caller-secret`, `${options.secret}\n`);
   if (options.scopedKeySecret) await handle.writeFile(`${STAGE_DIR}/boat-scoped-key`, `${options.scopedKeySecret}\n`);
@@ -370,7 +440,8 @@ command -v node >/dev/null || { echo "RP_COORD node is not installed in this san
 if [ -f "$S/boat-scoped-key" ]; then install -m 600 "$S/boat-scoped-key" "$C/boat-scoped-key"; shred -u "$S/boat-scoped-key"; fi
 [ -f "$C/boat-scoped-key" ] || { echo "RP_COORD the scoped provider key is missing; destroy and redeploy the coordinator"; exit 3; }
 install -m 600 "$S/caller-secret" "$C/caller-secret"; shred -u "$S/caller-secret"
-# Keep a config edited by hand? No: the laptop CLI owns it (single writer); the directory file is kept.
+# Keep a config edited by hand? No: the laptop CLI owns it (single writer); the directory file and the
+# GitHub credential (github/, written by coordinator github set) are kept.
 install -m 600 "$S/config.json" "$C/config.json"; rm -f "$S/config.json"
 rm -rf "$APP"; mkdir -p "$APP"
 base64 -d "$S/app.tgz.b64" | tar -xzf - -C "$APP"; rm -f "$S/app.tgz.b64"
@@ -548,6 +619,10 @@ async function loadProvider(deps: CloudDeps): Promise<{ credentials: CloudCreden
   if (!credentials.boat) throw new Error('No boat API key saved. Run: runpane cloud setup --boat-key-file <path|->');
   return { credentials, provider: deps.createProvider(credentials, (await deps.store.readSettings()).coordinator?.deployment?.boatOrg?.id) };
 }
+
+export const loadCoordinatorProvider = (deps: CloudDeps) => loadProvider(deps);
+export const requireCoordinatorDeployment = (deps: CloudDeps) => requireDeployment(deps);
+export const saveCoordinatorDeployment = (deps: CloudDeps, deployment: CoordinatorDeployment) => saveDeployment(deps, deployment);
 
 async function requireDeployment(deps: CloudDeps): Promise<CoordinatorDeployment> {
   const deployment = (await deps.store.readSettings()).coordinator?.deployment;

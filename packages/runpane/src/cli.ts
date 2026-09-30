@@ -13,6 +13,7 @@ import { boundary, decodeBoundary, type JsonObject } from './boundaryDecoder';
 import { PaneDaemonClientError } from './daemonClient';
 import { downloadArtifact } from './download';
 import { runDoctor } from './doctor';
+import { runCloudSafeToStop } from './cloudSafeToStop';
 import {
   installPaneArtifact,
   launchPaneClient,
@@ -261,6 +262,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'lock list') {
     return runLockList(parsed);
+  }
+
+  if (parsed.command === 'cloud safe-to-stop') {
+    return runCloudSafeToStop(parsed);
   }
 
   if (parsed.command === 'workspace state') {

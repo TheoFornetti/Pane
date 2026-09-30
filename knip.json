@@ -82,7 +82,8 @@
         "pkill",
         "wslpath",
         "explorer.exe",
-        "dscl"
+        "dscl",
+        "systemd-run"
       ]
     },
     "packages/runpane": {

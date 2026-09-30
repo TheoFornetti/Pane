@@ -1619,6 +1619,12 @@ export class TerminalPanelManager extends EventEmitter {
     return this.terminals.has(panelId);
   }
 
+  /** The PTY's root process id, for callers that inspect what runs under a panel. */
+  getPanelPid(panelId: string): number | undefined {
+    const terminal = this.terminals.get(panelId);
+    return terminal && !terminal.isPtyHost ? terminal.pty.pid : undefined;
+  }
+
   /**
    * Wait until the panel's launch command is typed and a CLI agent signalled
    * ready. Resolves false when the terminal is gone or the wait timed out.

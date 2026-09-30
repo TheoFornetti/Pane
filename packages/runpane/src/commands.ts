@@ -185,7 +185,8 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
     };
   }
 
-  if (first === 'cloud') {
+  // `cloud safe-to-stop` runs inside the sandbox against the local daemon, so it takes the shared flags.
+  if (first === 'cloud' && args[1] !== 'safe-to-stop') {
     return parseCloudEntry(args);
   }
 
@@ -920,6 +921,7 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'lock acquire'
     || command === 'lock release'
     || command === 'lock list'
+    || command === 'cloud safe-to-stop'
     || command === 'panels create'
     || command === 'panels open'
     || command === 'panels list'

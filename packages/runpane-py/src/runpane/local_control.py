@@ -222,6 +222,21 @@ def run_lock_list(parsed: Any) -> int:
     return 0
 
 
+def run_cloud_safe_to_stop(parsed: Any) -> int:
+    if parsed.force and parsed.dry_run:
+        raise ValueError("runpane cloud safe-to-stop takes --force or --dry-run, not both.")
+    flush = "always" if parsed.force else "never" if parsed.dry_run else "if-safe"
+    result = invoke_daemon("runpane:cloud:safe-to-stop", [{"flush": flush}], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+    else:
+        print("Safe to stop." if result.get("safe") else "Not safe to stop:")
+        for blocker in result.get("blockers") or []:
+            print(f"  {blocker.get('condition')}: {blocker.get('message')}")
+    # 3 = blocked, so scripts can tell it from a failure (1).
+    return 0 if result.get("safe") else 3
+
+
 def _require_lock_name(parsed: Any, action: str) -> str:
     name = (parsed.name or "").strip()
     if not name:

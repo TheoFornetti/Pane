@@ -26,6 +26,7 @@ from .local_control import (
     run_agents_doctor,
     run_lock_acquire,
     run_lock_list,
+    run_cloud_safe_to_stop,
     run_lock_release,
     run_panels_create,
     run_panels_input,
@@ -298,6 +299,8 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_lock_release(parsed)
     if parsed.command == "lock list":
         return run_lock_list(parsed)
+    if parsed.command == "cloud safe-to-stop":
+        return run_cloud_safe_to_stop(parsed)
     if parsed.command == "panes list":
         return run_panes_list(parsed)
     if parsed.command == "panes cost":
@@ -1026,6 +1029,7 @@ def is_runpane_local_command(command: str) -> bool:
         "lock acquire",
         "lock release",
         "lock list",
+        "cloud safe-to-stop",
         "workspace state",
         "watch",
         "panes list",

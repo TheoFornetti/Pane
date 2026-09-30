@@ -1,0 +1,90 @@
+# Runpane Cloud: daemon surface for the coordinator
+
+A cloud Session is a normal headless Pane daemon on a provider sandbox. The coordinator (`runpane cloud`)
+talks to it through three things only: `GET /health`, `runpane:cloud:safe-to-stop` and `runpane:cloud:upgrade`.
+Both channels go over the usual `POST /invoke` with a paired client token. Code: `main/src/daemon/cloud/`.
+
+## `GET /health`: version and readiness
+
+Unauthenticated, as before. The old fields stay (`ok`, `status: "ready"`, `transport`); `status` only says the HTTP
+server answers. New fields:
+
+```json
+{
+  "version": "2.4.141-rc.20260930064034.g44c801fe",
+  "gitCommit": "44c801fe",
+  "startedAt": "2026-09-30T06:58:03.159Z",
+  "readiness": {
+    "state": "ready",
+    "daemon": "ready",
+    "agentRestore": "none",
+    "agents": { "expected": 1, "ready": 1, "starting": 0, "blocked": 0, "notRunning": 0 }
+  }
+}
+```
+
+- `agents` counts the agent panels (Claude, Codex, ...) of non-archived Panes. `ready` means the terminal runs and
+  the agent shows idle or working chrome; `blocked` means it waits on a person (a trust or permission prompt);
+  `starting` means the terminal runs but the agent is not detected yet; `notRunning` means no terminal is behind the panel.
+- `readiness.state`:
+  - `starting` while bootstrap runs, while agent restore is `pending`, or while any agent panel is `starting`;
+  - `degraded` when restore finished (`done`, not lazy) but some agent panels are not running;
+  - `ready` otherwise.
+- A wake is finished when `readiness.state` is no longer `starting` (and `version` matches the pin).
+- The agent-restore step reports its progress with `setAgentRestorePhase('pending' | 'done', { lazy? })` from
+  `main/src/daemon/cloud/readiness.ts`. Without it, `agentRestore` stays `none` and readiness follows live panels only.
+
+## `runpane:cloud:safe-to-stop`
+
+A provider stop is a power-off after a disk snapshot, with no SIGTERM (M0: boat snapshots 3.6–4.7 s after the stop
+call). The daemon therefore has to say whether stopping is safe **and** make its state durable before the coordinator
+calls stop.
+
+Request (all optional): `{ "flush": "if-safe" | "always" | "never", "recentOutputMs": 120000, "clientWindowMs": 900000 }`.
+
+It refuses while any of these holds, and lists every one it finds:
+
+| condition | when |
+|---|---|
+| `agent-working` | an agent panel's detected state is working |
+| `recent-terminal-output` | any terminal printed within `recentOutputMs` (default 2 min) |
+| `lock-held` | a named lock (`runpane lock`) is held |
+| `watcher-active` | a `runpane:workspace:wait` or `runpane:panels:wait` call is running, or one returned in the last 30 s (a watch loop between calls) |
+| `pr-checks-pending` | a Session member's open PR has checks still running (the PR monitor polls first if its last round is over 60 s old) |
+| `user-client-attached` | a user client has an open `/events` stream, or called `/invoke` within `clientWindowMs` (default 15 min) |
+
+Peers (paired records with `scope: 'peer'`) never count: not their waits, streams or calls. Every `runpane:cloud:*`
+call is exempt too, so the coordinator's own polling never keeps a Session awake.
+
+With `flush: "if-safe"` (the default), a safe answer comes only after the daemon has checkpointed the SQLite WAL
+(`wal_checkpoint(TRUNCATE)`), fsynced every file at the top of the Pane directory and the directory itself, and run
+`sync -f` on its filesystem. `always` flushes even when blocked (a stop the user asked for); `never` only checks.
+
+```json
+{ "ok": true, "safe": true, "checkedAt": "...", "version": "...", "blockers": [],
+  "flush": { "walCheckpoint": { "busy": 0, "log": 12, "checkpointed": 12 }, "fsynced": ["..."], "syncedFilesystem": true, "durationMs": 40 } }
+```
+
+The coordinator should call the provider's stop right after `safe: true`. Anything written after the answer can
+still be lost; the window is the time until the provider's snapshot point.
+
+Inside the sandbox the same check runs through the local socket:
+`runpane cloud safe-to-stop [--force] [--dry-run] [--json]` (exit 0 safe, 3 blocked, 1 error).
+
+## `runpane:cloud:upgrade`: version pin on wake
+
+Headless daemons never update themselves (`versionChecker` runs only on the desktop). After a wake, when
+`/health.version` differs from the pinned version, the coordinator calls:
+
+```json
+{ "channel": "runpane:cloud:upgrade", "args": [{ "version": "<pinned>", "url": "https://.../pane_<pinned>_amd64.deb", "sha256": "<64 hex>" }] }
+```
+
+- Same version already running: `{ ok: true, upgraded: false }`.
+- Otherwise the daemon downloads the package (https only) into `<pane dir>/cloud-upgrades/`, checks its sha256, and
+  starts a transient `systemd-run --user` job that runs `sudo -n apt-get install` on it and restarts the daemon's own
+  systemd user unit (read from `/proc/self/cgroup`). It answers `{ ok: true, upgraded: "scheduled", from, to }`
+  before the restart; the coordinator then polls `/health` until `version` equals the pin and readiness is not `starting`.
+- Errors carry a code at the start of the message: `ERR_CLOUD_UPGRADE_BAD_REQUEST`, `_CHECKSUM`, `_DOWNLOAD`,
+  `_NO_SERVICE` (not under systemd), `_UNSUPPORTED` (not Linux), `_SPAWN`. An older daemon answers `ERR_UNKNOWN_CHANNEL`.
+- `debUrl` is accepted as an alias of `url`.

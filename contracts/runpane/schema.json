@@ -522,6 +522,7 @@
         "lock acquire",
         "lock release",
         "lock list",
+        "cloud safe-to-stop",
         "cloud",
         "cloud setup",
         "cloud new",
@@ -770,6 +771,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "lock list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud safe-to-stop": {
           "$ref": "#/$defs/helpLines"
         },
         "cloud": {

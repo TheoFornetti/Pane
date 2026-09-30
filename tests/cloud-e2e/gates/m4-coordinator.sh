@@ -81,6 +81,8 @@ os=$(cl boat get "$O_ID" --field state); ss_=$(cl boat get "$S_ID" --field state
 
 else rec reconcile SKIP "E2E_M4_SKIP_RECONCILE=1 (already gated on this head)"; fi
 
+write_dir "$S_ENTRY"   # serve reads the directory on every pass (the reconcile section may have been skipped)
+
 # ---- the always-on part: one `serve` process runs the idle-stop loop and the HTTP API (its streak and resume
 #      counts live in that process, as in production). Short interval; runaway guard at 1 resume/hour.
 python3 - "$CFG" <<'PY'

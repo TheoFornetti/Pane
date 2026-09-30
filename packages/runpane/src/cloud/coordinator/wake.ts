@@ -33,6 +33,7 @@ type WakeFailureCode =
   | 'directory-unreadable'
   | 'runaway-guard'
   | 'wake-rate-limited'
+  | 'provider-rate-limited'
   | 'provider-error';
 
 export interface WakeFailure {
@@ -58,6 +59,7 @@ export interface WakeOptions {
 }
 
 const STOPPING_WAIT_MS = 60_000;
+const RATE_LIMIT_BACKOFF_MS = [5_000, 10_000, 20_000, 30_000];
 
 export class WakeService {
   private readonly inflight = new Map<string, Promise<WakeResult>>();
@@ -121,7 +123,8 @@ export class WakeService {
     }
 
     if (sandbox.state === 'stopped') {
-      const resumed = await this.resume(entry);
+      // Without wait the caller wants an answer now: one resume attempt, no rate-limit retries.
+      const resumed = await this.resume(entry, wait ? deadline : this.deps.clock.now());
       if (resumed) return resumed;
       if (!wait) return this.report(entry, 'waking', null, 'resume requested');
     } else if (sandbox.state === 'missing' || sandbox.state === 'failed') {
@@ -150,7 +153,7 @@ export class WakeService {
     return this.applyPinnedVersion(entry, last, deadline);
   }
 
-  private async resume(entry: DirectoryEntry): Promise<WakeFailure | null> {
+  private async resume(entry: DirectoryEntry, retryUntil: number): Promise<WakeFailure | null> {
     let managed: ProviderSandbox[];
     try {
       managed = (await this.deps.provider.list()).filter((sandbox) => isManagedSandbox(sandbox, this.options));
@@ -168,33 +171,58 @@ export class WakeService {
       });
       return { ok: false, code: verdict.code, message: verdict.message };
     }
-    // Idle-stop may hold the sandbox for a few seconds; wait for it rather than racing its stop call.
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    let rateLimited = 0;
+    let busyWaits = 0;
+    for (;;) {
+      // Idle-stop may hold the sandbox for a few seconds; wait for it rather than racing its stop call.
       const outcome = await this.deps.activity.exclusive(entry.sandboxId, async () => {
         await this.deps.provider.resume(entry.sandboxId);
       }).catch((cause: unknown) => ({ ran: true as const, error: cause }));
       if (!outcome.ran) {
+        busyWaits += 1;
+        if (busyWaits > 120) return { ok: false, code: 'provider-error', message: 'sandbox stayed busy; resume not sent' };
         await this.deps.clock.sleep(500);
         continue;
       }
-      if ('error' in outcome) {
-        const error = outcome.error;
-        // 409: a resume is already in progress; the readiness loop picks it up.
-        if (error instanceof BoatProviderError && error.status === 409) return null;
+      if (!('error' in outcome)) break;
+      const error = outcome.error;
+      // 409: a resume is already in progress; the readiness loop picks it up.
+      if (error instanceof BoatProviderError && error.status === 409) return null;
+      if (!(error instanceof BoatProviderError && error.status === 429)) {
         return { ok: false, code: 'provider-error', message: describeError(error) };
       }
-      this.deps.guard.recordResume(entry.sandboxId);
-      this.deps.activity.markWoken(entry.sandboxId);
-      this.deps.alerts.emit({
-        level: 'info',
-        code: 'woken',
-        message: `${entry.label}: resume requested`,
-        sandboxId: entry.sandboxId,
-        sessionId: entry.sessionId,
-      });
-      return null;
+      // boat's machine-start limits are account-wide (creates, forks and resumes share them), so a
+      // wake can be refused for reasons unrelated to this Session. Retry until the wake deadline.
+      const backoff = RATE_LIMIT_BACKOFF_MS[Math.min(rateLimited, RATE_LIMIT_BACKOFF_MS.length - 1)];
+      if (rateLimited === 0) {
+        this.deps.alerts.emit({
+          level: 'warn',
+          code: 'provider-rate-limited',
+          message: `${entry.label}: the provider refused the resume (${describeError(error)}); retrying until the wake deadline`,
+          sandboxId: entry.sandboxId,
+          sessionId: entry.sessionId,
+        });
+      }
+      rateLimited += 1;
+      if (this.deps.clock.now() + backoff > retryUntil) {
+        return {
+          ok: false,
+          code: 'provider-rate-limited',
+          message: `the provider's machine-start limit refused the resume ${rateLimited} time(s): ${describeError(error)}`,
+        };
+      }
+      await this.deps.clock.sleep(backoff);
     }
-    return { ok: false, code: 'provider-error', message: 'sandbox stayed busy; resume not sent' };
+    this.deps.guard.recordResume(entry.sandboxId);
+    this.deps.activity.markWoken(entry.sandboxId);
+    this.deps.alerts.emit({
+      level: 'info',
+      code: 'woken',
+      message: `${entry.label}: resume requested${rateLimited > 0 ? ` after ${rateLimited} provider rate-limit retries` : ''}`,
+      sandboxId: entry.sandboxId,
+      sessionId: entry.sessionId,
+    });
+    return null;
   }
 
   private async waitWhileStopping(sandboxId: string): Promise<ProviderSandbox> {

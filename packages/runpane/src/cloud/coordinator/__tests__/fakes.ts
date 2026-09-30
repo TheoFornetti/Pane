@@ -69,6 +69,8 @@ export class FakeProvider implements CoordinatorProvider {
   readonly calls: string[] = [];
   readonly sandboxes = new Map<string, ProviderSandbox>();
   listError: Error | null = null;
+  /** Errors thrown by the next resume() calls, in order. */
+  resumeErrors: Error[] = [];
   /** State the sandbox moves to on the Nth get() after a resume (simulates boot). */
   bootAfterGets = 1;
   private pendingBoot = new Map<string, number>();
@@ -111,6 +113,8 @@ export class FakeProvider implements CoordinatorProvider {
 
   async resume(sandboxId: string): Promise<void> {
     this.calls.push(`resume ${sandboxId}`);
+    const failure = this.resumeErrors.shift();
+    if (failure) throw failure;
     const current = this.sandboxes.get(sandboxId);
     if (current) {
       current.state = 'starting';

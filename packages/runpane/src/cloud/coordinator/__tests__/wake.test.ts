@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { MemoryAlertSink } from '../alerts';
+import { BoatProviderError } from '../boatProvider';
 import { RunawayGuard, SandboxActivity } from '../guards';
 import { IdleStopper } from '../idleStop';
 import type { ProviderSandbox } from '../types';
@@ -173,6 +174,28 @@ describe('WakeService.wake', () => {
     assert.equal(status(result), 'awake');
     assert.ok(result.ok && /no pinnedDebUrl\/pinnedDebSha256 configured for 3.0.0/.test(result.detail));
     assert.ok(!probe.calls.some((call) => call.startsWith('upgrade')));
+  });
+
+  it('retries a provider start-limit 429 with backoff until the resume goes through', async () => {
+    const { wake, provider, alerts } = setup([sandbox('bx_a', 'stopped')]);
+    provider.resumeErrors = [
+      new BoatProviderError('boat POST /sandboxes/bx_a/resume failed: HTTP 429 (rate_limited)', 429, 'rate_limited'),
+      new BoatProviderError('boat POST /sandboxes/bx_a/resume failed: HTTP 429 (rate_limited)', 429, 'rate_limited'),
+    ];
+    assert.equal(status(await wake.wake('s1', { wait: true })), 'awake');
+    assert.equal(provider.mutations().filter((call) => call.startsWith('resume')).length, 3);
+    assert.ok(alerts.alerts.some((alert) => alert.code === 'provider-rate-limited'));
+  });
+
+  it('reports provider-rate-limited when the start limit outlasts the wake deadline, and does not retry without wait', async () => {
+    const limited = () => new BoatProviderError('HTTP 429 (rate_limited)', 429, 'rate_limited');
+    const waiting = setup([sandbox('bx_a', 'stopped')]);
+    waiting.provider.resumeErrors = Array.from({ length: 50 }, limited);
+    assert.equal(status(await waiting.wake.wake('s1', { wait: true, timeoutMs: 60_000 })), 'error:provider-rate-limited');
+    const noWait = setup([sandbox('bx_a', 'stopped')]);
+    noWait.provider.resumeErrors = [limited()];
+    assert.equal(status(await noWait.wake.wake('s1', { wait: false })), 'error:provider-rate-limited');
+    assert.equal(noWait.provider.mutations().length, 1);
   });
 
   it('a wake keeps idle-stop away for the grace period', async () => {

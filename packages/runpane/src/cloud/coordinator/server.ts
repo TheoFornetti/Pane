@@ -60,6 +60,7 @@ const FAILURE_STATUS = {
   'directory-unreadable': 503,
   'runaway-guard': 429,
   'wake-rate-limited': 429,
+  'provider-rate-limited': 429,
   'provider-error': 502,
 } as const;
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getCloudSwitchFailure,
   getCloudWakeCommand,
   getRemoteExecutableHealthPresentation,
   getRemoteFooterStatus,
@@ -176,5 +177,30 @@ describe('cloud host asleep hint', () => {
     const connected = { ...failed(cloudProfile), status: 'connected' as const };
     expect(getRemoteFooterStatus(connected, idleHost, [cloudProfile]).title).toBe('Connected to Checkout');
     expect(getRemoteHostSwitcherModel(connected, idleHost, [cloudProfile]).cloudWakeCommand).toBeNull();
+  });
+
+  // A desktop reopened on a sleeping host retries 5 times (~90 s) before 'error'; seen live.
+  it('names the wake command once the first attempt to reach a cloud host has failed', () => {
+    const retrying = { ...failed(cloudProfile), status: 'reconnecting' as const };
+    expect(getRemoteHostSwitcherModel(retrying, idleHost, [cloudProfile]).cloudWakeCommand).toBe('runpane cloud wake rp-abc12345');
+    expect(getRemoteFooterStatus(retrying, idleHost, [cloudProfile]).title).toBe('Cloud host asleep or unreachable');
+
+    const firstAttempt = { ...failed(cloudProfile), status: 'connecting' as const, lastError: null };
+    expect(getRemoteHostSwitcherModel(firstAttempt, idleHost, [cloudProfile]).cloudWakeCommand).toBeNull();
+    const retryingPlain = { ...failed(plainProfile), status: 'reconnecting' as const };
+    expect(getRemoteHostSwitcherModel(retryingPlain, idleHost, [plainProfile]).cloudWakeCommand).toBeNull();
+  });
+
+  // Picking a sleeping host from the switcher fails after one attempt and Pane goes back to this
+  // computer, so the connection state no longer names the host; seen live.
+  it('explains a failed switch to a cloud host with the wake command', () => {
+    expect(getCloudSwitchFailure(cloudProfile, 'Timed out waiting for remote daemon ready event after 10000ms')).toEqual({
+      title: 'Cloud host asleep or unreachable',
+      error: 'Checkout did not answer, so Pane stayed on this computer. A cloud Session that is asleep has to be woken first: run this, then pick Checkout again.',
+      command: 'runpane cloud wake rp-abc12345',
+      details: 'Timed out waiting for remote daemon ready event after 10000ms',
+    });
+    expect(getCloudSwitchFailure(plainProfile, 'fetch failed')).toBeNull();
+    expect(getCloudSwitchFailure(undefined, 'fetch failed')).toBeNull();
   });
 });

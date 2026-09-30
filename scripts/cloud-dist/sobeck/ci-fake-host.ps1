@@ -16,10 +16,10 @@ New-Item -ItemType Directory -Force -Path $HostDir, $ReposDir | Out-Null
 
 $setupOut = Join-Path $HostDir 'setup.out.txt'
 $setup = Start-Process -FilePath $Exe -Wait -NoNewWindow -PassThru -RedirectStandardOutput $setupOut -RedirectStandardError (Join-Path $HostDir 'setup.err.txt') `
-  -ArgumentList "--remote-setup --label $Label --pane-dir `"$HostDir`" --listen-port $Port --prefer-tunnel ssh --no-install-service"
+  -ArgumentList "--remote-setup --label $Label --pane-dir `"$HostDir`" --listen-port $Port --prefer-tunnel manual --base-url http://127.0.0.1:$Port --no-install-service"
 if ($setup.ExitCode -ne 0) { throw "remote setup exited $($setup.ExitCode)" }
 if (-not (Select-String -Path $setupOut -Pattern 'pane-remote://' -Quiet)) { throw 'remote setup printed no pane-remote:// code' }
-# The ssh-tunnel code points at the host's loopback; the desktop here reaches it directly.
+# Keep only the fields a cloud Session's code has (no tunnel): the desktop reaches this host directly.
 New-Item -ItemType Directory -Force -Path (Split-Path $PairingFile) | Out-Null
 $rewrite = @'
 const fs = require('node:fs');
@@ -44,7 +44,10 @@ $healthy = $false
 while (-not $healthy -and (Get-Date) -lt $deadline) {
   try { $healthy = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$Port/health" -TimeoutSec 3).StatusCode -eq 200 } catch { Start-Sleep -Seconds 2 }
 }
-if (-not $healthy) { Get-ChildItem (Join-Path $HostDir 'logs') -File -ErrorAction SilentlyContinue | Get-Content -Tail 40; throw 'fake host daemon never answered /health' }
+if (-not $healthy) {
+  $hostConfig = (Get-Content -Raw (Join-Path $HostDir 'config.json') | ConvertFrom-Json).remoteDaemon.host.config
+  Write-Host "host config: enabled=$($hostConfig.enabled) listen=$($hostConfig.listenHost):$($hostConfig.listenPort)"
+  Get-ChildItem (Join-Path $HostDir 'logs') -File -ErrorAction SilentlyContinue | Get-Content -Tail 40; throw 'fake host daemon never answered /health' }
 Write-Host "Fake host daemon healthy on 127.0.0.1:$Port"
 
 foreach ($name in 'Hello-World', 'montlakev2') {

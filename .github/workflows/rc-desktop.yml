@@ -354,15 +354,12 @@ jobs:
       shell: pwsh
       run: Copy-Item scripts\cloud-dist\sobeck\* "$HOME\PaneCloudTest\kit\" -Force -Exclude ci-fake-host.ps1
 
-    - name: Fake cloud host (real headless Pane daemon on loopback)
+    # One step: a daemon started in an earlier step does not reliably outlive it on Windows runners.
+    - name: Fake cloud host, then run-proof.ps1 (seed from the pairing file, drive the app)
       shell: pwsh
       run: |
         scripts\cloud-dist\sobeck\ci-fake-host.ps1 -Exe "$HOME\PaneCloudTest\app\Pane.exe" `
           -PairingFile "$HOME\PaneCloudTest\pairing.txt" -RunpaneCli "$PWD\packages\runpane\dist\cli.js"
-
-    - name: run-proof.ps1 (seed from the pairing file, then drive the app)
-      shell: pwsh
-      run: |
         powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\PaneCloudTest\kit\run-proof.ps1" `
           -OutDir "$PWD\relay-evidence\proof" -NoClaudeReply -HostnamePrefix $env:COMPUTERNAME
         $code = $LASTEXITCODE

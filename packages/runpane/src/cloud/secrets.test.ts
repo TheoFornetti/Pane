@@ -25,7 +25,8 @@ interface RealSandbox {
 /** A host from `new`, whose sandbox handle runs scripts for real with HOME=<temp dir> standing in for /home/user. */
 async function hostWithRealSandbox(harness: TestHarness): Promise<{ hostname: string; sandbox: RealSandbox }> {
   assert.equal(await run(harness, ['new', '--label', 'Secrets', '--name-prefix', 'rp-test', '--no-import', '--yes', '--json']), 0);
-  const hostname = (JSON.parse(harness.out[harness.out.length - 1]) as { host: { hostname: string } }).host.hostname;
+  const created: { host: { hostname: string } } = JSON.parse(harness.out[harness.out.length - 1]);
+  const hostname = created.host.hostname;
   const home = path.join(harness.root, 'sandbox-home');
   await fs.mkdir(path.join(home, '.runpane-cloud'), { recursive: true, mode: 0o700 });
   await fs.writeFile(path.join(home, '.bashrc'), '# user bashrc\ncase $- in *i*) ;; *) return;; esac\nexport FROM_USER_RC=1\n');

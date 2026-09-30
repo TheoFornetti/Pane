@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { boundary, decodeBoundary } from '../boundaryDecoder';
 import type { CloudDeps } from './commands';
 import type { SandboxHandle } from './provider';
 import { findHost, type CloudHostRecord } from './store';
@@ -287,6 +288,11 @@ PY
 `;
 }
 
+const sandboxOutcomeSchema = boundary.object({
+  names: boundary.array(boundary.string),
+  removed: boundary.array(boundary.string),
+});
+
 interface SandboxOutcome {
   names: string[];
   removed: string[];
@@ -300,10 +306,7 @@ async function runInSandbox(handle: SandboxHandle, script: string, what: string)
     const detail = result.stderr.trim().split('\n').slice(-1)[0] ?? '';
     throw new Error(`${what} failed in the sandbox (exit ${String(result.exitCode)})${detail ? `: ${detail}` : ''}.`);
   }
-  const parsed: unknown = JSON.parse(line.slice(OK_MARKER.length + 1));
-  const record = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
-  const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-  return { names: strings(record.names), removed: strings(record.removed) };
+  return decodeBoundary(JSON.parse(line.slice(OK_MARKER.length + 1)), sandboxOutcomeSchema);
 }
 
 // ---------------------------------------------------------------- the command

@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { promisify } from 'node:util';
 import * as path from 'node:path';
@@ -150,16 +150,17 @@ async function readSecretFile(filePath: string): Promise<string> {
 
 const execFileAsync = promisify(execFile);
 
-/** Runs a local program without a shell; a non-zero exit resolves (with its code) instead of rejecting. */
-async function runLocal(file: string, args: readonly string[], timeoutMs: number): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
-  try {
-    const { stdout, stderr } = await execFileAsync(file, [...args], { timeout: timeoutMs, maxBuffer: 1024 * 1024, encoding: 'utf8' });
-    return { exitCode: 0, stdout, stderr };
-  } catch (error) {
-    const failed = error as { code?: number | string; message?: string; stdout?: string; stderr?: string };
-    if (typeof failed.code !== 'number') throw new Error(failed.code === 'ENOENT' ? `${file}: ENOENT (not installed)` : `${file} did not run: ${String(failed.code ?? failed.message)}`);
-    return { exitCode: failed.code, stdout: failed.stdout ?? '', stderr: failed.stderr ?? '' };
-  }
+/** Runs a local program without a shell and collects its output; a non-zero exit resolves with its code. */
+function runLocal(file: string, args: readonly string[], timeoutMs: number): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, [...args], { stdio: ['ignore', 'pipe', 'pipe'], timeout: timeoutMs });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (exitCode) => resolve({ exitCode, stdout, stderr }));
+  });
 }
 
 /**

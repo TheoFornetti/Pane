@@ -11,7 +11,7 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 SNAP="$(mktemp -d "${TMPDIR:-/tmp}/cloud-e2e-snap.XXXXXX")"
 cp -a "$SRC/." "$SNAP/"
 trap 'rm -rf "$SNAP"' EXIT
-gates=("$@"); [ "${gates[0]:-all}" = all ] && gates=(m0-harness m1-cli m1-golden m2-resume m2-safestop m3-peers m4-coordinator)
+gates=("$@"); [ "${gates[0]:-all}" = all ] && gates=(m0-harness integration m1-golden m2-safestop m4-coordinator)
 rc=0
 for g in "${gates[@]}"; do
   echo "=== $g ($(date -u +%FT%TZ))"

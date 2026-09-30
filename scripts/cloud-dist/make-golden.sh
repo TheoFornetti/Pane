@@ -14,7 +14,7 @@ FORK_REPO=${FORK_REPO:-jamari-morrison/Pane}
 DIST_CURRENT=${DIST_CURRENT:-$HOME/rc-loop/results/dist-current.md}
 EVIDENCE_DIR=${EVIDENCE_DIR:-$HOME/rc-loop/evidence/m2-dist}
 BOAT=https://boat.dev/api/v1
-TAG= NAME= KEEP_SOURCE=0 KEEP_GATE=0
+TAG='' NAME='' KEEP_SOURCE=0 KEEP_GATE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --tag) TAG=$2; shift 2;;

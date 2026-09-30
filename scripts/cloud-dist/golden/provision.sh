@@ -34,4 +34,4 @@ step "golden check + metadata"
 install -m 755 "$CHECK_SRC" /usr/local/sbin/rp-golden-check
 printf '%s\n' "$META" > /etc/rp-golden.json
 chmod 644 /etc/rp-golden.json
-step done
+step "done"

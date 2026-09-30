@@ -10,7 +10,7 @@ rmx(){ for p in "$@"; do if [ -e "$p" ] || [ -L "$p" ]; then rm -rf --one-file-s
 
 # 1. stop identity-bearing services so they don't rewrite state after we delete it
 systemctl stop tailscaled 2>/dev/null
-sudo -u "$U" XDG_RUNTIME_DIR=/run/user/$(id -u "$U") systemctl --user stop pane-remote-daemon.service 2>/dev/null
+sudo -u "$U" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" systemctl --user stop pane-remote-daemon.service 2>/dev/null
 pkill -u "$U" -f '/opt/Pane/pane' 2>/dev/null; true
 
 # 2. agent / tool credentials (every home incl. root)

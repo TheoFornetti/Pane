@@ -19,6 +19,7 @@ for h in "$H" /root; do
   absent "docker config ($h)"        "$h/.docker/config.json"
   absent "chrome profile ($h)"       "$h/.config/google-chrome" "$h/.config/chromium"
   absent "shell history ($h)"        "$h/.bash_history" "$h/.zsh_history" "$h/.local/share/fish/fish_history" "$h/.python_history" "$h/.node_repl_history"
+  # shellcheck disable=SC2046 # one argument per key file
   absent "ssh user keys ($h)"        $(ls "$h"/.ssh/id_* 2>/dev/null)
   absent "pane remote state/pairing/client records ($h)" "$h/.pane_remote"
   absent "pane analytics id ($h)"    "$h/.pane/config.json"

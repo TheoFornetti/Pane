@@ -14,7 +14,7 @@ RC_BIN=${RC_BIN:-$HOME/rc-loop/bin}
 FORK_REPO=${FORK_REPO:-jamari-morrison/Pane}
 DIST_CURRENT=${DIST_CURRENT:-$HOME/rc-loop/results/dist-current.md}
 BOAT=https://boat.dev/api/v1
-DEVBOX= REF= SKIP_BUILD=0
+DEVBOX='' REF='' SKIP_BUILD=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --devbox) DEVBOX=$2; shift 2;;

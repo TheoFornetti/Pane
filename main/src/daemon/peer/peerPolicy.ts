@@ -122,7 +122,8 @@ function authorizeSubmit(
     );
   }
 
-  const forwarded: JsonObject = { panelId, input: framePeerMessage(peer.label, submit.input) };
+  // agentOnly: if the orchestrator's agent has exited, its panel is a shell; a peer never types into it.
+  const forwarded: JsonObject = { panelId, input: framePeerMessage(peer.label, submit.input), agentOnly: true };
   if (submit.asFilePointer !== undefined) forwarded.asFilePointer = submit.asFilePointer;
   if (submit.idempotencyKey !== undefined) forwarded.idempotencyKey = submit.idempotencyKey;
   return { ok: true, args: [forwarded] };

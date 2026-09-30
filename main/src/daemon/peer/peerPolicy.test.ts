@@ -30,7 +30,7 @@ describe('authorizePeerInvoke', () => {
     ], [sessionB, sessionC]);
     expect(decision).toEqual({
       ok: true,
-      args: [{ panelId: 'panel-orch-b', input: '[peer message from Session A] please rebase', idempotencyKey: 'k1' }],
+      args: [{ panelId: 'panel-orch-b', input: '[peer message from Session A] please rebase', agentOnly: true, idempotencyKey: 'k1' }],
     });
   });
 

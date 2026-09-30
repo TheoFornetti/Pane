@@ -136,7 +136,7 @@ describe('peer gate on the remote HTTP API', () => {
     expect(response.statusCode).toBe(200);
     expect(calls).toEqual([{
       channel: 'runpane:panels:submit',
-      args: [{ panelId: 'panel-orch-b', input: '[peer message from Session A] build is green', idempotencyKey: 'peer-a:msg-1' }],
+      args: [{ panelId: 'panel-orch-b', input: '[peer message from Session A] build is green', agentOnly: true, idempotencyKey: 'peer-a:msg-1' }],
     }]);
   });
 

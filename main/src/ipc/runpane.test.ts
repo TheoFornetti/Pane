@@ -2182,6 +2182,22 @@ describe('runpane IPC handlers', () => {
       .rejects.toThrow(/idempotencyKey/);
   });
 
+  it('sends nothing to a shell when agentOnly is set', async () => {
+    // The orchestrator's agent has exited: Pane's own shell is in the foreground.
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'bash', isShell: true });
+    const services = createServices();
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id,
+      input: '[peer message from Session A] rm -rf ~',
+      agentOnly: true,
+    }]);
+
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: false, inputBytes: 0, blocked: { kind: 'composer-unknown' } });
+  });
+
   it('stages text before submitting an idle Codex composer', async () => {
     vi.useFakeTimers();
     vi.mocked(terminalPanelManager.getTerminalSnapshot)

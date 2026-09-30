@@ -7893,6 +7893,9 @@ export const RUNPANE_CONTRACT = {
         },
         "idempotencyKey": {
           "type": "string"
+        },
+        "agentOnly": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false

@@ -1302,6 +1302,29 @@ export function registerRunpaneHandlers(
       };
     }
 
+    if (normalized.agentOnly) {
+      // Peers reach an agent's composer or nothing: when the agent has exited,
+      // the panel is a shell and the text would run as a command.
+      const suggestedCommand = panelScreenCommand(panel.id);
+      return {
+        ok: false,
+        panelId: panel.id,
+        paneId: panel.sessionId,
+        inputBytes: 0,
+        enter: 'cr',
+        sequenceName: 'enter-cr',
+        verifiedSubmitted: false,
+        sentAt: new Date().toISOString(),
+        blocked: {
+          kind: 'composer-unknown',
+          message: 'This submit only goes to an agent composer, and none is on screen (the agent may have exited or still be starting), so Pane sent nothing.',
+          suggestedCommand,
+        },
+        promptFile,
+        nextCommand: suggestedCommand,
+      };
+    }
+
     // An agent's CRs inside the text would each be an Enter; a shell keeps its bytes.
     const input = ensureSubmitEnter(agentType === 'claude' || agentType === 'codex' ? stagedInput : submittedText);
     // A busy Codex takes text and Enter in one write and holds the message
@@ -3851,6 +3874,7 @@ function parsePanelSubmitRequest(value: PaneCommandValue): RunpanePanelSubmitReq
     input,
     asFilePointer: optionalBoolean(value.asFilePointer),
     idempotencyKey,
+    agentOnly: optionalBoolean(value.agentOnly),
   };
 }
 

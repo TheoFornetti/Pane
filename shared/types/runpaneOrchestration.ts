@@ -983,6 +983,8 @@ export interface RunpanePanelSubmitRequest {
    * submit's result (with `deduplicated: true`) instead of sending again.
    */
   idempotencyKey?: string;
+  /** Send only into a Claude or Codex composer; never write to a shell or an unknown screen. Peers always get this. */
+  agentOnly?: boolean;
 }
 
 export type RunpanePanelVerification = 'observed' | 'unverifiable';

@@ -13536,6 +13536,7 @@
       "cloud list": {
         "name": "cloud list",
         "summary": "List cloud hosts with their sandbox state.",
+        "details": "Reads the local host records and the provider list; it never probes daemons, so it is fast and safe to run anytime.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [
@@ -13555,6 +13556,7 @@
       "cloud status": {
         "name": "cloud status",
         "summary": "Show one cloud host: sandbox state, tailnet device and daemon health (awake, asleep, waking, daemon-down or lost).",
+        "details": "Checks the provider, the tailnet device and, when the sandbox runs, GET /health over the tailnet. Exit code 1 means lost.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [
@@ -13579,6 +13581,7 @@
       "cloud stop": {
         "name": "cloud stop",
         "summary": "Put a cloud host to sleep: flush its disk, then stop the sandbox (billing stops; disk and tailnet identity are kept).",
+        "details": "boat stops are a hard power-off after a live snapshot (no SIGTERM), so the CLI runs sync in the sandbox first. The tailnet identity and disk survive.",
         "requiresPaneDaemon": false,
         "mutates": true,
         "arguments": [
@@ -13618,6 +13621,7 @@
       "cloud wake": {
         "name": "cloud wake",
         "summary": "Wake a sleeping cloud host and wait until its daemon answers /health on the same tailnet name.",
+        "details": "Resumes a stopped sandbox (a fresh machine with the same disk), then waits for the daemon /health over the tailnet and checks the tailnet node id is unchanged.",
         "requiresPaneDaemon": false,
         "mutates": true,
         "arguments": [
@@ -13654,6 +13658,7 @@
       "cloud destroy": {
         "name": "cloud destroy",
         "summary": "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host.",
+        "details": "Order matters: the tailnet device is deleted through the Tailscale API first, so no orphan node keeps the host name; then the sandbox; then the local record and the desktop profile.",
         "requiresPaneDaemon": false,
         "mutates": true,
         "arguments": [
@@ -13689,6 +13694,7 @@
       "cloud pair": {
         "name": "cloud pair",
         "summary": "Print a cloud host's pane-remote:// pairing code, for pairing a phone or another Pane app.",
+        "details": "Use this for a phone or a second computer. Pane desktop on this machine gets the host through runpane cloud new or runpane cloud sync without showing the code.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [
@@ -13714,6 +13720,7 @@
       "cloud sync": {
         "name": "cloud sync",
         "summary": "Add or refresh every cloud host in Pane desktop's saved remote hosts.",
+        "details": "Writes remoteDaemon.client.profiles in the desktop config.json; the running desktop reloads the file. Profiles keep the desktop's own ids.",
         "requiresPaneDaemon": false,
         "mutates": true,
         "arguments": [
@@ -13739,6 +13746,7 @@
       "cloud coordinator": {
         "name": "cloud coordinator",
         "summary": "Run or manage the always-on runpane cloud coordinator (idle-stop, reconcile, wake).",
+        "details": "Owned by the coordinator module; this build passes the arguments through.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [

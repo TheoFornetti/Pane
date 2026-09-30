@@ -518,6 +518,6 @@ async function waitForState(provider: CloudProvider, sandboxId: string, wanted: 
   }
 }
 
-function report(args: CoordinatorArgs, deps: CloudDeps, json: { ok: boolean }, text: string): void {
+function report<Result extends { ok: boolean }>(args: CoordinatorArgs, deps: CloudDeps, json: Result, text: string): void {
   deps.stdout(args.json ? JSON.stringify(json, null, 2) : text);
 }

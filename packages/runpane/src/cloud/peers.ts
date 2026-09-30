@@ -182,10 +182,11 @@ export async function pushPeersFile(
   record: CloudHostRecord,
   records: readonly CloudHostRecord[],
   deps: CloudDeps,
-  provider: CloudProvider = deps.createProvider(await deps.store.readCredentials()),
+  givenProvider?: CloudProvider,
 ): Promise<PeersFileResult> {
   const host = record.profile.cloud.hostname;
   try {
+    const provider = givenProvider ?? deps.createProvider(await deps.store.readCredentials());
     const sandbox = await provider.get(record.profile.cloud.sandboxId);
     if (sandbox.state !== 'running') return { host, written: false, reason: `sandbox is ${sandbox.providerState}` };
     const file = await renderPeersFile(record, records, deps);

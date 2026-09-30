@@ -28,7 +28,7 @@ async function newHost(harness: TestHarness, label: string): Promise<string> {
 
 function peersFile(harness: TestHarness, hostname: string): { v: number; hosts: { label: string; token: string; cloud?: { hostname: string } }[]; coordinator?: { baseUrl: string; token: string } } {
   const sandbox = [...harness.world.sandboxes.values()].find((candidate) => candidate.name === hostname);
-  assert.ok(sandbox);
+  assert.ok(sandbox, `no sandbox ${hostname}; have ${[...harness.world.sandboxes.values()].map((candidate) => candidate.name).join(', ')}`);
   const content = harness.world.files.get(`${sandbox.id}:/home/user/.config/runpane-cloud/peers.json`);
   assert.ok(content, `no peers.json in ${hostname}`);
   return JSON.parse(content);

@@ -191,6 +191,19 @@ describe('invokeRemote wake policy', () => {
     assert.match(submitted.idempotencyKey, /^runpane-cli:/);
   });
 
+  it('names the coordinator\'s reason when it rejects the caller', async () => {
+    const transport = async (request: RemoteHttpRequest): Promise<RemoteHttpResponse> => {
+      if (request.url.startsWith(COORD_URL)) {
+        return { status: 403, body: JSON.stringify({ ok: false, code: 'auth-unknown-peer', message: 'caller m3cli-a is not a cloud Session in the directory' }) };
+      }
+      throw new RemoteConnectError('connect ETIMEDOUT', 'ETIMEDOUT');
+    };
+    await assert.rejects(
+      invokeRemote(cloudTarget(), 'runpane:panels:list', [{}], { ...fast, transport }),
+      { name: 'RemoteTargetError', code: 'ERR_RUNPANE_COORDINATOR_AUTH', message: /not a cloud Session in the directory/ },
+    );
+  });
+
   it('says a plain unreachable host cannot be woken', async () => {
     const transport = async (): Promise<RemoteHttpResponse> => {
       throw new RemoteConnectError('connect ECONNREFUSED', 'ECONNREFUSED');

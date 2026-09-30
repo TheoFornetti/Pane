@@ -70,13 +70,17 @@ export class CoordinatorClient {
         'ERR_RUNPANE_COORDINATOR_UNREACHABLE',
       );
     }
-    if (response.status === 401 || response.status === 403) {
-      throw new CoordinatorError('The runpane cloud coordinator rejected this caller token.', 'ERR_RUNPANE_COORDINATOR_AUTH');
-    }
     let decoded;
     try {
       decoded = decodeBoundary(JSON.parse(response.body), hostStateSchema);
     } catch {
+      decoded = null;
+    }
+    if (response.status === 401 || response.status === 403) {
+      const reason = decoded && !decoded.ok && decoded.message ? ` (${decoded.message})` : '';
+      throw new CoordinatorError(`The runpane cloud coordinator rejected this caller token${reason}.`, 'ERR_RUNPANE_COORDINATOR_AUTH');
+    }
+    if (!decoded) {
       throw new CoordinatorError(`The runpane cloud coordinator answered ${response.status} with an unreadable body.`, 'ERR_RUNPANE_COORDINATOR_BAD_RESPONSE');
     }
     if (!decoded.ok) {

@@ -288,6 +288,37 @@ export async function reenrolSandbox(sandbox: SandboxHandle, options: ReenrolOpt
   return { ...identity, deletedNodeIds, elapsedMs: Date.now() - started };
 }
 
+interface RepairOptions {
+  hostname: string;
+  tailscale: TailscaleApi;
+  oldNodeId?: string;
+  sandboxHome?: string;
+}
+
+type RepairResult =
+  | { reenrolled: false; backendState: string }
+  | ({ reenrolled: true; previousBackendState: string } & ReenrolResult);
+
+/**
+ * Wake-time repair: when a resumed sandbox's node is no longer logged in (seen live on boat: an
+ * incremental restore brought tailscaled.state back empty), re-enrol it under the same hostname.
+ * A node that is running is left alone, so this is safe to call whenever /health does not answer.
+ */
+export async function repairTailnetIfLoggedOut(sandbox: SandboxHandle, options: RepairOptions): Promise<RepairResult> {
+  const home = options.sandboxHome ?? DEFAULT_SANDBOX_HOME;
+  await uploadScripts(sandbox, home);
+  const current = await new StepRunner(sandbox, home).run('tailnet-identity', [], tailnetStepSchema);
+  const backendState = current.backendState ?? 'unknown';
+  if (backendState === 'Running') return { reenrolled: false, backendState };
+  const result = await reenrolSandbox(sandbox, {
+    hostname: options.hostname,
+    tailscale: options.tailscale,
+    oldNodeId: options.oldNodeId,
+    sandboxHome: home,
+  });
+  return { reenrolled: true, previousBackendState: backendState, ...result };
+}
+
 async function joinTailnet(
   sandbox: SandboxHandle,
   runner: StepRunner,

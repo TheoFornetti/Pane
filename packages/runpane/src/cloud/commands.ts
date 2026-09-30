@@ -387,8 +387,11 @@ async function runList(args: CloudArgs, deps: CloudDeps): Promise<number> {
       size: sandbox?.size ?? record.meta.size,
     };
   });
-  const known = new Set(records.map((record) => record.profile.cloud.sandboxId));
   const settings = await deps.store.readSettings();
+  const coordinatorId = settings.coordinator?.deployment?.sandboxId;
+  // The coordinator's own sandbox shares the name prefix but is not a cloud Session.
+  const known = new Set(records.map((record) => record.profile.cloud.sandboxId));
+  if (coordinatorId) known.add(coordinatorId);
   const prefixes = new Set([settings.namePrefix ?? DEFAULT_NAME_PREFIX, ...records.map((record) => record.meta.namePrefix)]);
   const unmanaged = sandboxes
     .filter((sandbox) => !known.has(sandbox.id) && [...prefixes].some((prefix) => sandbox.name.startsWith(`${prefix}-`)))
@@ -519,7 +522,7 @@ async function runStop(args: CloudArgs, deps: CloudDeps): Promise<number> {
 }
 
 async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
-  const { provider, tailnet } = await loadCloudWithTailnet(deps);
+  const { provider, tailnet, tailnetCredentials } = await loadCloudWithTailnet(deps);
   const record = findHost(await deps.store.listHosts(), requiredHost(args));
   const { sandboxId, hostname } = record.profile.cloud;
   const timeoutMs = args.timeoutMs ?? DEFAULT_WAKE_TIMEOUT_MS;
@@ -540,11 +543,26 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
   await waitForSandbox(provider, sandboxId, 'running', Math.max(timeoutMs - (deps.now() - started), 1_000), deps);
   timings.runningMs = deps.now() - started;
   if (!record.profile.baseUrl) throw new Error(`${hostname} has no daemon address yet; its setup never finished. Destroy it and create a new one.`);
-  const health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, {
+  let health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, {
     timeoutMs: Math.max(timeoutMs - (deps.now() - started), 1_000),
     intervalMs: 500,
   });
   timings.healthMs = deps.now() - started;
+  let repaired: { previousBackendState: string; oldNodeId: string; nodeId: string } | null = null;
+  if (!health.ok) {
+    // A resume can bring the node back logged out (tailscaled.state lost); re-enrol under the same name.
+    const repair = await deps.bootstrap.repairTailnet(provider.handle(sandboxId), { hostname, oldNodeId: record.profile.cloud.nodeId }, tailnetCredentials);
+    if (repair.reenrolled) {
+      if (!args.json) deps.stdout(`runpane cloud: ${hostname}'s tailnet node came back logged out (${repair.previousBackendState}); re-enrolled it as ${repair.nodeId} under the same name.`);
+      repaired = { previousBackendState: repair.previousBackendState, oldNodeId: record.profile.cloud.nodeId, nodeId: repair.nodeId };
+      record.profile.cloud = { ...record.profile.cloud, nodeId: repair.nodeId, version: record.profile.cloud.version + 1 };
+      await deps.store.writeHost(record);
+      await importIntoDesktop(args, deps, [record.profile]);
+      await pushDirectory(deps);
+      health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: 90_000, intervalMs: 500 });
+      timings.repairedHealthMs = deps.now() - started;
+    }
+  }
   const devices = await tailnet.findDevicesByHostname(hostname);
   const sameNode = devices.some((device) => device.nodeId === record.profile.cloud.nodeId);
   // Grants changed while it slept are written now (final-plan M1: "sleeping peers get it when they wake").
@@ -561,6 +579,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     sameTailnetNode: sameNode,
     nodeIds: devices.map((device) => device.nodeId),
     version: health.version ?? null,
+    repaired,
     peersFile,
     timings,
   };

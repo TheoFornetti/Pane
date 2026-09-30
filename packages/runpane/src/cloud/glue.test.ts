@@ -22,6 +22,8 @@ interface GlueJson {
   grants?: { from: string; to: string }[];
   peersFile?: { written: boolean };
   agentCredentials?: string[];
+  status?: string;
+  repaired?: { oldNodeId: string; nodeId: string } | null;
 }
 
 function lastJson(harness: TestHarness): GlueJson {
@@ -249,4 +251,29 @@ test('peers allow with the source asleep keeps the grant and writes its list on 
   assert.equal(lastJson(harness).peersFile?.written, false);
   assert.equal(await run(harness, ['wake', a, '--json']), 0);
   assert.equal(peersFile(harness, a).hosts.length, 1);
+});
+
+test('wake re-enrols a node that came back logged out, keeping its name and bumping the profile version', async () => {
+  const harness = await createTestHarness();
+  const hostname = await newHost(harness, 'Alpha');
+  const [before] = await harness.deps.store.listHosts();
+  assert.equal(await run(harness, ['stop', hostname, '--yes', '--json']), 0);
+  harness.world.loggedOut.add(hostname);
+  assert.equal(await run(harness, ['wake', hostname, '--json', '--timeout-ms', '5000']), 0);
+  const woke = lastJson(harness);
+  assert.equal(woke.status, 'awake');
+  assert.equal(woke.repaired?.oldNodeId, before.profile.cloud.nodeId);
+  const [after] = await harness.deps.store.listHosts();
+  assert.equal(after.profile.cloud.nodeId, woke.repaired?.nodeId);
+  assert.equal(after.profile.cloud.version, before.profile.cloud.version + 1);
+  assert.equal(after.profile.baseUrl, before.profile.baseUrl);
+});
+
+test('wake leaves a running node alone when only the daemon is slow', async () => {
+  const harness = await createTestHarness();
+  const hostname = await newHost(harness, 'Alpha');
+  harness.world.healthy.delete(hostname);
+  assert.equal(await run(harness, ['wake', hostname, '--json', '--timeout-ms', '3000']), 1);
+  assert.ok(harness.world.calls.some((call) => call.startsWith('repair ')));
+  assert.equal((await harness.deps.store.listHosts())[0].profile.cloud.version, 1);
 });

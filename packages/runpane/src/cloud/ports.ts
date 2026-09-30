@@ -59,7 +59,13 @@ export interface BootstrapPort {
   createTailnet(credentials: TailnetCredentials): TailnetPort;
   /** Joins a sandbox to the tailnet as tag:rp-session without installing Pane (the coordinator's box). */
   joinTailnet(sandbox: SandboxHandle, request: JoinTailnetRequest, tailnet: TailnetCredentials): Promise<JoinedNode>;
+  /** Re-enrols the node under the same hostname only if it is logged out (a resume can lose its state). */
+  repairTailnet(sandbox: SandboxHandle, request: { hostname: string; oldNodeId?: string }, tailnet: TailnetCredentials): Promise<TailnetRepair>;
 }
+
+type TailnetRepair =
+  | { reenrolled: false; backendState: string }
+  | { reenrolled: true; previousBackendState: string; nodeId: string; magicDnsName: string; deletedNodeIds: string[] };
 
 interface JoinTailnetRequest {
   sessionId: string;

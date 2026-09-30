@@ -6,7 +6,7 @@ import { boundary, decodeBoundary, type JsonObject } from '../boundaryDecoder';
 import { RemoteDaemonClient } from '../remote/remoteDaemonClient';
 import { getWrapperVersion } from '../version';
 import { createBoatProvider } from './boat';
-import { cloudHostname, joinSandboxToTailnet, provisionSandbox, waitForDaemonHealth } from './bootstrap';
+import { cloudHostname, joinSandboxToTailnet, provisionSandbox, repairTailnetIfLoggedOut, waitForDaemonHealth } from './bootstrap';
 import { runCoordinatorCommand } from './coordinator';
 import type { CloudDeps } from './commands';
 import { callCoordinator, readClientConfig } from './coordinator/client';
@@ -33,6 +33,12 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
         },
       });
       return { nodeId: node.nodeId, magicDnsName: node.magicDnsName, tailscaleIps: node.tailscaleIps };
+    },
+    async repairTailnet(sandbox, request, tailnet) {
+      const result = await repairTailnetIfLoggedOut(sandbox, { ...request, tailscale: createTailscaleApi(tailnet) });
+      return result.reenrolled
+        ? { reenrolled: true, previousBackendState: result.previousBackendState, nodeId: result.nodeId, magicDnsName: result.magicDnsName, deletedNodeIds: result.deletedNodeIds }
+        : result;
     },
     async provision(sandbox, request, tailnet) {
       const result = await provisionSandbox(sandbox, {

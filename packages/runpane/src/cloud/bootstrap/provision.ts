@@ -1,0 +1,387 @@
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { CLOUD_SESSION_TAG, type TailscaleApi } from '../tailscale';
+import { cloudBootstrapAssets, type CloudBootstrapAssetName } from './generated/assets';
+import { waitForDaemonHealth } from './health';
+import type {
+  DaemonHealthResult,
+  PaneSource,
+  ProvisionStep,
+  ProvisionStepName,
+  SandboxHandle,
+  TailnetIdentity,
+} from './types';
+
+const DEFAULT_SANDBOX_HOME = '/home/user';
+const DEFAULT_RUNPANE_SPEC = 'runpane@latest';
+const UPLOADED_ASSETS: CloudBootstrapAssetName[] = ['rp-bootstrap.sh', 'golden-scrub.sh', 'golden-check.sh'];
+const HOSTNAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const PAIRING_PATTERN = /pane-remote:\/\/\S+/g;
+
+export interface ExtraClientRequest {
+  /** Client record label on the daemon, e.g. "runpane-cloud-coordinator". */
+  label: string;
+  /** Local file that receives this client's pane-remote:// code (0600). */
+  outputPath: string;
+}
+
+export interface ProvisionOptions {
+  sessionId: string;
+  label: string;
+  tailscale: TailscaleApi;
+  paneSource: PaneSource;
+  /** Tailnet hostname; defaults to cloudHostname(sessionId). Used verbatim. */
+  hostname?: string;
+  /** npm spec (or tarball URL) of the runpane CLI that runs `install daemon` in the sandbox. */
+  runpaneSpec?: string;
+  repo?: { url: string; ref?: string; dir?: string };
+  /** Local path that receives the pane-remote:// code with mode 0600. The code is never printed. */
+  pairingOutputPath: string;
+  extraClients?: ExtraClientRequest[];
+  tags?: string[];
+  healthTimeoutMs?: number;
+  sandboxHome?: string;
+  fetchImpl?: typeof fetch;
+  onStep?: (step: ProvisionStep) => void;
+}
+
+export interface ProvisionResult extends TailnetIdentity {
+  baseUrl: string;
+  pairingPath: string;
+  extraClientPaths: string[];
+  daemonVersion?: string;
+  health: DaemonHealthResult;
+  identityReset: boolean;
+  deletedStaleNodeIds: string[];
+  repoDir?: string;
+  timings: Partial<Record<ProvisionStepName, number>>;
+}
+
+export interface ReenrolOptions {
+  hostname: string;
+  tailscale: TailscaleApi;
+  /** The node id recorded at provision time. Devices under the same hostname are deleted too. */
+  oldNodeId?: string;
+  tags?: string[];
+  /** Re-point Tailscale Serve at the daemon (its config lives in the wiped node state). Default true. */
+  restoreServe?: boolean;
+  sandboxHome?: string;
+}
+
+export interface ReenrolResult extends TailnetIdentity {
+  deletedNodeIds: string[];
+  elapsedMs: number;
+}
+
+export class BootstrapError extends Error {
+  constructor(readonly step: string, message: string) {
+    super(`cloud bootstrap step "${step}" failed: ${message}`);
+    this.name = 'BootstrapError';
+  }
+}
+
+/** `rp-` plus the first 8 lowercase alphanumerics of the session id. */
+export function cloudHostname(sessionId: string, prefix = 'rp'): string {
+  const short = sessionId.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+  if (short.length < 4) {
+    throw new Error(`Session id "${sessionId}" has too few alphanumerics for a hostname`);
+  }
+  return assertHostname(`${prefix}-${short}`);
+}
+
+/**
+ * Provisions one cloud sandbox for a Pane Session: identity reset, strip-list check, tailnet join
+ * with a single-use tagged key (never Tailscale SSH), Pane daemon install, pairing capture to a
+ * local 0600 file, optional repo clone, and a /health wait over the tailnet. Safe to re-run for
+ * the same session: finished steps are detected and skipped.
+ */
+export async function provisionSandbox(sandbox: SandboxHandle, options: ProvisionOptions): Promise<ProvisionResult> {
+  const home = options.sandboxHome ?? DEFAULT_SANDBOX_HOME;
+  const hostname = assertHostname(options.hostname ?? cloudHostname(options.sessionId));
+  const tags = options.tags ?? [CLOUD_SESSION_TAG];
+  const timings: Partial<Record<ProvisionStepName, number>> = {};
+  const step = async <T>(name: ProvisionStepName, run: () => Promise<T>, detail?: (value: T) => string): Promise<T> => {
+    options.onStep?.({ step: name, state: 'start' });
+    const started = Date.now();
+    const value = await run();
+    timings[name] = Date.now() - started;
+    options.onStep?.({ step: name, state: 'done', elapsedMs: timings[name], detail: detail?.(value) });
+    return value;
+  };
+  const runner = new StepRunner(sandbox, home);
+
+  await step('upload-scripts', () => uploadScripts(sandbox, home));
+  const identity = await step('identity', () => runner.run('identity', [options.sessionId]),
+    (value) => (value.reset === true ? 'reset' : 'already this session'));
+  await step('tailscale-install', () => runner.run('tailscale-install', []));
+  const current = await runner.run('tailnet-identity', []);
+  const alreadyJoined = current.backendState === 'Running';
+  if (!alreadyJoined) {
+    await step('check', async () => {
+      const check = await runner.run('check', [], { allowFailure: true });
+      if (check.ok !== true) {
+        const failed = Array.isArray(check.failed) ? check.failed.join('; ') : 'unknown';
+        throw new BootstrapError('check', `identity strip-list check failed: ${failed}`);
+      }
+      return check;
+    }, (value) => `${String(value.passed)} passed`);
+  }
+
+  const deletedStaleNodeIds: string[] = [];
+  const tailnet = await step('tailscale-join', async () => {
+    if (alreadyJoined) {
+      return parseIdentity(current);
+    }
+    // M0: a device left under this hostname would push the new node to "<hostname>-1".
+    for (const device of await options.tailscale.findDevicesByHostname(hostname)) {
+      if (await options.tailscale.deleteDevice(device.nodeId)) {
+        deletedStaleNodeIds.push(device.nodeId);
+      }
+    }
+    return joinTailnet(sandbox, runner, options.tailscale, home, hostname, tags);
+  }, (value) => value.magicDnsName);
+  assertTailnetIdentity(tailnet, hostname, tags);
+
+  const runpaneSpec = options.paneSource.kind === 'runpane-npm'
+    ? options.paneSource.spec
+    : options.runpaneSpec ?? DEFAULT_RUNPANE_SPEC;
+  const install = await step('install-pane', () => runner.run('install-pane', [
+    options.paneSource.kind,
+    options.paneSource.kind === 'deb-url' ? options.paneSource.url : '',
+    options.paneSource.kind === 'deb-url' ? options.paneSource.sha256 ?? '' : '',
+    runpaneSpec,
+    options.label,
+  ], { timeoutSeconds: 600 }), (value) => (typeof value.version === 'string' ? value.version : 'installed'));
+
+  await step('pairing', async () => {
+    const pairing = await runner.run('pairing-read', []);
+    writeSecretFile(options.pairingOutputPath, requirePairingCode(pairing));
+  });
+
+  const extraClientPaths: string[] = [];
+  if (options.extraClients && options.extraClients.length > 0) {
+    await step('extra-clients', async () => {
+      for (const client of options.extraClients ?? []) {
+        const slug = clientSlug(client.label);
+        await runner.run('add-client', [slug, client.label], { timeoutSeconds: 180 });
+        writeSecretFile(client.outputPath, requirePairingCode(await runner.run('pairing-read', [slug])));
+        extraClientPaths.push(client.outputPath);
+      }
+    });
+  }
+
+  let repoDir: string | undefined;
+  if (options.repo) {
+    const repo = options.repo;
+    const dir = repo.dir ?? path.posix.join(home, repoNameFromUrl(repo.url));
+    await step('clone', () => runner.run('clone', [repo.url, repo.ref ?? '', dir], { timeoutSeconds: 600 }),
+      (value) => String(value.head ?? ''));
+    repoDir = dir;
+  }
+
+  const baseUrl = `https://${tailnet.magicDnsName}`;
+  const health = await step('health', async () => {
+    const result = await waitForDaemonHealth(baseUrl, {
+      timeoutMs: options.healthTimeoutMs ?? 120_000,
+      fetchImpl: options.fetchImpl,
+    });
+    if (!result.ok) {
+      const local = await runner.run('health-local', [], { allowFailure: true });
+      throw new BootstrapError('health', `${baseUrl}/health not ready after ${result.elapsedMs} ms `
+        + `(last HTTP ${result.status ?? 'none'}; in-sandbox loopback check ${local.ok === true ? 'ok' : 'failed'})`);
+    }
+    return result;
+  }, (value) => `${value.elapsedMs} ms`);
+
+  return {
+    ...tailnet,
+    baseUrl,
+    pairingPath: options.pairingOutputPath,
+    extraClientPaths,
+    daemonVersion: health.version ?? (typeof install.version === 'string' ? install.version : undefined),
+    health,
+    identityReset: identity.reset === true,
+    deletedStaleNodeIds,
+    repoDir,
+    timings,
+  };
+}
+
+/**
+ * Repair path: gives a sandbox a fresh tailnet node under the SAME hostname. Deletes the old
+ * device(s) through the API first (M0: otherwise the name gets a -1 suffix and the old name keeps
+ * pointing at a dead IP), wipes the node state, rejoins with a new single-use key and restores
+ * Tailscale Serve. The MagicDNS name is kept; the tailnet IPs change.
+ */
+export async function reenrolSandbox(sandbox: SandboxHandle, options: ReenrolOptions): Promise<ReenrolResult> {
+  const started = Date.now();
+  const home = options.sandboxHome ?? DEFAULT_SANDBOX_HOME;
+  const hostname = assertHostname(options.hostname);
+  const tags = options.tags ?? [CLOUD_SESSION_TAG];
+  const runner = new StepRunner(sandbox, home);
+  await uploadScripts(sandbox, home);
+
+  const doomed = new Set<string>();
+  if (options.oldNodeId) {
+    doomed.add(options.oldNodeId);
+  }
+  for (const device of await options.tailscale.findDevicesByHostname(hostname)) {
+    doomed.add(device.nodeId);
+  }
+  const deletedNodeIds: string[] = [];
+  for (const nodeId of doomed) {
+    if (await options.tailscale.deleteDevice(nodeId)) {
+      deletedNodeIds.push(nodeId);
+    }
+  }
+
+  await runner.run('tailscale-reset', []);
+  const identity = await joinTailnet(sandbox, runner, options.tailscale, home, hostname, tags);
+  assertTailnetIdentity(identity, hostname, tags);
+  if (options.restoreServe ?? true) {
+    await runner.run('serve-restore', []);
+  }
+  return { ...identity, deletedNodeIds, elapsedMs: Date.now() - started };
+}
+
+async function joinTailnet(
+  sandbox: SandboxHandle,
+  runner: StepRunner,
+  tailscale: TailscaleApi,
+  home: string,
+  hostname: string,
+  tags: string[],
+): Promise<TailnetIdentity> {
+  const key = await tailscale.mintAuthKey({ tags, description: `runpane cloud ${hostname}` });
+  const keyPath = path.posix.join(stateDir(home), `tskey-${crypto.randomBytes(6).toString('hex')}`);
+  // The state dir is 0700, so the key is private from the moment it lands; the step chmods and shreds it.
+  await sandbox.writeFile(keyPath, key.key);
+  return parseIdentity(await runner.run('tailscale-up', [keyPath, hostname], { timeoutSeconds: 120 }));
+}
+
+function assertTailnetIdentity(identity: TailnetIdentity, hostname: string, tags: string[]): void {
+  if (identity.runSsh) {
+    throw new BootstrapError('tailscale-join', 'Tailscale SSH is enabled on the node; cloud sessions must run without it');
+  }
+  const missing = tags.filter((tag) => !identity.tags.includes(tag));
+  if (missing.length > 0) {
+    throw new BootstrapError('tailscale-join', `node is missing tags ${missing.join(', ')}`);
+  }
+  const shortName = identity.magicDnsName.split('.')[0];
+  if (shortName !== hostname) {
+    throw new BootstrapError('tailscale-join',
+      `node joined as "${shortName}" instead of "${hostname}" (a stale device still holds the name)`);
+  }
+}
+
+async function uploadScripts(sandbox: SandboxHandle, home: string): Promise<void> {
+  const dir = stateDir(home);
+  const prepared = await sandbox.runScript(`umask 077; mkdir -p ${shellQuote(`${dir}/bin`)}; chmod 700 ${shellQuote(dir)}`);
+  if (prepared.exitCode !== 0) {
+    throw new BootstrapError('upload-scripts', `could not create ${dir} (exit ${String(prepared.exitCode)})`);
+  }
+  for (const name of UPLOADED_ASSETS) {
+    await sandbox.writeFile(`${dir}/bin/${name}`, cloudBootstrapAssets[name]);
+  }
+}
+
+class StepRunner {
+  constructor(private readonly sandbox: SandboxHandle, private readonly home: string) {}
+
+  async run(
+    stepName: string,
+    args: string[],
+    options: { timeoutSeconds?: number; allowFailure?: boolean } = {},
+  ): Promise<Record<string, unknown>> {
+    const script = [`${stateDir(this.home)}/bin/rp-bootstrap.sh`, stepName, ...args].map(shellQuote).join(' ');
+    const result = await this.sandbox.runScript(`bash ${script}`, { timeoutSeconds: options.timeoutSeconds ?? 300 });
+    const payload = parseStepResult(result.stdout);
+    if (!payload) {
+      throw new BootstrapError(stepName, `no result (exit ${String(result.exitCode)}${result.timedOut ? ', timed out' : ''}): `
+        + redact(`${result.stderr}\n${result.stdout}`).trim().split('\n').slice(-5).join(' | '));
+    }
+    if (payload.ok !== true && !options.allowFailure) {
+      throw new BootstrapError(stepName, typeof payload.error === 'string' ? redact(payload.error) : 'unknown error');
+    }
+    return payload;
+  }
+}
+
+export function parseStepResult(stdout: string): Record<string, unknown> | undefined {
+  const line = stdout.split('\n').reverse().find((candidate) => candidate.startsWith('RP_RESULT '));
+  if (!line) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(line.slice('RP_RESULT '.length));
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseIdentity(payload: Record<string, unknown>): TailnetIdentity {
+  const stringList = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  const nodeId = typeof payload.nodeId === 'string' ? payload.nodeId : '';
+  const magicDnsName = typeof payload.magicDnsName === 'string' ? payload.magicDnsName : '';
+  if (!nodeId || !magicDnsName) {
+    throw new BootstrapError('tailscale-join', 'tailscale reported no node id or MagicDNS name');
+  }
+  return {
+    nodeId,
+    hostname: typeof payload.hostname === 'string' ? payload.hostname : '',
+    magicDnsName,
+    tailscaleIps: stringList(payload.tailscaleIps),
+    tags: stringList(payload.tags),
+    runSsh: payload.runSsh === true,
+  };
+}
+
+function requirePairingCode(payload: Record<string, unknown>): string {
+  const code = typeof payload.code === 'string' ? payload.code.trim() : '';
+  if (!code.startsWith('pane-remote://')) {
+    throw new BootstrapError('pairing', 'the sandbox returned no pane-remote:// code');
+  }
+  return code;
+}
+
+/** Writes a secret to a local file with mode 0600 (parent created 0700). */
+export function writeSecretFile(filePath: string, content: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const temporary = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${content}\n`, { mode: 0o600 });
+  fs.chmodSync(temporary, 0o600);
+  fs.renameSync(temporary, filePath);
+}
+
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export function redact(text: string): string {
+  return text.replace(PAIRING_PATTERN, '<pairing-redacted>').replace(/tskey-[A-Za-z0-9-]+/g, '<tskey-redacted>');
+}
+
+function assertHostname(hostname: string): string {
+  if (!HOSTNAME_PATTERN.test(hostname)) {
+    throw new Error(`"${hostname}" is not a valid tailnet hostname (lowercase letters, digits and dashes)`);
+  }
+  return hostname;
+}
+
+function clientSlug(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'client';
+}
+
+function repoNameFromUrl(url: string): string {
+  const name = url.replace(/\/+$/, '').split('/').pop()?.replace(/\.git$/, '') ?? '';
+  return /^[A-Za-z0-9._-]+$/.test(name) && name !== '.' && name !== '..' ? name : 'repo';
+}
+
+function stateDir(home: string): string {
+  return path.posix.join(home, '.runpane-cloud');
+}

@@ -62,11 +62,18 @@ runpane cloud setup \
   --boat-key-file <($D BOAT_DEV_API_KEY) \
   --tailscale-client-id krreHuCr3M11CNTRL \
   --tailscale-secret-file <($D TAILSCALE_OAUTH_SECRET) \
+  --claude-token-file <($D <Claude token secret name>) \
   --golden <golden snapshot name> \
+  --name-prefix rp-red \
   --size large
 ```
 
-- Add `--anthropic-key-file <($D ANTHROPIC_API_KEY)` to store an Anthropic key as well.
+- Agent sign-in for cloud Sessions (see [Agents in a cloud Session](#agents-in-a-cloud-session)):
+  `--claude-token-file` takes a Claude subscription token (from `claude setup-token`);
+  `--anthropic-key-file <($D ANTHROPIC_API_KEY)` takes an Anthropic API key instead. Both are optional.
+- `--name-prefix` names your sandboxes and tailnet hosts `<prefix>-<id>` (default `rp`). The coordinator
+  manages every sandbox whose name starts with `<prefix>-`, so pick a prefix no other sandboxes in the
+  boat account use: the build loop's boxes are all `rp-loop-*`, which `rp-` would match.
 - `--golden` names the image new Sessions start from: a boat named snapshot with the Pane daemon, Tailscale
   and Playwright's Chromium preinstalled. It makes `new` about a minute faster. Without it (`--no-golden`)
   each `new` installs everything onto the plain image. Fork builds make goldens named
@@ -169,8 +176,10 @@ runpane cloud wake "api work"         # resumes and returns once the daemon answ
   tailnet name and its pairing. Wake takes about 10 to 13 seconds to `/health`.
 - After a wake, panels come back: submitting to a panel restarts it if needed, and a Claude panel resumes
   the same conversation.
-- boat's stop is a hard power-off after a live snapshot, with no shutdown signal. `stop` runs `sync` in
-  the sandbox first so recent writes are kept. `--force` skips that; avoid it.
+- boat's stop is a hard power-off after a live snapshot, with no shutdown signal. So `stop` first asks
+  the daemon to flush (it checkpoints Pane's database and syncs the disk; an older daemon just gets
+  `sync`). If an agent is still working or a terminal is busy, `stop` warns but stops anyway, because you
+  asked. `--force` skips the flush; avoid it.
 - `~/.cache`, `/tmp` and `/var/tmp` are not kept across a stop.
 - Every wake counts against boat's start limit; see [Costs](#costs).
 - `wake --size large` resumes onto a bigger machine (about 11 s); the disk is kept.
@@ -336,6 +345,7 @@ for your other devices.
 | `new` or `wake` fails with `429` / "60 sandbox starts per hour" | boat's start limit (see [Costs](#costs)). Wait, then rerun. Prefer stopping and waking over creating new Sessions |
 | `new` fails at the create step with a boat error about the snapshot | The saved golden image was deleted (releases keep only the newest two). `runpane cloud setup --golden <newer snapshot>`, or `--no-golden` |
 | `setup` says a Tailscale key is invalid (401) | Wrong client id or secret, or the OAuth client lacks `auth_keys` for `tag:rp-session` |
+| `new` fails at `install-pane` with a dpkg error (`failed to remove my own update file /var/lib/dpkg/updates/...`) | Seen once when a `--pane-deb-url` install ran on a fresh golden fork. `new` has already removed the sandbox and device; run it again. A golden image that already carries the right Pane (`--pane-preinstalled`, the default with `--golden`) skips this step |
 | `new` fails at `tailscale-join` or the /health wait | Check the tailnet policy has `tag:rp-session`. `new` has already cleaned up; rerun with `--keep-on-failure` to look inside |
 | `new` failed and `runpane cloud list` shows nothing for it | Rarely, boat creates the sandbox but naming it fails, and the CLI loses track of it. Look in boat's console for a sandbox without an `rp-` name created at that time and delete it there |
 | The desktop says "Connection failed" for a cloud host | The Session is probably asleep. The host switcher says so for cloud hosts ("Cloud host asleep or unreachable", with a Copy wake command item); run `runpane cloud wake <host>`, then pick it again. If it is awake, check `tailscale status` on the laptop |

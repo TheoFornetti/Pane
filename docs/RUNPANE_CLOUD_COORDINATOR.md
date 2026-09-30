@@ -197,7 +197,7 @@ the config from the saved settings, so an in-place redeploy keeps the broker; th
     - a missing Contents, Issues or Pull requests write.
   - **Tokens.** The coordinator mints a **1-hour installation token per call**. It is narrowed to that one
     repository and to the permissions the call needs (for example `contents:write` for a push,
-    `pull_requests:write` for a PR). It keeps them in memory only, reuses each until 5 minutes before it
+    `pull_requests:write` plus `contents:read` for a PR, since GitHub reads its head and base refs). It keeps them in memory only, reuses each until 5 minutes before it
     expires, and never logs them.
 - **The ceiling, whatever the App was granted.** Every `access_tokens` request carries an explicit
   `permissions` object within:

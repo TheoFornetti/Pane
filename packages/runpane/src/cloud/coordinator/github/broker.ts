@@ -76,6 +76,12 @@ interface BrokerAnswer {
   body: JsonObject;
 }
 
+/**
+ * Creating or updating a pull request makes GitHub read its head and base refs: with only
+ * pull_requests:write it answers 422 "not all refs are readable" (seen live on montlakev2).
+ */
+const PULL_WRITE = { pull_requests: 'write', contents: 'read' } as const satisfies Permissions;
+
 /** 50 MiB of bundle, base64-encoded, plus the JSON around it. */
 const PUSH_BODY_LIMIT = 72 * 1024 * 1024;
 const MAX_BUNDLE_BYTES = 50 * 1024 * 1024;
@@ -477,7 +483,7 @@ export class GitHubBroker {
     context.audit.target = head;
     context.audit.titleLength = title.length;
     context.audit.bodyLength = body.body?.length ?? 0;
-    const token = await this.token(context, repo, { pull_requests: 'write' });
+    const token = await this.token(context, repo, PULL_WRITE);
     const created = decodeGitHubBody((await this.deps.rest.request('POST', `/repos/${repo}/pulls`, token, {
       title,
       head,
@@ -496,7 +502,7 @@ export class GitHubBroker {
     const body = decodeBody(raw, editSchema);
     const repo = this.allowedRepo(context, body.repo);
     context.audit.target = `#${pullNumber}`;
-    const token = await this.token(context, repo, { pull_requests: 'write' });
+    const token = await this.token(context, repo, PULL_WRITE);
     const current = decodeGitHubBody((await this.deps.rest.request('GET', `/repos/${repo}/pulls/${pullNumber}`, token)).body, githubPullSchema, 'pull request');
     const headRepo = current.head.repo?.full_name.toLowerCase() ?? null;
     if (headRepo !== repo.toLowerCase() || !inNamespace(context.entry, current.head.ref)) {
@@ -591,7 +597,7 @@ export class GitHubBroker {
     const permissions: Permissions = parsed.path.startsWith('commits/') && parsed.path.endsWith('/status') ? { statuses: 'read' }
       : parsed.path.endsWith('/check-runs') ? { checks: 'read' }
         : parsed.path.startsWith('actions/') ? { actions: 'read' }
-          : parsed.path.startsWith('pulls') ? { pull_requests: 'read' }
+          : parsed.path.startsWith('pulls') ? { pull_requests: 'read', contents: 'read' }
             : { issues: 'read' };
     const token = await this.token(context, repo, permissions);
     const response = await this.deps.rest.request('GET', `/repos/${repo}/${parsed.path}${parsed.query}`, token);

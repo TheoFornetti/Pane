@@ -459,6 +459,12 @@ export class FakeGitHub {
       reply(403, { message: 'Resource not accessible by integration' });
       return false;
     };
+    // Like GitHub: creating or updating a PR reads its head and base refs, which needs contents:read.
+    const refsReadable = (): boolean => {
+      if (this.allows(auth.record, fullName, 'contents', 'read')) return true;
+      reply(422, { message: 'Validation Failed', errors: [{ resource: 'PullRequest', code: 'custom', message: 'not all refs are readable' }], documentation_url: 'https://docs.github.com/rest/pulls/pulls#create-a-pull-request' });
+      return false;
+    };
     const html = (kind: string, number: number) => `https://github.com/${repo.fullName}/${kind}/${number}`;
     const pullJson = (pull: PullRecord) => ({
       number: pull.number,
@@ -483,7 +489,7 @@ export class FakeGitHub {
       return reply(200, repo.labels.map((name) => ({ name })));
     }
     if (rest === '/pulls' && method === 'POST') {
-      if (!need('pull_requests', 'write')) return;
+      if (!need('pull_requests', 'write') || !refsReadable()) return;
       const head = String(body.head ?? '');
       if (!this.refs(repo.fullName)[`refs/heads/${head}`]) return reply(422, { message: 'Validation Failed', errors: [{ message: `No commits between ${String(body.base)} and ${head}` }] });
       const pull: PullRecord = {
@@ -531,7 +537,7 @@ export class FakeGitHub {
         }
         if (sub === '' && method === 'GET') return need('pull_requests', 'read') ? reply(200, pullJson(pull)) : undefined;
         if (sub === '' && method === 'PATCH') {
-          if (!need('pull_requests', 'write')) return;
+          if (!need('pull_requests', 'write') || !refsReadable()) return;
           if (body.title !== undefined) pull.title = body.title;
           if (body.body !== undefined) pull.body = body.body;
           if (body.state === 'open' || body.state === 'closed') pull.state = body.state;

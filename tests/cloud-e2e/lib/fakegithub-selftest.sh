@@ -34,7 +34,8 @@ mint() { curl -s -X POST -H "Authorization: Bearer $J" -d "$1" "$B/app/installat
 expect 422 "$(code -X POST -H "Authorization: Bearer $J" -d '{"permissions":{"workflows":"write"}}' "$B/app/installations/4242/access_tokens")" "minting beyond the grant (workflows) refused"
 RT=$(mint '{"repositories":["app"],"permissions":{"contents":"read","metadata":"read"}}')
 WT=$(mint '{"repositories":["app"],"permissions":{"contents":"write","metadata":"read"}}')
-PT=$(mint '{"repositories":["app"],"permissions":{"pull_requests":"write","issues":"write","metadata":"read"}}')
+PT=$(mint '{"repositories":["app"],"permissions":{"pull_requests":"write","issues":"write","contents":"read","metadata":"read"}}')
+NT=$(mint '{"repositories":["app"],"permissions":{"pull_requests":"write","issues":"write","metadata":"read"}}')
 [ -n "$RT" ] && [ -n "$WT" ] && [ -n "$PT" ] && ok "3 downscoped installation tokens minted" || bad "token mint failed"
 
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
@@ -51,6 +52,8 @@ git push "$(url "$WT")" cloud/h/wf 2>"$W/wf.err" && bad "workflow push without w
 git checkout -q -b tmp "$MASTER0" && git -c user.name=t -c user.email=t@x commit -q --allow-empty -m m
 git push -q "$(url "$WT")" HEAD:master 2>/dev/null && ok "no branch protection: a write token CAN move master (like montlakev2 on the free plan)" || bad "fake protects master"
 
+expect 422 "$(code -H "Authorization: token $NT" -X POST -d '{"title":"t","head":"cloud/h/x","base":"master","draft":true}' "$B/repos/acme/app/pulls")" "PR without contents:read refused (GitHub: not all refs are readable)"
+grep -q "not all refs are readable" "$W/last.json" && ok "422 carries GitHub's message" || bad "422 body: $(cat "$W/last.json")"
 A=(-H "Authorization: token $PT")
 expect 201 "$(code "${A[@]}" -X POST -d '{"title":"t","head":"cloud/h/x","base":"master","draft":true,"body":"b"}' "$B/repos/acme/app/pulls")" "draft PR created"
 python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));sys.exit(0 if d["draft"] and d["user"]["login"].endswith("[bot]") else 1)' "$W/last.json" && ok "PR is draft, author is the app bot" || bad "PR fields"

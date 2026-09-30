@@ -778,3 +778,38 @@ describe('GitHub broker with an over-privileged App installation', () => {
     }
   });
 });
+
+// P4 on real montlakev2: POST pulls answered 422 "not all refs are readable" because the token had
+// only pull_requests:write. GitHub reads the head and base refs, which needs contents:read.
+describe('pull requests need contents:read (real-GitHub regression)', () => {
+  it('the fake refuses a PR without contents:read like GitHub; the broker mints contents:read + pull_requests:write', async () => {
+    const h = await harness();
+    try {
+      const work = new Work(h.fake);
+      work.commit('refs.txt', 'r\n');
+      assert.equal((await h.call('s1', 'POST', 'push', { repo: 'acme/app', branch: 'refs', bundle: work.bundle() })).status, 200);
+      // A token with pull_requests:write only, straight at the fake: GitHub's 422.
+      h.fake.addPat('github_pat_prsonly', ['acme/app'], { pull_requests: 'write', metadata: 'read' });
+      const direct = await fetch(`${h.fake.baseUrl}/repos/acme/app/pulls`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer github_pat_prsonly', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 't', head: 'cloud/rp-one/refs', base: 'master', draft: true }),
+      });
+      assert.equal(direct.status, 422);
+      assert.match(JSON.stringify(await direct.json()), /not all refs are readable/u);
+
+      const before = h.fake.minted.length;
+      const pull = await h.call('s1', 'POST', 'pulls', { repo: 'acme/app', branch: 'refs', title: 'refs' });
+      assert.equal(pull.status, 200, JSON.stringify(pull.body));
+      const edited = await h.call('s1', 'PATCH', `pulls/${String(pull.body.number)}`, { repo: 'acme/app', state: 'closed' });
+      assert.equal(edited.status, 200, JSON.stringify(edited.body));
+      const pullTokens = h.fake.minted.slice(before).filter((minted) => minted.requestedPermissions?.pull_requests === 'write');
+      assert.ok(pullTokens.length >= 1);
+      for (const minted of pullTokens) assert.deepEqual(minted.requestedPermissions, { metadata: 'read', contents: 'read', pull_requests: 'write' });
+      const files = await h.call('s1', 'GET', `read/acme/app/pulls/${String(pull.body.number)}/files`);
+      assert.equal(files.status, 200, JSON.stringify(files.body));
+    } finally {
+      await h.close();
+    }
+  });
+});

@@ -254,10 +254,11 @@ def cmd_pre_receive(_a) -> None:
 # ------------------------------------------------------------------------------------------ server
 
 class Denied(Exception):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, errors: list | None = None):
         super().__init__(message)
         self.status = status
         self.message = message
+        self.errors = errors
 
 
 # endpoint -> required permission (resource, level). Order matters: first match wins.
@@ -340,6 +341,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "classic": pat["classic"]}
         raise Denied(401, "Bad credentials")
 
+    def _refs_readable(self, pr: dict):
+        # Like GitHub: creating or updating a PR reads its head and base refs, which needs contents:read
+        # (seen live on montlakev2 with a pull_requests:write-only installation token).
+        if LEVEL.get(pr["permissions"].get("contents", "none"), 0) < LEVEL["read"]:
+            raise Denied(422, "Validation Failed", [{"resource": "PullRequest", "code": "custom", "message": "not all refs are readable"}])
+
     def _need(self, pr: dict, repo: str, resource: str, level: str):
         if pr["kind"] in ("none", "app-jwt"):
             raise Denied(404 if pr["kind"] == "none" else 403, "Not Found" if pr["kind"] == "none" else
@@ -375,7 +382,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._rest(method, u, body, st)
         except Denied as d:
             self.entry["denied"] = d.message
-            self._send(d.status, {"message": d.message, "documentation_url": "https://docs.github.com/rest"},
+            self._send(d.status, {"message": d.message, **({"errors": d.errors} if d.errors else {}), "documentation_url": "https://docs.github.com/rest"},
                        {"WWW-Authenticate": 'Basic realm="GitHub"'} if d.status == 401 else None)
         except Exception as ex:  # noqa: BLE001 - a fake must answer, and log what broke
             self.entry["error"] = str(ex)[:300]
@@ -641,6 +648,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return it
 
             if rest == "/pulls" and method == "POST":
+                self._refs_readable(pr)
                 head = (data.get("head") or "").split(":")[-1]
                 base = data.get("base") or repo["default_branch"]
                 hs = git(rp, "rev-parse", "--verify", "-q", f"refs/heads/{head}", check=False)
@@ -681,6 +689,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if method == "GET":
                     return self._send(200, self._issue_json(full, it))
                 if method == "PATCH":
+                    self._refs_readable(pr)
                     for k in ("title", "body", "state"):
                         if k in data:
                             it[k] = data[k]

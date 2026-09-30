@@ -10,7 +10,12 @@ const cloud = {
   version: 1,
 };
 
-function configWithProfile(profile: Record<string, unknown>) {
+/** Extra fields on the saved profile under test; `cloud` is deliberately loose to cover malformed input. */
+interface ProfileExtras {
+  cloud?: { provider: string; sandboxId?: string; sessionId?: string; nodeId?: string; hostname?: string; version?: number };
+}
+
+function configWithProfile(profile: ProfileExtras) {
   return {
     client: {
       profiles: [{

@@ -64,7 +64,7 @@ wait_screen() {
 wait_last_message() {
   local end=$(( $(date +%s) + ${4:-120} )) out
   while [ "$(date +%s)" -lt "$end" ]; do
-    out=$(cl remote invoke "$1" runpane:panels:last-message "[{\"panelId\":\"$2\",\"limit\":1}]")
+    out=$(cl remote invoke "$1" runpane:panels:last-message "[{\"panelId\":\"$2\",\"limit\":4000}]")
     grep -qF -- "$3" <<<"$out" && { printf '%s\n' "$out"; return 0; }
     sleep 3
   done

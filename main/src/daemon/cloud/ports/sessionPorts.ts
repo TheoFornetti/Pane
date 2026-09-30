@@ -23,6 +23,7 @@ const PANE_HTTPS_PORT = 443;
 const CERT_PROBE_TIMEOUT_MS = 45_000;
 const VERIFY_TIMEOUT_MS = 3_000;
 const BOOT_VERIFY_TIMEOUT_MS = 10_000;
+const NO_CERT_DETAIL = 'no TLS certificate for';
 
 export type ProbeResult = { ok: true; status: number } | { ok: false; error: string };
 
@@ -212,7 +213,11 @@ export class SessionPortsService {
     }
     const dnsName = self.dnsName;
     const state = this.readState();
-    const sameLocal = state.ports.find(entry => entry.port === port);
+    const found = state.ports.find(entry => entry.port === port);
+    // Asking for another scheme on the same tailnet port re-publishes it (e.g. https once a certificate exists).
+    const rescheme = Boolean(found && request.scheme && request.scheme !== 'auto' && request.scheme !== found.scheme
+      && (request.httpsPort === undefined || request.httpsPort === found.httpsPort));
+    const sameLocal = rescheme ? undefined : found;
     if (sameLocal && (request.httpsPort === undefined || sameLocal.httpsPort === httpsPort) && !sameLocal.blockedBy) {
       return this.reopenExisting(state, sameLocal, request, dnsName);
     }
@@ -227,6 +232,13 @@ export class SessionPortsService {
     if (sameName) fail('ERR_PORTS_INVALID', `the name ${name} is taken by port ${sameName.port}; pass --name`);
 
     const listeners = await this.deps.serve.listeners(dnsName);
+    if (found && rescheme) {
+      const own = listeners.get(found.httpsPort);
+      if (own && isOurs(own, found)) {
+        await this.deps.serve.remove(found.httpsPort, own);
+        listeners.delete(found.httpsPort);
+      }
+    }
     const current = listeners.get(httpsPort);
     let replaced: SessionPortOpenResult['replaced'];
     if (current && !(current.kind === 'web' && current.proxy === localTarget(port))) {
@@ -314,7 +326,7 @@ export class SessionPortsService {
     await this.deps.serve.applyWeb('http', httpsPort, port);
     return {
       scheme: 'http',
-      detail: `no TLS certificate for ${dnsName} yet (${probe.error}); plain HTTP inside the tailnet (WireGuard-encrypted). Retry later with: runpane port open ${port} --scheme https`,
+      detail: `${NO_CERT_DETAIL} ${dnsName} yet (${probe.error}; Let's Encrypt's weekly limit per tailnet is the usual cause); plain HTTP inside the tailnet (WireGuard-encrypted) until tailscaled has one, then https by itself. Retry now with: runpane port open ${port} --scheme https`,
     };
   }
 
@@ -334,6 +346,7 @@ export class SessionPortsService {
       const before = JSON.stringify({ state: this.readState(), manifests: this.manifests });
       await this.reconcileManifests();
       const reapplied = await this.reapplyMissing(dnsName);
+      await this.upgradeToHttps(dnsName);
       const after = JSON.stringify({ state: this.readState(), manifests: this.manifests });
       if (reapplied.length > 0) this.deps.log(`ports: reconcile (${reason}) RE-APPLIED ${reapplied.join(', ')}`);
       if (reason === 'boot') await this.verifyAll(dnsName);
@@ -344,6 +357,7 @@ export class SessionPortsService {
   private async reconcileManifests(): Promise<void> {
     const readManifest = this.deps.readManifest ?? readPortsManifest;
     const repos = [...new Set(this.deps.projectPaths())];
+    this.projectsKey = projectsKeyOf(repos);
     const reads = new Map(repos.map(repo => [repo, readManifest(repo)]));
     this.manifests = [...reads.entries()]
       .filter(([, read]) => read.kind !== 'absent')
@@ -461,6 +475,23 @@ export class SessionPortsService {
     return reapplied;
   }
 
+  /** Ports that fell back to http for want of a certificate move to https once tailscaled holds one. */
+  private async upgradeToHttps(dnsName: string): Promise<void> {
+    const state = this.readState();
+    const waiting = state.ports.filter(port => port.scheme === 'http' && port.detail?.startsWith(NO_CERT_DETAIL) && !port.blockedBy);
+    if (waiting.length === 0 || !(await this.deps.serve.certCached(dnsName))) return;
+    const listeners = await this.deps.serve.listeners(dnsName);
+    for (const stored of waiting) {
+      const listener = listeners.get(stored.httpsPort);
+      if (listener && isOurs(listener, stored)) await this.deps.serve.remove(stored.httpsPort, listener);
+      await this.deps.serve.applyWeb('https', stored.httpsPort, stored.port);
+      stored.scheme = 'https';
+      delete stored.detail;
+      this.deps.log(`ports: ${stored.name} moved to https now that ${dnsName} has a certificate`);
+    }
+    this.saveState(state);
+  }
+
   private async verifyAll(dnsName: string): Promise<void> {
     for (const stored of this.readState().ports.filter(port => !port.blockedBy)) {
       const url = portUrl(stored.scheme, dnsName, stored.httpsPort, stored.path);
@@ -474,12 +505,10 @@ export class SessionPortsService {
    * Pane panel become suggestions. With autoOpen they are published. Cheap when nothing changed.
    */
   async detect(): Promise<void> {
-    const projectsKey = JSON.stringify([...new Set(this.deps.projectPaths())].sort());
-    if (this.projectsKey !== undefined && projectsKey !== this.projectsKey) {
-      this.projectsKey = projectsKey;
+    // The reconcile records the repositories it read, so one added at any moment since is seen here.
+    if (this.projectsKey !== undefined && projectsKeyOf(this.deps.projectPaths()) !== this.projectsKey) {
       await this.reconcile('repo-add');
     }
-    this.projectsKey = projectsKey;
 
     const state = this.readState();
     const panels = this.deps.panelProcesses();
@@ -557,6 +586,10 @@ export class SessionPortsService {
     for (const timer of this.timers) clearTimeout(timer);
     this.timers = [];
   }
+}
+
+function projectsKeyOf(paths: readonly string[]): string {
+  return JSON.stringify([...new Set(paths)].sort());
 }
 
 function reachability(probe: ProbeResult): Pick<SessionPort, 'reachable' | 'detail'> {

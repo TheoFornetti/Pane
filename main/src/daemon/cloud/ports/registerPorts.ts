@@ -1,4 +1,6 @@
 import fs from 'fs';
+import http from 'http';
+import https from 'https';
 import { boundary, BoundaryDecodeError, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../../../shared/validation/boundaryDecoder';
 import { SESSION_PORTS_CHANGED_EVENT, type SessionPortsListResult } from '../../../../../shared/types/sessionPorts';
 import { PaneCommandError } from '../../../core/commandError';
@@ -52,17 +54,25 @@ function decodeRequest<T>(value: PaneCommandValue, schema: BoundarySchema<T>): T
   }
 }
 
-async function probeUrl(url: string, timeoutMs: number): Promise<ProbeResult> {
-  try {
-    const response = await fetch(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
-    await response.body?.cancel();
-    return { ok: true, status: response.status };
-  } catch (error) {
-    if (!(error instanceof Error)) return { ok: false, error: String(error) };
-    if (error.name === 'TimeoutError') return { ok: false, error: `timed out after ${timeoutMs} ms` };
-    // fetch wraps the network error (TLS, refused, reset) as its cause.
-    return { ok: false, error: error.cause instanceof Error ? error.cause.message : error.message };
-  }
+/**
+ * One GET with an overall deadline. Not fetch: undici gives up connecting after 10 s, and a first TLS
+ * request on a new name waits while tailscaled gets the certificate, which can take longer.
+ */
+function probeUrl(url: string, timeoutMs: number): Promise<ProbeResult> {
+  return new Promise(resolve => {
+    const target = new URL(url);
+    const request = (target.protocol === 'https:' ? https : http).get(target, response => {
+      clearTimeout(timer);
+      response.resume();
+      resolve({ ok: true, status: response.statusCode ?? 0 });
+      request.destroy();
+    });
+    const timer = setTimeout(() => request.destroy(new Error(`timed out after ${timeoutMs} ms`)), timeoutMs);
+    request.on('error', error => {
+      clearTimeout(timer);
+      resolve({ ok: false, error: error.message });
+    });
+  });
 }
 
 /** Whether this daemon runs in a Runpane Cloud Session; ports never act on a laptop's tailnet name. */

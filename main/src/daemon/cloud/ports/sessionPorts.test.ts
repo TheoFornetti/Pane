@@ -170,6 +170,25 @@ describe('SessionPortsService.open', () => {
     expect((await h.service.list()).scheme).toBe('http');
   });
 
+  it('moves fallback ports to https once a certificate is cached, and --scheme https retries at once', async () => {
+    const h = makeHarness();
+    h.serve.cert = false;
+    h.probeAnswer = () => ({ ok: false, error: 'timed out after 45000 ms' });
+    await h.service.open({ port: 8787 });
+    await h.service.open({ port: 3000 });
+    h.serve.cert = true;
+    h.serve.calls = [];
+    const again = await h.service.open({ port: 3000, scheme: 'https' });
+    expect(again.port.scheme).toBe('https');
+    expect(h.serve.calls).toEqual(['off :3000', 'apply https :3000 -> 3000']);
+    await h.service.reconcile('periodic');
+    const list = await h.service.list();
+    expect(list.ports.map(port => [port.port, port.scheme, port.status, port.detail])).toEqual([
+      [8787, 'https', 'serving', undefined],
+      [3000, 'https', 'serving', undefined],
+    ]);
+  });
+
   it('uses HTTPS when the first TLS request gets a certificate', async () => {
     const h = makeHarness();
     h.serve.cert = false;
@@ -328,9 +347,9 @@ describe('SessionPortsService.detect', () => {
     expect((await h.service.list()).suggested).toEqual([]);
   });
 
-  it('reconciles when a repository is added', async () => {
+  it('reconciles when a repository is added, even right after the boot reconcile', async () => {
     const h = makeHarness();
-    await h.service.detect();
+    await h.service.reconcile('boot');
     h.projects = ['/home/user/new-repo'];
     h.manifests.set('/home/user/new-repo', { kind: 'ok', ports: [{ name: 'docs', port: 4000, path: '/' }] });
     await h.service.detect();

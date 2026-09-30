@@ -22,18 +22,22 @@ const downloadSchema = boundary.jsonObject;
 const errorSchema = boundary.object({ messages: boundary.optional(boundary.array(boundary.string)) });
 
 export interface DopplerApi {
-  /** Every secret in the token's config, name to computed value. */
-  download(token: string): Promise<Map<string, string>>;
+  /**
+   * Every secret in `project/config`, name to computed value. A service token only reads its own
+   * config (Doppler answers 400 for any other), so naming it also checks the token is the right one.
+   */
+  download(token: string, project: string, config: string): Promise<Map<string, string>>;
 }
 
 export function createDopplerApi(apiBaseUrl: string, fetchImpl: FetchLike = fetch): DopplerApi {
   const base = apiBaseUrl.replace(/\/+$/u, '');
   return {
-    async download(token) {
+    async download(token, project, config) {
       const headers = new Headers({ Authorization: `Bearer ${token}`, Accept: 'application/json', 'User-Agent': 'runpane-cloud-coordinator' });
       let response;
       try {
-        response = await fetchImpl(`${base}/v3/configs/config/secrets/download?format=json`, { method: 'GET', headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
+        const query = new URLSearchParams({ format: 'json', project, config });
+        response = await fetchImpl(`${base}/v3/configs/config/secrets/download?${query.toString()}`, { method: 'GET', headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
       } catch (cause) {
         throw new DopplerError(`Doppler could not be reached: ${cause instanceof Error ? cause.message : String(cause)}`, 0);
       }

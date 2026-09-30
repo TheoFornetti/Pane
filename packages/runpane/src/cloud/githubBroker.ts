@@ -64,15 +64,16 @@ function shq(value: string): string {
 }
 
 /** A launcher that runs `runpane cloud agent <verb>` with the Session's Pane-managed runpane. */
-function launcher(comment: string, verb: string): string {
+export function launcher(comment: string, verb: string, installedBy = 'github connect --broker / new --github'): string {
+  const name = verb === 'git-credential' ? 'git-credential-runpane' : verb;
   return `#!/bin/sh
 # ${comment}
-# Installed by runpane cloud (github connect --broker / new --github); it holds no credential.
+# Installed by runpane cloud (${installedBy}); it holds no credential.
 for rp in "\${PANE_RUNPANE_BIN:-}" "$HOME/.pane_remote/bin/runpane" "$HOME/.pane/bin/runpane"; do
   if [ -n "$rp" ] && [ -x "$rp" ]; then exec "$rp" cloud agent ${verb} "$@"; fi
 done
 if command -v runpane >/dev/null 2>&1; then exec runpane cloud agent ${verb} "$@"; fi
-echo "${verb === 'gh' ? 'gh' : 'git-credential-runpane'}: runpane is not installed in this Session" >&2
+echo "${name}: runpane is not installed in this Session" >&2
 exit 1
 `;
 }

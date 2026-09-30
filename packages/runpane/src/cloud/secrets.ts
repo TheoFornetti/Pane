@@ -3,6 +3,7 @@ import { boundary, decodeBoundary } from '../boundaryDecoder';
 import type { CloudDeps } from './commands';
 import { BUILT_IN_DENY_LIST, DENIED_DOPPLER_CONFIGS, isDeniedConfig, matchingPattern, reservedBy, SECRET_NAME_PATTERN } from './secretPolicy';
 import type { SandboxHandle } from './provider';
+import { coordinatorSecretsEnabled, describeSecretsOutcome, disableSessionSecrets, enableSessionSecrets } from './sessionSecrets';
 import { findHost, type CloudHostRecord } from './store';
 import { hostProvider } from './wallet';
 
@@ -32,7 +33,7 @@ type SecretsSourceArg =
   | { kind: 'doppler'; project: string; config: string };
 
 interface SecretsArgs {
-  sub: 'set' | 'list' | 'rm';
+  sub: 'set' | 'list' | 'rm' | 'enable' | 'disable';
   host: string;
   names: string[];
   source: SecretsSourceArg;
@@ -47,11 +48,16 @@ const SECRETS_USAGE = `Usage:
       with the local doppler CLI (never prd/prod/stg/staging/production configs).
   runpane cloud secrets list <host> [--json]      names only; values are never shown
   runpane cloud secrets rm <host> NAME [NAME...] [--json]
-New agent panels load the change at once; panels already open keep their old environment.`;
+New agent panels load the change at once; panels already open keep their old environment.
+
+Laptop-free (the coordinator holds read-only Doppler tokens: runpane cloud coordinator doppler set):
+  runpane cloud secrets enable <host> [--json]     install the doppler stand-in in an existing Session and fetch
+                                                   its repository's .runpane/secrets.json names (new Sessions get it)
+  runpane cloud secrets disable <host> [--json]    remove the stand-in and shred the Session's copy`;
 
 export function parseSecretsArgs(argv: readonly string[]): SecretsArgs {
   const [sub, ...rest] = argv;
-  if (sub !== 'set' && sub !== 'list' && sub !== 'rm') throw new Error(SECRETS_USAGE);
+  if (sub !== 'set' && sub !== 'list' && sub !== 'rm' && sub !== 'enable' && sub !== 'disable') throw new Error(SECRETS_USAGE);
   let json = false;
   let source: SecretsSourceArg | undefined;
   const positionals: string[] = [];
@@ -82,8 +88,8 @@ export function parseSecretsArgs(argv: readonly string[]): SecretsArgs {
   }
   const [host, ...names] = positionals;
   if (!host) throw new Error(SECRETS_USAGE);
-  if (sub === 'list' && names.length > 0) throw new Error(SECRETS_USAGE);
-  if (sub !== 'list' && names.length === 0) throw new Error(`runpane cloud secrets ${sub} needs at least one NAME.\n\n${SECRETS_USAGE}`);
+  if ((sub === 'list' || sub === 'enable' || sub === 'disable') && names.length > 0) throw new Error(SECRETS_USAGE);
+  if (sub !== 'list' && sub !== 'enable' && sub !== 'disable' && names.length === 0) throw new Error(`runpane cloud secrets ${sub} needs at least one NAME.\n\n${SECRETS_USAGE}`);
   const resolved = source ?? { kind: 'env' };
   if ((resolved.kind === 'file' || (resolved.kind === 'env' && resolved.variable)) && names.length !== 1) {
     throw new Error(`--from-${resolved.kind} gives one value; set one NAME at a time with it.`);
@@ -310,6 +316,29 @@ export async function runSecretsCommand(argv: readonly string[], deps: CloudDeps
   const record = findHost(await deps.store.listHosts(), args.host);
   const handle = await runningSandbox(record, deps);
   const host = record.profile.cloud.hostname;
+
+  if (args.sub === 'enable') {
+    if (!(await coordinatorSecretsEnabled(deps))) {
+      throw new Error('The coordinator has no Doppler secrets service yet: run runpane cloud coordinator doppler set --project <p> --config <c> first.');
+    }
+    if (!record.meta.brokerRepos?.length) {
+      deps.stderr(`runpane cloud: ${host} has no GitHub broker repository, so the coordinator has no manifest to read for it (runpane cloud github connect ${host} --repo <owner/name> --broker).`);
+    }
+    const outcome = await enableSessionSecrets(handle, host);
+    if (args.json) deps.stdout(JSON.stringify({ ok: outcome.ready && !outcome.fetchError, host, ...outcome }, null, 2));
+    else {
+      deps.stdout(`${host}: ${describeSecretsOutcome(outcome)}.`);
+      if (outcome.warning) deps.stderr(`runpane cloud: ${outcome.warning}`);
+    }
+    return outcome.ready && !outcome.fetchError ? 0 : 1;
+  }
+
+  if (args.sub === 'disable') {
+    await disableSessionSecrets(handle);
+    if (args.json) deps.stdout(JSON.stringify({ ok: true, host, removed: true }, null, 2));
+    else deps.stdout(`${host}: the doppler stand-in, its boot refresh and the Session's stored copy are removed.`);
+    return 0;
+  }
 
   if (args.sub === 'list') {
     const outcome = await runInSandbox(handle, secretsScript({}), 'Listing the secrets');

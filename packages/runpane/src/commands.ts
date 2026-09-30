@@ -273,8 +273,9 @@ function parseCloudEntry(args: string[]): ParsedArgs {
     throw new Error(`Unknown cloud command: ${args[1]}\n\n${helpText('cloud')}`);
   }
   const rest = args.slice(matched.tokens.length);
-  // The coordinator, the gh shim and the git credential helper read their own arguments (gh's -h is --hostname).
-  const ownArguments = ['cloud coordinator', 'cloud agent gh', 'cloud agent git-credential'];
+  // The coordinator, the gh shim, the git credential helper and the doppler stand-in read their own arguments
+  // (gh's -h is --hostname; doppler run passes everything after -- to the command it runs).
+  const ownArguments = ['cloud coordinator', 'cloud agent gh', 'cloud agent git-credential', 'cloud agent doppler'];
   if (!ownArguments.includes(matched.name) && rest.some(wantsHelp)) {
     return { command: 'help', helpTopic: matched.name, ...DEFAULTS };
   }

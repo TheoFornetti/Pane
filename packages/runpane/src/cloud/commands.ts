@@ -4,11 +4,13 @@ import type { CloudArgs } from './args';
 import type { JsonObject, JsonValue } from '../boundaryDecoder';
 import { placeAgentCredentials } from './agentCredentials';
 import { COORDINATOR_LIFECYCLE_USAGE, isCoordinatorLifecycleCommand, runCoordinatorLifecycle } from './coordinatorDeploy';
+import { COORDINATOR_DOPPLER_USAGE, runCoordinatorDoppler } from './coordinatorDoppler';
 import { COORDINATOR_GITHUB_USAGE, runCoordinatorGitHub } from './coordinatorGithub';
 import { NO_COORDINATOR, pushDirectory, type CoordinatorPushResult } from './coordinatorSync';
 import { syncDesktopProfiles, type DesktopImportResult } from './desktop';
 import { cloneThroughBroker, connectDeployKey, deployKeyCloneUrl, parseRepoSpec, revokeGitHubGrants, runGitCommand, runGitHubCommand } from './github';
 import { brokerReaches, enableBroker, readBrokerStatus } from './githubBroker';
+import { coordinatorSecretsEnabled, describeSecretsOutcome, enableSessionSecrets } from './sessionSecrets';
 import type { GitHubPort } from './githubApi';
 import { decodePairingCode } from './pairing';
 import { pushPeersFile, runPeersCommand } from './peers';
@@ -131,7 +133,14 @@ export async function runCloudCommand(args: CloudArgs, deps: CloudDeps): Promise
         }
         return runCoordinatorGitHub(args.passthrough.slice(1), deps);
       }
-      if (['help', '--help', '-h', undefined].includes(args.passthrough[0])) deps.stdout(`${COORDINATOR_LIFECYCLE_USAGE}\n${COORDINATOR_GITHUB_USAGE}\n`);
+      if (args.passthrough[0] === 'doppler') {
+        if (['help', '--help', '-h', undefined].includes(args.passthrough[1])) {
+          deps.stdout(COORDINATOR_DOPPLER_USAGE);
+          return 0;
+        }
+        return runCoordinatorDoppler(args.passthrough.slice(1), deps);
+      }
+      if (['help', '--help', '-h', undefined].includes(args.passthrough[0])) deps.stdout(`${COORDINATOR_LIFECYCLE_USAGE}\n${COORDINATOR_GITHUB_USAGE}\n${COORDINATOR_DOPPLER_USAGE}\n`);
       if (!deps.runCoordinator) throw new Error('runpane cloud coordinator is not available in this build.');
       return deps.runCoordinator(args.passthrough);
     case 'peers': return runPeersCommand(args.passthrough, deps);
@@ -425,6 +434,14 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
         progress(`  - clone done over https (git asks the broker for a read-only token when GitHub wants one): ${head.slice(0, 12)}`);
       }
       timings.githubBrokerMs = deps.now() - started;
+      // The coordinator reads this Session's .runpane/secrets.json (directory secretsManifest) and hands
+      // it the names; the Session fetches straight from the coordinator, now and at every wake.
+      if (await coordinatorSecretsEnabled(deps)) {
+        const secrets = await enableSessionSecrets(provider.handle(sandbox.id), hostname);
+        progress(`  - secrets done: ${describeSecretsOutcome(secrets)}`);
+        if (secrets.warning) deps.stderr(`runpane cloud: ${secrets.warning}`);
+        timings.secretsMs = deps.now() - started;
+      }
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

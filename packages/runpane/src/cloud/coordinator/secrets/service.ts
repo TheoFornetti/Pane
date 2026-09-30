@@ -200,7 +200,7 @@ export class SecretsService {
       if (check && token !== undefined) {
         // The user's `doppler status --check`: does the token still read its config? Names count only.
         try {
-          item.names = (await this.deps.doppler.download(token)).size;
+          item.names = (await this.deps.doppler.download(token, project, config)).size;
         } catch (error) {
           item.error = error instanceof Error ? error.message : String(error);
         }
@@ -297,7 +297,7 @@ export class SecretsService {
     }
     let all: Map<string, string>;
     try {
-      all = await this.deps.doppler.download(token);
+      all = await this.deps.doppler.download(token, item.project, item.config);
     } catch (error) {
       // A Doppler outage fails the whole fetch, so the Session keeps what it had instead of losing it.
       throw new SecretsError('doppler-error', `${key}: ${error instanceof DopplerError ? error.message : String(error)}`);

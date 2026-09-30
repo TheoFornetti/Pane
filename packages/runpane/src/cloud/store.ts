@@ -74,6 +74,28 @@ export interface CoordinatorDeployment {
    * coordinator (0600) and never on this machine's disk. Kept so a redeploy rewrites the same config.
    */
   github?: CoordinatorGitHub;
+  /**
+   * The Doppler secrets service (`coordinator doppler set`). Only settings and token slugs: each
+   * config's read-only service token lives on the coordinator (0600), never on this machine.
+   */
+  secrets?: CoordinatorSecrets;
+}
+
+export interface CoordinatorSecrets {
+  /** An override for a fake Doppler (tests). */
+  apiBaseUrl?: string;
+  configs: CoordinatorSecretsConfig[];
+  /** default: the built-in deny-list; allow-all: everything the manifest names (the user's call); custom: these lists. */
+  policy: { mode: 'default' | 'allow-all' | 'custom'; deniedNames?: string[]; deniedConfigs?: string[] };
+}
+
+export interface CoordinatorSecretsConfig {
+  project: string;
+  config: string;
+  /** Set when this machine minted the token (doppler configs tokens create), so unset can revoke it. */
+  tokenSlug?: string;
+  tokenName?: string;
+  setAt: string;
 }
 
 export interface CoordinatorGitHub {

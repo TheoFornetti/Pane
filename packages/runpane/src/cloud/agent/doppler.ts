@@ -170,6 +170,13 @@ interface RefreshOutcome {
   previous: SecretsCache | null;
 }
 
+/**
+ * Coordinator answers that are decisions, not outages: the Session drops what it had (the user turned
+ * the service off, the manifest is broken or on a branch the Session can write, the Session was removed).
+ * Anything else (unreachable, Doppler or GitHub down, rate limited) keeps the stored copy.
+ */
+const CLEARING_CODES = new Set(['secrets-disabled', 'manifest-invalid', 'manifest-ref-writable', 'forbidden', 'auth-unknown-peer', 'auth-revoked']);
+
 async function refresh(deps: AgentDeps, options: { retryForMs: number }): Promise<RefreshOutcome> {
   const previous = await readCache(deps);
   const broker = sessionBroker(deps);
@@ -181,9 +188,14 @@ async function refresh(deps: AgentDeps, options: { retryForMs: number }): Promis
       await writeCache(deps, cache);
       return { cache, previous };
     } catch (error) {
+      if (error instanceof BrokerError && CLEARING_CODES.has(error.code)) {
+        const now = new Date().toISOString();
+        await writeCache(deps, { fetchedAt: now, storedAt: now, manifest: previous?.manifest ?? null, reason: `${error.message} (${error.code})`, policy: null, version: null, configs: [] });
+        throw error;
+      }
       // At boot the tailnet may not be up yet: keep trying while the coordinator is unreachable.
-      const unreachable = error instanceof BrokerError && (error.code === 'unreachable' || error.status >= 500);
-      if (!unreachable || Date.now() >= until) throw error;
+      const transient = error instanceof BrokerError && (error.code === 'unreachable' || error.status >= 500);
+      if (!transient || Date.now() >= until) throw error;
       await new Promise((resolve) => setTimeout(resolve, 3_000));
     }
   }

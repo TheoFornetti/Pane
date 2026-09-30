@@ -106,6 +106,9 @@ async function harness(options: { policy?: JsonObject; tokens?: Array<keyof type
     fs.writeFileSync(file, `${TOKENS[name]}\n`, { mode: options.badTokenFile && name === 'dev' ? 0o644 : 0o600 });
     return { project: 'montlake', config, tokenFile: file };
   });
+  const secretsSection: JsonObject = { doppler: { apiBaseUrl: 'https://doppler.invalid', tokens: tokenEntries } };
+  if (options.policy) secretsSection.policy = options.policy;
+  if (options.limits) secretsSection.limits = options.limits;
   const config = parseCoordinatorConfig({
     version: 1,
     listenHost: '127.0.0.1',
@@ -113,7 +116,7 @@ async function harness(options: { policy?: JsonObject; tokens?: Array<keyof type
     provider: { kind: 'boat', apiKeyFile: path.join(root, 'unused') },
     managedNamePrefix: 'rp-',
     github: { mode: 'app', appId: APP_ID, privateKeyFile: keyFile, apiBaseUrl: fakeBase, gitBaseUrl: fakeBase },
-    secrets: { doppler: { apiBaseUrl: 'https://doppler.invalid', tokens: tokenEntries }, ...(options.policy ? { policy: options.policy } : {}), ...(options.limits ? { limits: options.limits } : {}) },
+    secrets: secretsSection,
   }, root);
   const directory = FakeDirectory.of([S1, S2, S3]);
   const whois = new SwitchableWhois();
@@ -124,7 +127,12 @@ async function harness(options: { policy?: JsonObject; tokens?: Array<keyof type
     dopplerCalls.push(url);
     const reply = (status: number, body: JsonValue) => ({ status, headers: { get: () => null }, text: async () => JSON.stringify(body) });
     if (dopplerDown.value) return reply(503, { messages: ['Doppler is down'], success: false });
-    if (!url.endsWith('/v3/configs/config/secrets/download?format=json')) return reply(404, { messages: ['no route'] });
+    const parsed = new URL(url);
+    if (parsed.pathname !== '/v3/configs/config/secrets/download' || parsed.searchParams.get('format') !== 'json') return reply(404, { messages: ['no route'] });
+    // Like Doppler: a service token reads only its own config.
+    const wanted = `${parsed.searchParams.get('project') ?? ''}/${parsed.searchParams.get('config') ?? ''}`;
+    const own = token === TOKENS.dev ? 'montlake/dev' : token === TOKENS.personal ? 'montlake/dev_personal' : token === TOKENS.prd ? 'montlake/prd' : '';
+    if (own && wanted !== own) return reply(400, { messages: [`This token does not have access to requested config '${parsed.searchParams.get('config') ?? ''}'`], success: false });
     if (token === TOKENS.dev) return reply(200, Object.fromEntries(DEV_VALUES));
     if (token === TOKENS.personal) return reply(200, { OPENROUTER_API_KEY: 'personal-value', DOPPLER_CONFIG: 'dev_personal' });
     if (token === TOKENS.prd) return reply(200, { DOPPLER_PROJECT: 'montlake', DOPPLER_CONFIG: 'prd', PRD_ONLY: 'prd-value' });

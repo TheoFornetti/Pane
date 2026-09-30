@@ -9,6 +9,7 @@ import {
   DEFAULT_NAME_PREFIX,
   type CloudCredentials,
   type CoordinatorDeployment,
+  type CoordinatorSecrets,
   type PinnedPane,
 } from './store';
 
@@ -300,6 +301,7 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     deps.stdout(`  manages sandboxes named ${next.managedPrefix}*; idle-stop on; reconcile ${next.reconcile ? 'on (stop + alert only)' : 'off'}.`);
     deps.stdout(`  holds a provider key scoped to ${SCOPED_KEY_ACTIONS.join(', ')}${next.scopedKeyTtl ? ` (lifetime ${next.scopedKeyTtl} from ${next.deployedAt.slice(0, 10)}; destroy and redeploy before it expires)` : ''}; this machine's caller token is in ${deps.store.coordinatorClientPath} (0600).`);
     if (next.pin) deps.stdout(`  pinned Pane ${next.pin.version}: Sessions are upgraded to it when they wake.`);
+    if (next.secrets) deps.stdout(`  Doppler secrets kept (${next.secrets.configs.map((config) => `${config.project}/${config.config}`).join(', ') || 'no configs'}; policy ${next.secrets.policy.mode}); see runpane cloud coordinator doppler status.`);
     if (next.github) deps.stdout(`  GitHub broker kept (${next.github.mode === 'app' ? `App ${next.github.appId ?? '?'}` : 'fine-grained PAT'}); see runpane cloud coordinator github status.`);
     deps.stdout(`  directory: ${coordinator.pushed ? `${coordinator.sessions} cloud Session${coordinator.sessions === 1 ? '' : 's'}` : `not pushed (${coordinator.reason})`}.`);
     if (withoutClient.length > 0) {
@@ -363,6 +365,35 @@ function githubConfig(deployment: CoordinatorDeployment): CoordinatorGitHubConfi
   return config;
 }
 
+/** Where `coordinator doppler set` puts each config's read-only service token (0600, in a 0700 dir). */
+const COORDINATOR_DOPPLER_DIR = `${COORDINATOR_HOME}/doppler`;
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/gu, `'\\''`)}'`;
+}
+
+function dopplerTokenFile(project: string, config: string): string {
+  return `${COORDINATOR_DOPPLER_DIR}/${project}.${config}.token`;
+}
+
+/** The secrets section of the coordinator config: settings from this machine, token paths on the box. */
+function secretsConfig(deployment: CoordinatorDeployment) {
+  const secrets = deployment.secrets;
+  if (!secrets) return null;
+  const policy: CoordinatorSecrets['policy'] = { mode: secrets.policy.mode };
+  if (secrets.policy.mode === 'custom') {
+    if (secrets.policy.deniedNames) policy.deniedNames = secrets.policy.deniedNames;
+    if (secrets.policy.deniedConfigs) policy.deniedConfigs = secrets.policy.deniedConfigs;
+  }
+  return {
+    doppler: {
+      apiBaseUrl: secrets.apiBaseUrl ?? 'https://api.doppler.com',
+      tokens: secrets.configs.map((config) => ({ project: config.project, config: config.config, tokenFile: dopplerTokenFile(config.project, config.config) })),
+    },
+    policy,
+  };
+}
+
 /** The whole coordinator config. This machine is its single writer, so a redeploy rebuilds it from the record. */
 function coordinatorConfig(deployment: CoordinatorDeployment, listenHost: string) {
   return {
@@ -386,6 +417,7 @@ function coordinatorConfig(deployment: CoordinatorDeployment, listenHost: string
     idleStop: idleStopConfig(deployment),
     reconcile: { enabled: deployment.reconcile },
     github: githubConfig(deployment),
+    secrets: secretsConfig(deployment),
   };
 }
 
@@ -398,6 +430,15 @@ async function coordinatorListenHost(handle: ReturnType<CloudProvider['handle']>
   return listenHost;
 }
 
+interface ReconfigureOptions {
+  githubCredential?: { file: 'app.pem' | 'pat'; content: string };
+  removeGitHubCredentials?: boolean;
+  /** Read-only Doppler service tokens to install (replacing any for the same config). */
+  dopplerTokens?: Array<{ project: string; config: string; content: string }>;
+  /** Tokens to shred first: some configs, or every one. */
+  removeDopplerTokens?: Array<{ project: string; config: string }> | 'all';
+}
+
 /**
  * Rewrites the config (and optionally installs or removes the GitHub credential) without touching the
  * app, then restarts the unit and waits for /health on the box. The credential goes through the files
@@ -406,17 +447,33 @@ async function coordinatorListenHost(handle: ReturnType<CloudProvider['handle']>
 export async function reconfigureCoordinator(
   provider: CloudProvider,
   deployment: CoordinatorDeployment,
-  options: { githubCredential?: { file: 'app.pem' | 'pat'; content: string }; removeGitHubCredentials?: boolean } = {},
+  options: ReconfigureOptions = {},
 ): Promise<void> {
   const handle = provider.handle(deployment.sandboxId);
   const listenHost = await coordinatorListenHost(handle);
   await handle.writeFile(`${STAGE_DIR}/config.json`, `${JSON.stringify(coordinatorConfig(deployment, listenHost), null, 2)}\n`);
   if (options.githubCredential) await handle.writeFile(`${STAGE_DIR}/github-credential`, options.githubCredential.content);
   const target = options.githubCredential ? `${COORDINATOR_GITHUB_DIR}/${options.githubCredential.file}` : '';
+  // Doppler tokens: each staged through the files API, then installed 0600 and the staged copy shredded.
+  const dopplerLines: string[] = [];
+  for (const [index, token] of (options.dopplerTokens ?? []).entries()) {
+    await handle.writeFile(`${STAGE_DIR}/doppler-token-${index}`, `${token.content}\n`);
+    const file = shellQuote(dopplerTokenFile(token.project, token.config));
+    dopplerLines.push(`[ -f ${file} ] && shred -u ${file}; install -m 600 "$S/doppler-token-${index}" ${file}; shred -u "$S/doppler-token-${index}"`);
+  }
+  if (options.removeDopplerTokens === 'all') {
+    dopplerLines.unshift('for f in "$D"/*.token; do [ -f "$f" ] && shred -u "$f"; done; true');
+  } else {
+    for (const removed of options.removeDopplerTokens ?? []) {
+      const file = shellQuote(dopplerTokenFile(removed.project, removed.config));
+      dopplerLines.unshift(`[ -f ${file} ] && shred -u ${file}; true`);
+    }
+  }
   const script = `set -e
 umask 077
-S=${STAGE_DIR}; C=${COORDINATOR_HOME}; G=${COORDINATOR_GITHUB_DIR}
-mkdir -p "$G"; chmod 700 "$G"
+S=${STAGE_DIR}; C=${COORDINATOR_HOME}; G=${COORDINATOR_GITHUB_DIR}; D=${COORDINATOR_DOPPLER_DIR}
+mkdir -p "$G" "$D"; chmod 700 "$G" "$D"
+${dopplerLines.join('\n')}
 ${options.removeGitHubCredentials ? 'for f in "$G/app.pem" "$G/pat"; do [ -f "$f" ] && shred -u "$f"; done; true' : ''}
 ${options.githubCredential ? `for f in "$G/app.pem" "$G/pat"; do [ -f "$f" ] && shred -u "$f"; done; install -m 600 "$S/github-credential" "${target}"; shred -u "$S/github-credential"` : ''}
 install -m 600 "$S/config.json" "$C/config.json"; rm -f "$S/config.json"

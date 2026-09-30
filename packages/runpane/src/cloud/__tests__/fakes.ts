@@ -273,7 +273,7 @@ export async function createTestHarness(): Promise<TestHarness> {
         case 'runpane:sessions:list':
           return { ok: true, sessions: daemon.sessions.map((session) => ({ id: session.id, name: session.name, archived: session.archived === true })) };
         case 'runpane:peers:mint': {
-          const peer = { id: `peer-${daemon.peers.length + 1}`, label: String(request.label), sessions: Array.isArray(request.sessions) ? request.sessions.filter((value): value is string => typeof value === 'string') : [] };
+          const peer = { id: `peer-${daemon.peers.length + 1}`, label: String(request.label), sessions: Array.isArray(request.sessions) ? request.sessions.map(String) : [] };
           daemon.peers.push(peer);
           const connectionCode = encodePairingCode({ v: 1, label: host, baseUrl: profile.baseUrl, token: `peer-token-${peer.id}`, transport: 'http+sse' });
           return { ok: true, peer: { id: peer.id, label: peer.label, scope: 'peer', allowedSessionIds: peer.sessions }, connectionCode };

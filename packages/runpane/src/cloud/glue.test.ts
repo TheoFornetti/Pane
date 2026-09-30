@@ -15,7 +15,16 @@ async function run(harness: TestHarness, argv: string[]): Promise<number> {
   return runCloudCommand(parseCloudArgs(argv), harness.deps);
 }
 
-function lastJson(harness: TestHarness): Record<string, unknown> & { host?: { hostname: string } } {
+/** The `--json` fields these tests read. */
+interface GlueJson {
+  host?: { hostname: string };
+  state?: string;
+  grants?: { from: string; to: string }[];
+  peersFile?: { written: boolean };
+  agentCredentials?: string[];
+}
+
+function lastJson(harness: TestHarness): GlueJson {
   return JSON.parse(harness.out[harness.out.length - 1]);
 }
 
@@ -92,7 +101,7 @@ test('coordinator deploy creates a small tailnet sandbox, a scoped key, and wire
 test('coordinator deploy again updates in place: no new sandbox or key, pin applied', async () => {
   const harness = await createTestHarness();
   await harness.deps.store.writeSettings({ namePrefix: 'rp-test' });
-  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json']), 0);
+  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json', '--idle-check-seconds', '60']), 0);
   const creates = harness.world.calls.filter((call) => call.startsWith('create ')).length;
   const sha = 'a'.repeat(64);
   assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json', '--pin-version', '2.4.142', '--pin-deb-url', 'https://example.test/pane.deb', '--pin-deb-sha256', sha]), 0);
@@ -103,6 +112,8 @@ test('coordinator deploy again updates in place: no new sandbox or key, pin appl
   const config = JSON.parse(harness.world.files.get(`${deployment?.sandboxId}:/home/user/.runpane-cloud/coordinator-stage/config.json`) ?? '{}');
   assert.equal(config.pinnedVersion, '2.4.142');
   assert.equal(config.pinnedDebSha256, sha);
+  // Timings given at the first deploy survive a redeploy that does not repeat them.
+  assert.equal(config.idleStop.intervalSeconds, 60);
 });
 
 test('coordinator stop, status, start and destroy', async () => {
@@ -191,7 +202,7 @@ test('peers allow mints a peer on the target, allowlisted to its one Session, an
 
   await assert.rejects(run(harness, ['peers', 'allow', a, b]), /already message/u);
   assert.equal(await run(harness, ['peers', 'list', '--json']), 0);
-  assert.equal((lastJson(harness).grants as unknown[]).length, 1);
+  assert.equal(lastJson(harness).grants?.length, 1);
 
   assert.equal(await run(harness, ['peers', 'revoke', a, b, '--json']), 0);
   assert.deepEqual(harness.world.daemons.get(b)?.peers, []);
@@ -226,7 +237,7 @@ test('peers allow with the source asleep keeps the grant and writes its list on 
   harness.world.daemons.set(b, { sessions: [{ id: 'sess-b', name: 'Main' }], peers: [] });
   assert.equal(await run(harness, ['stop', a, '--yes', '--json']), 0);
   assert.equal(await run(harness, ['peers', 'allow', a, b, '--json']), 0);
-  assert.equal((lastJson(harness).peersFile as { written: boolean }).written, false);
+  assert.equal(lastJson(harness).peersFile?.written, false);
   assert.equal(await run(harness, ['wake', a, '--json']), 0);
   assert.equal(peersFile(harness, a).hosts.length, 1);
 });

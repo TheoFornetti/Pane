@@ -217,6 +217,8 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     ...deployment,
     reconcile: args.reconcile ?? deployment.reconcile,
   };
+  if (args.idleCheckSeconds) next.idleCheckSeconds = args.idleCheckSeconds;
+  if (args.wakeGraceSeconds) next.wakeGraceSeconds = args.wakeGraceSeconds;
   if (args.noPin) delete next.pin;
   else if (args.pin?.version && args.pin.debUrl && args.pin.sha256) {
     next.pin = { version: args.pin.version, debUrl: args.pin.debUrl, sha256: args.pin.sha256 };
@@ -235,8 +237,6 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     archiveBase64: app.archiveBase64,
     secret,
     scopedKeySecret: scopedKey?.secret,
-    idleCheckSeconds: args.idleCheckSeconds,
-    wakeGraceSeconds: args.wakeGraceSeconds,
   });
   timings.installedMs = deps.now() - started;
 
@@ -298,8 +298,14 @@ interface InstallOptions {
   secret: string;
   /** Only on the first deploy: the scoped key's secret is returned once by the provider. */
   scopedKeySecret?: string;
-  idleCheckSeconds?: number;
-  wakeGraceSeconds?: number;
+}
+
+/** Unset timings fall back to the coordinator's defaults (check every 300 s, 600 s grace after a wake). */
+function idleStopConfig(deployment: CoordinatorDeployment): { enabled: true; intervalSeconds?: number; wakeGraceSeconds?: number } {
+  const config: { enabled: true; intervalSeconds?: number; wakeGraceSeconds?: number } = { enabled: true };
+  if (deployment.idleCheckSeconds) config.intervalSeconds = deployment.idleCheckSeconds;
+  if (deployment.wakeGraceSeconds) config.wakeGraceSeconds = deployment.wakeGraceSeconds;
+  return config;
 }
 
 /** Uploads the app, the config and the secrets (0600, never on a command line), then (re)starts the unit. */
@@ -323,11 +329,7 @@ async function installCoordinator(provider: CloudProvider, deployment: Coordinat
     pinnedVersion: deployment.pin?.version ?? null,
     pinnedDebUrl: deployment.pin?.debUrl ?? null,
     pinnedDebSha256: deployment.pin?.sha256 ?? null,
-    idleStop: {
-      enabled: true,
-      ...(options.idleCheckSeconds ? { intervalSeconds: options.idleCheckSeconds } : {}),
-      ...(options.wakeGraceSeconds ? { wakeGraceSeconds: options.wakeGraceSeconds } : {}),
-    },
+    idleStop: idleStopConfig(deployment),
     reconcile: { enabled: deployment.reconcile },
   };
   await handle.writeFile(`${STAGE_DIR}/config.json`, `${JSON.stringify(config, null, 2)}\n`);

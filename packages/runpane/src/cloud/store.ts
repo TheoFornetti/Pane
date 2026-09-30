@@ -55,6 +55,9 @@ export interface CoordinatorDeployment {
   deployedAt: string;
   appVersion: string;
   pin?: PinnedPane;
+  /** Idle-stop timings, when set by `deploy --idle-check-seconds/--wake-grace-seconds`; kept across redeploys. */
+  idleCheckSeconds?: number;
+  wakeGraceSeconds?: number;
 }
 
 export interface PinnedPane {

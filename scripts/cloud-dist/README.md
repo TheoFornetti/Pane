@@ -16,7 +16,7 @@ the scripts refuse a `greenfield-inc/*` repo.
 ## GitHub Actions (no devbox)
 
 `.github/workflows/rc-integration.yml` (fork only) runs the integrator suite on every push to `rc/integration`
-and to the integrator's candidate branch `rc/p2/p2-integrator`. On `rc/integration` it then runs
+and to every Phase 2 branch `rc/p2/**` (peers and the integrator candidate). On `rc/integration` it then runs
 `build-artifacts.sh` on `ubuntu-24.04` (the boat sandbox OS) and publishes the prerelease `rc-<sha8>` with the
 workflow's own token. A merge commit whose message contains `[no-release]` skips the publish (docs-only merges).
 Afterwards, run `record-release.sh rc-<sha8>` on agentbox to update `dist-current.md`. This costs 0 boat starts.

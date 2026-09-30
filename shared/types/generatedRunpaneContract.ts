@@ -1192,6 +1192,19 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "lockListResult"
       ]
+    },
+    {
+      "name": "cloud safe-to-stop",
+      "summary": "Inside a Runpane Cloud sandbox: check whether stopping it is safe now and, when it is, make the daemon's state durable (SQLite WAL checkpoint and fsync). Exits 0 when safe and 3 when something blocks.",
+      "usage": [
+        "runpane cloud safe-to-stop [--force] [--dry-run] [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "admin"
+      ],
+      "jsonSchemas": [
+        "cloudSafeToStopResult"
+      ]
     }
   ],
   "flags": {
@@ -1623,7 +1636,7 @@ export const RUNPANE_CONTRACT = {
       },
       {
         "name": "--force",
-        "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes; for lock release, release another owner's lock."
+        "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes; for lock release, release another owner's lock; for cloud safe-to-stop, flush even when something blocks the stop."
       },
       {
         "name": "--remove-worktree",
@@ -2813,6 +2826,18 @@ export const RUNPANE_CONTRACT = {
         "  --force                      Release a lock another owner holds (release).",
         "  --session <id|name>          Named Session whose locks to list or release.",
         "  --json                       Print JSON output."
+      ],
+      "cloud safe-to-stop": [
+        "Usage:",
+        "runpane cloud safe-to-stop [--force] [--dry-run] [--json] [--pane-dir <path>]",
+        "",
+        "Blocks while an agent works, a terminal printed in the last 2 minutes, a lock is held, a watch is waiting,",
+        "a PR has checks running, or a user client used the daemon in the last 15 minutes. Peers never count.",
+        "",
+        "Options:",
+        "  --force                      Flush even when something blocks (a stop the user asked for).",
+        "  --dry-run                    Only check; do not flush.",
+        "  --json                       Print JSON output."
       ]
     },
     "pip": {
@@ -3874,6 +3899,18 @@ export const RUNPANE_CONTRACT = {
         "  --panel <panel-id>           Act for this panel instead of $PANE_PANEL_ID.",
         "  --force                      Release a lock another owner holds (release).",
         "  --session <id|name>          Named Session whose locks to list or release.",
+        "  --json                       Print JSON output."
+      ],
+      "cloud safe-to-stop": [
+        "Usage:",
+        "python -m runpane cloud safe-to-stop [--force] [--dry-run] [--json] [--pane-dir <path>]",
+        "",
+        "Blocks while an agent works, a terminal printed in the last 2 minutes, a lock is held, a watch is waiting,",
+        "a PR has checks running, or a user client used the daemon in the last 15 minutes. Peers never count.",
+        "",
+        "Options:",
+        "  --force                      Flush even when something blocks (a stop the user asked for).",
+        "  --dry-run                    Only check; do not flush.",
         "  --json                       Print JSON output."
       ]
     }
@@ -8599,6 +8636,122 @@ export const RUNPANE_CONTRACT = {
       },
       "additionalProperties": false
     },
+    "cloudSafeToStopResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "safe",
+        "checkedAt",
+        "version",
+        "blockers",
+        "flush"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "safe": {
+          "type": "boolean"
+        },
+        "checkedAt": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "condition",
+              "message"
+            ],
+            "properties": {
+              "condition": {
+                "enum": [
+                  "agent-working",
+                  "recent-terminal-output",
+                  "lock-held",
+                  "watcher-active",
+                  "pr-checks-pending",
+                  "user-client-attached"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "paneId": {
+                "type": "string"
+              },
+              "panelId": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "flush": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "walCheckpoint",
+                "fsynced",
+                "syncedFilesystem",
+                "durationMs"
+              ],
+              "properties": {
+                "walCheckpoint": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "busy",
+                        "log",
+                        "checkpointed"
+                      ],
+                      "properties": {
+                        "busy": {
+                          "type": "number"
+                        },
+                        "log": {
+                          "type": "number"
+                        },
+                        "checkpointed": {
+                          "type": "number"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "fsynced": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "syncedFilesystem": {
+                  "type": "boolean"
+                },
+                "durationMs": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "lockListResult": {
       "type": "object",
       "required": [
@@ -12984,6 +13137,46 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "released:false with ok:true means no such lock was held. ok:false with reason not-owner (exit 1) means another owner holds it."
+        ]
+      },
+      "cloud safe-to-stop": {
+        "name": "cloud safe-to-stop",
+        "summary": "Inside a Runpane Cloud sandbox: check whether stopping it is safe now and, when it is, make the daemon's state durable.",
+        "details": "Refuses while an agent is working, a terminal printed output in the last 2 minutes, a named lock is held, a workspace or panel wait is running, a PR has checks still running, or a user client (not a peer) has an open event stream or called the daemon in the last 15 minutes. When safe it checkpoints the SQLite WAL, fsyncs the Pane directory, and syncs the filesystem, so a provider snapshot taken right after keeps every write. The coordinator calls the same check over /invoke as runpane:cloud:safe-to-stop.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--force",
+            "required": false,
+            "description": "Flush even when something blocks the stop; still reports the blockers."
+          },
+          {
+            "name": "--dry-run",
+            "required": false,
+            "description": "Only check; do not flush."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane cloud safe-to-stop --json",
+          "runpane cloud safe-to-stop --dry-run --json"
+        ],
+        "jsonSchemas": [
+          "cloudSafeToStopResult"
+        ],
+        "notes": [
+          "Exit code 0 means safe (and flushed), 3 means something blocks the stop."
         ]
       },
       "lock list": {

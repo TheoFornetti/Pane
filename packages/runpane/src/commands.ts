@@ -838,6 +838,7 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'lock acquire'
     || command === 'lock release'
     || command === 'lock list'
+    || command === 'cloud safe-to-stop'
     || command === 'panels create'
     || command === 'panels open'
     || command === 'panels list'

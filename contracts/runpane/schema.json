@@ -509,7 +509,8 @@
         "lock",
         "lock acquire",
         "lock release",
-        "lock list"
+        "lock list",
+        "cloud safe-to-stop"
       ],
       "properties": {
         "default": {
@@ -729,6 +730,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "lock list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud safe-to-stop": {
           "$ref": "#/$defs/helpLines"
         }
       },

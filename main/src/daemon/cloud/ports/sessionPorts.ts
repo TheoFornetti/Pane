@@ -375,7 +375,8 @@ export class SessionPortsService {
         try {
           await this.openLocked({ port: entry.port, name: entry.name, httpsPort: entry.httpsPort, path: entry.path }, { source: 'manifest', repo });
         } catch (error) {
-          this.recordBlocked(entry, repo, error);
+          const conflict = error instanceof PaneCommandError && error.code === 'ERR_PORTS_CONFLICT';
+          this.recordBlocked(entry, repo, error instanceof Error ? error.message : String(error), conflict);
         }
       }
     }
@@ -399,13 +400,12 @@ export class SessionPortsService {
     this.deps.log(`ports: closed ${stored.name} (${why})`);
   }
 
-  private recordBlocked(entry: { name: string; port: number; httpsPort?: number; path: string }, repo: string, error: unknown): void {
-    const message = error instanceof Error ? error.message : String(error);
+  private recordBlocked(entry: { name: string; port: number; httpsPort?: number; path: string }, repo: string, message: string, conflict: boolean): void {
     this.deps.log(`ports: manifest port ${entry.name} (${repo}) not opened: ${message}`);
     const state = this.readState();
     if (state.ports.some(port => port.port === entry.port && !port.blockedBy)) return;
     // A port or name clash with another published port is shown on the manifest, not stored.
-    if (!(error instanceof PaneCommandError) || error.code !== 'ERR_PORTS_CONFLICT') {
+    if (!conflict) {
       this.manifests = this.manifests.map(manifest => manifest.repo === repo ? { ...manifest, error: `${entry.name}: ${message}` } : manifest);
       return;
     }

@@ -13,7 +13,7 @@ import { createTailscaleServeBackend, type ServeBackend } from './tailscaleServe
 const CLOUD_SERVE_RECORD = '/etc/rp-cloud/serve.json';
 const DEFAULT_DAEMON_PORT = 42137;
 
-export interface SessionPortsWiring {
+interface SessionPortsWiring {
   commandRegistry: PaneCommandRegistry;
   panelIds(): string[];
   panelPid(panelId: string): number | undefined;
@@ -58,10 +58,10 @@ async function probeUrl(url: string, timeoutMs: number): Promise<ProbeResult> {
     await response.body?.cancel();
     return { ok: true, status: response.status };
   } catch (error) {
-    const cause = error instanceof Error ? Reflect.get(error, 'cause') : undefined;
-    const code = cause instanceof Error ? Reflect.get(cause, 'code') ?? cause.message : undefined;
-    const name = error instanceof Error ? error.name : '';
-    return { ok: false, error: name === 'TimeoutError' ? `timed out after ${timeoutMs} ms` : String(code ?? (error instanceof Error ? error.message : error)) };
+    if (!(error instanceof Error)) return { ok: false, error: String(error) };
+    if (error.name === 'TimeoutError') return { ok: false, error: `timed out after ${timeoutMs} ms` };
+    // fetch wraps the network error (TLS, refused, reset) as its cause.
+    return { ok: false, error: error.cause instanceof Error ? error.cause.message : error.message };
   }
 }
 

@@ -52,7 +52,7 @@ const stateSchema = boundary.object({
   dismissed: boundary.optional(boundary.array(boundary.string)),
 });
 
-export function emptyPortsState(): PortsState {
+function emptyPortsState(): PortsState {
   return { version: 1, autoOpen: false, ports: [], dismissed: [] };
 }
 

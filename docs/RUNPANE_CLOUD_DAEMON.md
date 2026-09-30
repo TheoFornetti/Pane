@@ -88,3 +88,33 @@ Headless daemons never update themselves (`versionChecker` runs only on the desk
 - Errors carry a code at the start of the message: `ERR_CLOUD_UPGRADE_BAD_REQUEST`, `_CHECKSUM`, `_DOWNLOAD`,
   `_NO_SERVICE` (not under systemd), `_UNSUPPORTED` (not Linux), `_SPAWN`. An older daemon answers `ERR_UNKNOWN_CHANNEL`.
 - `debUrl` is accepted as an alias of `url`.
+
+## `runpane:ports:*`: Session ports (for clients, not the coordinator)
+
+User clients (Pane desktop, the phone app, `runpane --host`, `runpane cloud port`) and agents in the Session
+call these; the coordinator and peers are refused like every other channel outside their scope. Code:
+`main/src/daemon/cloud/ports/`, types in `shared/types/sessionPorts.ts`. Every daemon registers them; off a
+Runpane Cloud Session (no `/etc/rp-cloud/serve.json`) `list` answers `available: false` and the others fail
+with `ERR_PORTS_UNAVAILABLE`, so a laptop's tailnet name is never touched.
+
+| Channel | Args | Result |
+|---|---|---|
+| `runpane:ports:list` | `[{ verify?: boolean }]` | `{ ok, available, unavailableReason?, host?, scheme, autoOpen, ports: SessionPort[], suggested: SuggestedPort[], manifests: [{repo, ok, error?, count}] }` |
+| `runpane:ports:open` | `[{ port, name?, httpsPort?, path?, yes?, scheme?: "auto"\|"https"\|"http" }]` | `{ ok, port: SessionPort, alreadyOpen, replaced?: {httpsPort, was} }` |
+| `runpane:ports:close` | `[{ target: number\|string }]` (local port or name) | `{ ok, closed: SessionPort \| null }` |
+| `runpane:ports:configure` | `[{ autoOpen: boolean }]` | `{ ok, autoOpen }` |
+
+- `SessionPort`: `{ name, port, httpsPort, url, scheme, path, source: "user"|"manifest"|"auto", repo?, createdAt,
+  status: "serving"|"missing"|"error", detail?, reachable? }` (`reachable` only with `verify`; 502 counts as not
+  reachable). `SuggestedPort`: `{ port, address, process?, pid?, paneId?, panelId?, detectedAt }`.
+- Errors (`code`): `ERR_PORTS_CONFLICT` (another Serve entry holds the tailnet port; retry with `yes: true` after
+  the user agrees), `ERR_PORTS_RESERVED` (443 or the daemon's port), `ERR_PORTS_IN_USE` (another published
+  port uses that tailnet port, or this port is published elsewhere), `ERR_PORTS_INVALID`, `ERR_PORTS_UNAVAILABLE`.
+- Event: `runpane:ports:changed` with the `list` result (never verified) after every change and whenever the
+  suggestions change.
+- Mechanics: `tailscale serve --bg --https=<httpsPort> http://127.0.0.1:<port>` as the node's operator (`sudo -n`
+  when that is refused); the state is `~/.runpane-cloud/ports.json` (0600, atomic writes). A reconcile runs
+  once Tailscale is `Running` after the daemon starts (so at every boot and wake), every minute, and when the
+  set of repositories changes. It reads each repository's `.runpane/ports.json`, re-applies lost entries, never
+  removes a Serve entry it did not make, and at boot requests every URL and logs the answer. Detection reads
+  `/proc/net/tcp{,6}` every 5 s and keeps listeners whose process descends from a panel's PTY.

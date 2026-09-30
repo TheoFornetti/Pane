@@ -11,7 +11,7 @@ export type ServeListener =
   | { kind: 'web'; scheme: SessionPortScheme; proxy?: string }
   | { kind: 'tcp'; forward: string; terminateTls: boolean };
 
-export interface ServeSelf {
+interface ServeSelf {
   running: boolean;
   backendState: string;
   /** MagicDNS name without the trailing dot. */
@@ -30,7 +30,7 @@ export interface ServeBackend {
   certCached(dnsName: string): Promise<boolean>;
 }
 
-export class ServeCommandError extends Error {}
+class ServeCommandError extends Error {}
 
 const statusSchema = boundary.object({
   BackendState: boundary.string,
@@ -96,7 +96,7 @@ type Runner = (file: string, args: readonly string[]) => Promise<RunResult>;
 function runCommand(file: string, args: readonly string[]): Promise<RunResult> {
   return new Promise(resolve => {
     execFile(file, [...args], { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
-      const code = error ? Number(Reflect.get(error, 'code')) || 1 : 0;
+      const code = error ? Number(error.code) || 1 : 0;
       resolve({ code, stdout: String(stdout), stderr: String(stderr || (error && !stderr ? error.message : '')) });
     });
   });

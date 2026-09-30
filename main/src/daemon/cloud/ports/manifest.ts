@@ -3,13 +3,13 @@ import path from 'path';
 import { boundary, BoundaryDecodeError, decodeBoundary, type JsonObject } from '../../../../../shared/validation/boundaryDecoder';
 
 /** Where a repository declares the services its Sessions publish (beside `.runpane/secrets.json`). */
-export const PORTS_MANIFEST_PATH = path.join('.runpane', 'ports.json');
+const PORTS_MANIFEST_PATH = path.join('.runpane', 'ports.json');
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_MANIFEST_PORTS = 20;
 
 export const PORT_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/u;
 
-export interface ManifestPort {
+interface ManifestPort {
   name: string;
   port: number;
   httpsPort?: number;
@@ -91,6 +91,7 @@ export function parsePortsManifest(text: string): ManifestRead {
 
 export function readPortsManifest(repoPath: string): ManifestRead {
   const file = path.join(repoPath, PORTS_MANIFEST_PATH);
+  if (!fs.existsSync(file)) return { kind: 'absent' };
   let text: string;
   try {
     const stat = fs.statSync(file);
@@ -98,7 +99,6 @@ export function readPortsManifest(repoPath: string): ManifestRead {
     if (stat.size > MAX_MANIFEST_BYTES) return { kind: 'invalid', error: `${PORTS_MANIFEST_PATH} is larger than 64 KiB` };
     text = fs.readFileSync(file, 'utf8');
   } catch (error) {
-    if (error instanceof Error && Reflect.get(error, 'code') === 'ENOENT') return { kind: 'absent' };
     return { kind: 'invalid', error: `unreadable: ${error instanceof Error ? error.message : String(error)}` };
   }
   return parsePortsManifest(text);

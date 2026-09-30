@@ -21,7 +21,7 @@ export const CLOUD_PORT_USAGE = `Usage:
   runpane cloud port close <host> <port|name> [--json]
 A port is a service in the Session published on the Session's own tailnet name (Tailscale Serve, never Funnel).`;
 
-export type PortsCommand =
+type PortsCommand =
   | { sub: 'open'; request: JsonObject; json: boolean }
   | { sub: 'list'; verify: boolean; json: boolean }
   | { sub: 'close'; target: number | string; json: boolean }
@@ -37,7 +37,12 @@ function parsePortNumber(value: string, what: string): number {
  * Parses what follows `port` (or `cloud port`). With `withHost`, the first positional is the host.
  * Returns the host (cloud only) and the command.
  */
-export function parsePortsArgv(argv: readonly string[], options: { withHost: boolean; usage: string }): { host?: string; command: PortsCommand } {
+interface ParsedPortsArgv {
+  host?: string;
+  command: PortsCommand;
+}
+
+export function parsePortsArgv(argv: readonly string[], options: { withHost: boolean; usage: string }): ParsedPortsArgv {
   const [sub, ...rest] = argv;
   if (sub !== 'open' && sub !== 'list' && sub !== 'close' && sub !== 'auto-open') throw new Error(options.usage);
   const positionals: string[] = [];
@@ -148,7 +153,7 @@ const openSchema = boundary.object({
 const closeSchema = boundary.object({ ok: boundary.literal(true), closed: boundary.nullable(portSchema) });
 const configureSchema = boundary.object({ ok: boundary.literal(true), autoOpen: boundary.boolean });
 
-export interface PortsIo {
+interface PortsIo {
   /** Calls a `runpane:ports:*` channel on the Session's daemon. */
   invoke(channel: string, args: JsonObject[]): Promise<JsonValue | undefined>;
   stdout(line: string): void;
@@ -241,8 +246,8 @@ export async function checkUrlFromHere(url: string): Promise<{ reachable: boolea
     if (response.status === 502) return { reachable: false, detail: 'Tailscale Serve answered 502: nothing listens on the local port in the Session' };
     return { reachable: true };
   } catch (error) {
-    const cause = error instanceof Error ? Reflect.get(error, 'cause') : undefined;
-    return { reachable: false, detail: `no answer from this machine: ${cause instanceof Error ? cause.message : error instanceof Error ? error.message : String(error)}` };
+    const reason = error instanceof Error ? (error.cause instanceof Error ? error.cause.message : error.message) : String(error);
+    return { reachable: false, detail: `no answer from this machine: ${reason}` };
   }
 }
 

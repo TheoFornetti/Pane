@@ -54,23 +54,23 @@ both_running() { local a b; a=$(cl boat get "$S_ID" --field state); b=$(cl boat 
 
 # ---- reconciler safety
 rm -f "$CH/directory.json"
-r=$(coord reconcile 2>&1); printf '%s\n' "$r" | ev reconcile-missing.json >/dev/null
+r=$(coord reconcile 2>>"$E2E_RUN_DIR/coord-stderr.log"); printf '%s\n' "$r" | ev reconcile-missing.json >/dev/null
 [ "$(jget 'd.get("aborted")' <<<"$r" 2>/dev/null)" = directory-unreadable ] && [ "$(both_running)" = yes ] \
   && rec reconcile.missing-directory PASS "missing directory -> aborted=directory-unreadable; nothing stopped or deleted" "$E2E_RUN_DIR/reconcile-missing.json" \
   || rec reconcile.missing-directory FAIL "aborted=$(jget 'd.get("aborted")' <<<"$r" 2>/dev/null) sandboxes=$(both_running)" "$E2E_RUN_DIR/reconcile-missing.json"
 write_dir '[]'
-r=$(coord reconcile 2>&1); printf '%s\n' "$r" | ev reconcile-empty.json >/dev/null
+r=$(coord reconcile 2>>"$E2E_RUN_DIR/coord-stderr.log"); printf '%s\n' "$r" | ev reconcile-empty.json >/dev/null
 [ "$(jget 'd.get("aborted")' <<<"$r" 2>/dev/null)" = directory-empty ] && [ "$(both_running)" = yes ] \
   && rec reconcile.empty-directory PASS "empty directory while provider lists managed sandboxes -> aborted=directory-empty; nothing touched" "$E2E_RUN_DIR/reconcile-empty.json" \
   || rec reconcile.empty-directory FAIL "aborted=$(jget 'd.get("aborted")' <<<"$r" 2>/dev/null) sandboxes=$(both_running)" "$E2E_RUN_DIR/reconcile-empty.json"
 write_dir "$S_ENTRY"; cp "$KEYF" "$KEYF.good"; (umask 077; echo "boat_invalid_e2e_key" > "$KEYF")
-r=$(coord reconcile 2>&1); printf '%s\n' "$r" | ev reconcile-provider-fail.json >/dev/null
+r=$(coord reconcile 2>>"$E2E_RUN_DIR/coord-stderr.log"); printf '%s\n' "$r" | ev reconcile-provider-fail.json >/dev/null
 cp "$KEYF.good" "$KEYF"
 ab=$(jget 'd.get("aborted")' <<<"$r" 2>/dev/null)
 [ "$(both_running)" = yes ] && { [ "$ab" = provider-error ] || [ -z "$ab" ]; } \
   && rec reconcile.provider-failure PASS "provider list fails -> aborted=${ab:-error exit}; nothing touched" "$E2E_RUN_DIR/reconcile-provider-fail.json" \
   || rec reconcile.provider-failure FAIL "aborted=$ab sandboxes=$(both_running)" "$E2E_RUN_DIR/reconcile-provider-fail.json"
-r=$(coord reconcile 2>&1); printf '%s\n' "$r" | ev reconcile-orphan.json >/dev/null
+r=$(coord reconcile 2>>"$E2E_RUN_DIR/coord-stderr.log"); printf '%s\n' "$r" | ev reconcile-orphan.json >/dev/null
 cl boat wait "$O_ID" archived --timeout 120 >/dev/null
 os=$(cl boat get "$O_ID" --field state); ss_=$(cl boat get "$S_ID" --field state)
 [ "$os" = archived ] && [[ "$ss_" =~ ^(idle|ready|running)$ ]] \
@@ -80,14 +80,14 @@ os=$(cl boat get "$O_ID" --field state); ss_=$(cl boat get "$S_ID" --field state
 # ---- idle-stop
 rp_in "$S_ID" panels submit --panel "$SHELL_PANEL" --text 'for i in $(seq 1 90); do echo busy $i; sleep 1; done' --yes --json >/dev/null
 sleep 3
-i1=$(coord idle-check 2>&1); i2=$(coord idle-check 2>&1); printf '%s\n%s\n' "$i1" "$i2" | ev idle-busy.json >/dev/null
+i1=$(coord idle-check 2>>"$E2E_RUN_DIR/coord-stderr.log"); i2=$(coord idle-check 2>>"$E2E_RUN_DIR/coord-stderr.log"); printf '%s\n%s\n' "$i1" "$i2" | ev idle-busy.json >/dev/null
 st=$(cl boat get "$S_ID" --field state)
 [[ "$st" =~ ^(idle|ready|running)$ ]] && rec idle-stop.refuses-busy PASS "two idle-checks while the shell prints: Session left running ($st)" "$E2E_RUN_DIR/idle-busy.json" \
   || rec idle-stop.refuses-busy FAIL "Session state after busy idle-checks: $st" "$E2E_RUN_DIR/idle-busy.json"
 log "waiting for the output window (default 120 s) to pass"
 stopped=""; end=$(( $(date +%s) + 420 )); grep -q '"unsupported"' "$E2E_RUN_DIR/idle-busy.json" && end=$(( $(date +%s) + 40 ))
 while [ "$(date +%s)" -lt "$end" ]; do
-  coord idle-check >> "$E2E_RUN_DIR/idle-quiet.jsonl" 2>&1
+  coord idle-check >> "$E2E_RUN_DIR/idle-quiet.jsonl" 2>>"$E2E_RUN_DIR/coord-stderr.log"
   [ "$(cl boat get "$S_ID" --field state)" != running ] && [ "$(cl boat get "$S_ID" --field state)" != idle ] && { stopped=1; break; }
   sleep 30
 done
@@ -103,11 +103,11 @@ else
 fi
 
 # ---- status / wake (CLI), then the HTTP API
-s=$(coord status "$S_HOST" 2>&1); printf '%s\n' "$s" | ev status-asleep.json >/dev/null
+s=$(coord status "$S_HOST" 2>>"$E2E_RUN_DIR/coord-stderr.log"); printf '%s\n' "$s" | ev status-asleep.json >/dev/null
 [ "$(jget 'd.get("status")' <<<"$s")" = asleep ] && [ "$(cl boat get "$S_ID" --field state)" = archived ] \
   && rec status-asleep PASS "status -> asleep, and it did not wake the sandbox" "$E2E_RUN_DIR/status-asleep.json" \
   || rec status-asleep FAIL "status=$(jget 'd.get("status")' <<<"$s") boat=$(cl boat get "$S_ID" --field state)" "$E2E_RUN_DIR/status-asleep.json"
-t0=$(ms_now); w=$(coord wake "$S_HOST" --timeout-ms 120000 2>&1); ws=$(secs_since "$t0"); printf '%s\n' "$w" | ev wake-cli.json >/dev/null
+t0=$(ms_now); w=$(coord wake "$S_HOST" --timeout-ms 120000 2>>"$E2E_RUN_DIR/coord-stderr.log"); ws=$(secs_since "$t0"); printf '%s\n' "$w" | ev wake-cli.json >/dev/null
 h=$(cl remote health "$S_PAIR" --timeout 5)
 [ "$(jget 'd.get("status")' <<<"$w")" = awake ] && [ "$(jget 'd["http"]' <<<"$h")" = 200 ] \
   && rec wake.cli PASS "wake -> awake in ${ws}s; /health 200 right after (readiness=$(jget 'd["body"].get("readiness",{}).get("state")' <<<"$h"))" "$E2E_RUN_DIR/wake-cli.json" "seconds=$ws" \

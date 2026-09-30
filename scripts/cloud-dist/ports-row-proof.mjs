@@ -47,11 +47,30 @@ async function rowShot(page, name) {
 async function liveChangeRoundTrip(page, surface) {
   const row = page.getByRole('region', { name: 'Session ports' }).first();
   if (!env.OPEN_CMD) return;
-  const started = Date.now();
-  sh(env.OPEN_CMD);
+  // The CLI runs in the background: the chip must appear while or after it runs, and on the web surface
+  // no runpane:ports:list read may happen in between (then only the pushed runpane:ports:changed explains it).
+  const listReads = [];
+  const onRequest = (request) => { if ((request.postData() ?? '').includes('"runpane:ports:list"')) listReads.push(Date.now()); };
+  page.on('request', onRequest);
+  const cliStarted = Date.now();
+  let cliEnded = 0;
+  const cli = new Promise((resolve) => {
+    const child = spawn('bash', ['-c', env.OPEN_CMD], { stdio: 'ignore' });
+    child.on('exit', (code) => { cliEnded = Date.now(); resolve(code); });
+  });
   const chip = row.getByRole('button', { name: new RegExp(`^Open ${liveName} \\(`) });
-  const shown = await chip.waitFor({ timeout: 20_000 }).then(() => true, () => false);
-  check(`${surface}: out-of-band port open appears live`, shown, `${Date.now() - started} ms after the CLI returned`);
+  const shown = await chip.waitFor({ timeout: 90_000 }).then(() => true, () => false);
+  const shownAt = Date.now();
+  const cliCode = await cli;
+  page.off('request', onRequest);
+  // The port exists only once the daemon's open finishes (just before the CLI exits); only a list read
+  // after that could have shown it. A chip with no such read came from the pushed event.
+  const commitFloor = Math.min(cliEnded, shownAt) - 1500;
+  const readsBefore = listReads.filter((at) => at >= commitFloor && at <= shownAt).length;
+  const pushed = surface === 'web' ? readsBefore === 0 : null;
+  check(`${surface}: out-of-band port open appears live`, shown && cliCode === 0 && pushed !== false,
+    `chip ${shownAt - cliStarted} ms after the CLI started; the CLI exited ${cliEnded - cliStarted} ms after start (code ${cliCode})` +
+    (surface === 'web' ? `; runpane:ports:list reads after the open committed: ${readsBefore} of ${listReads.length} during the wait (0 = the push event delivered it)` : ''));
   await rowShot(page, `${surface}-live-open`);
   if (!shown) return;
   await row.getByRole('button', { name: `Close ${liveName}` }).click();

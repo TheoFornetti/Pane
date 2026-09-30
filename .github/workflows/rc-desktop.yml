@@ -148,7 +148,8 @@ jobs:
   macos:
     name: macOS arm64 + x64
     needs: meta
-    if: inputs.macos != false
+    # inputs.macos is null on push, and Actions compares null == false.
+    if: github.event_name != 'workflow_dispatch' || inputs.macos
     runs-on: macos-latest
     timeout-minutes: 60
     steps:

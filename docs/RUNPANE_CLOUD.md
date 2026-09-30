@@ -143,14 +143,20 @@ you get an ordinary remote Pane (agent panels, terminals, diffs). One remote hos
 >    `runpane cloud sync`.
 >
 > Or leave the desktop running and import through the app itself, which is safe: `runpane cloud new
-> --no-import ...`, then `runpane cloud pair <host>` and paste the code into `Settings > Remote Pane >
-> Import Remote Connection`.
+> --no-import ...`, then `runpane cloud pair <host>` and paste the code into `Settings > Remote Access >
+> Connections > Connection code`, then click **Import & Connect**.
 >
 > The fix (commit `cd190659`: the desktop now picks up outside edits live and never writes over them) is in
-> fork builds from `rc/integration` at `080d3828` or later. Those builds ship the desktop as a **Linux `.deb`
-> only**, so macOS and Windows desktops need the workaround until an upstream release has it. A fork `.deb`
-> desktop shows a "Software Update" prompt for the upstream release on launch. Dismiss it: updating would
-> replace the fork build.
+> fork builds from `rc/integration` at `080d3828` or later. The cloud prerelease ships the desktop as a
+> **Linux `.deb` only**, so an installed macOS or Windows desktop needs the workaround until an upstream
+> release has it. A fork `.deb` desktop shows a "Software Update" prompt for the upstream release on launch.
+> Dismiss it: updating would replace the fork build.
+>
+> To try the fix on Windows or macOS without touching an installed Pane, use a **side-by-side test build**:
+> the fork prerelease `rc-desktop-<sha8>` from `.github/workflows/rc-desktop.yml` (unsigned zips). It keeps
+> its data in `~/.pane_cloudtest`, runs next to the installed Pane, registers nothing machine-wide (no login
+> item, `pane://` handler, agent MCP servers or skills) and never offers updates. Remove it by deleting its
+> folder and `~/.pane_cloudtest`.
 
 If Pane desktop was not installed yet, or you use another data directory, add every cloud Session later
 with:
@@ -160,8 +166,8 @@ runpane cloud sync                           # into ~/.pane
 runpane cloud sync --desktop-dir <pane dir>  # somewhere else
 ```
 
-For a desktop on another machine, print the pairing code and paste it into `Settings > Remote Pane >
-Import Remote Connection` there:
+For a desktop on another machine, print the pairing code and paste it into `Settings > Remote Access >
+Connections > Connection code` there, then click **Import & Connect**:
 
 ```bash
 runpane cloud pair "api work"     # prints the pane-remote:// code; treat it like a password

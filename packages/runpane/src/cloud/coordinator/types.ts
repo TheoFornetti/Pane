@@ -25,7 +25,7 @@ export interface CoordinatorProvider {
   /** Returns state 'missing' when the provider no longer knows the sandbox. */
   get(sandboxId: string): Promise<ProviderSandbox>;
   stop(sandboxId: string): Promise<void>;
-  resume(sandboxId: string, idempotencyKey: string): Promise<void>;
+  resume(sandboxId: string): Promise<void>;
 }
 
 export interface DirectoryEntry {
@@ -51,13 +51,19 @@ export interface SessionDirectory {
 
 export type DaemonHealth =
   | { reachable: false; error: string }
-  | { reachable: true; ready: boolean; version: string | null };
+  | { reachable: true; ready: boolean; version: string | null; detail: string | null };
 
 export type SafeToStopAnswer =
   | { kind: 'safe'; checkpointed: boolean }
   | { kind: 'unsafe'; reasons: string[] }
   | { kind: 'unsupported'; error: string }
   | { kind: 'error'; error: string };
+
+export interface UpgradeTarget {
+  version: string;
+  url: string;
+  sha256: string;
+}
 
 export type UpgradeAnswer =
   | { kind: 'started' }
@@ -67,7 +73,7 @@ export type UpgradeAnswer =
 export interface DaemonProbe {
   health(baseUrl: string): Promise<DaemonHealth>;
   safeToStop(baseUrl: string, token: string): Promise<SafeToStopAnswer>;
-  upgrade(baseUrl: string, token: string, version: string, debUrl: string | null): Promise<UpgradeAnswer>;
+  upgrade(baseUrl: string, token: string, target: UpgradeTarget): Promise<UpgradeAnswer>;
 }
 
 export type AlertLevel = 'info' | 'warn' | 'error';

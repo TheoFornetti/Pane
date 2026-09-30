@@ -63,6 +63,7 @@ export function buildCoordinator(
     ...scope,
     pinnedVersion: config.pinnedVersion,
     pinnedDebUrl: config.pinnedDebUrl,
+    pinnedDebSha256: config.pinnedDebSha256,
     defaultTimeoutMs: config.wake.defaultTimeoutMs,
     maxTimeoutMs: config.wake.maxTimeoutMs,
     daemonDownGraceMs: config.wake.daemonDownGraceSeconds * 1000,

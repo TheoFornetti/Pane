@@ -118,17 +118,17 @@ export class BoatCoordinatorProvider implements CoordinatorProvider {
     await this.request('POST', `/sandboxes/${encodeURIComponent(sandboxId)}/stop`, {});
   }
 
-  async resume(sandboxId: string, idempotencyKey: string): Promise<void> {
-    await this.request('POST', `/sandboxes/${encodeURIComponent(sandboxId)}/resume`, {}, idempotencyKey);
+  async resume(sandboxId: string): Promise<void> {
+    // boat's resume takes no Idempotency-Key; the wake service single-flights resumes and treats 409 as "already resuming".
+    await this.request('POST', `/sandboxes/${encodeURIComponent(sandboxId)}/resume`, {});
   }
 
-  private async request(method: string, pathAndQuery: string, body?: object, idempotencyKey?: string): Promise<unknown> {
+  private async request(method: string, pathAndQuery: string, body?: object): Promise<unknown> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.options.apiKey}`,
       Accept: 'application/json',
     };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
     const response = await this.fetchImpl(`${this.options.apiBase}${pathAndQuery}`, {
       method,
       headers,

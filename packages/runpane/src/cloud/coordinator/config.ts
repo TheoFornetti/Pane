@@ -21,6 +21,7 @@ export interface CoordinatorConfig {
   ignoreSandboxIds: string[];
   pinnedVersion: string | null;
   pinnedDebUrl: string | null;
+  pinnedDebSha256: string | null;
   idleStop: {
     enabled: boolean;
     intervalSeconds: number;
@@ -73,6 +74,7 @@ const rawConfigSchema = boundary.object({
   ignoreSandboxIds: boundary.optional(boundary.array(boundary.string)),
   pinnedVersion: optionalNullableString,
   pinnedDebUrl: optionalNullableString,
+  pinnedDebSha256: optionalNullableString,
   idleStop: boundary.optional(boundary.object({
     enabled: optionalBoolean,
     intervalSeconds: optionalNumber,
@@ -138,6 +140,7 @@ export function parseCoordinatorConfig(value: unknown, home = defaultCoordinator
     ignoreSandboxIds: raw.ignoreSandboxIds ?? [],
     pinnedVersion: raw.pinnedVersion ?? null,
     pinnedDebUrl: raw.pinnedDebUrl ?? null,
+    pinnedDebSha256: raw.pinnedDebSha256 ?? null,
     idleStop: {
       enabled: raw.idleStop?.enabled ?? true,
       intervalSeconds: positive(raw.idleStop?.intervalSeconds, 300, 'idleStop.intervalSeconds'),

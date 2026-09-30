@@ -10,6 +10,7 @@ import type {
   SafeToStopAnswer,
   SessionDirectory,
   UpgradeAnswer,
+  UpgradeTarget,
 } from '../types';
 
 export class FakeClock implements Clock {
@@ -108,8 +109,8 @@ export class FakeProvider implements CoordinatorProvider {
     }
   }
 
-  async resume(sandboxId: string, idempotencyKey: string): Promise<void> {
-    this.calls.push(`resume ${sandboxId} ${idempotencyKey}`);
+  async resume(sandboxId: string): Promise<void> {
+    this.calls.push(`resume ${sandboxId}`);
     const current = this.sandboxes.get(sandboxId);
     if (current) {
       current.state = 'starting';
@@ -133,7 +134,7 @@ export class FakeProbe implements DaemonProbe {
 
   async health(baseUrl: string): Promise<DaemonHealth> {
     this.calls.push(`health ${baseUrl}`);
-    return this.healthByUrl.get(baseUrl) ?? { reachable: true, ready: true, version: '1.0.0' };
+    return this.healthByUrl.get(baseUrl) ?? { reachable: true, ready: true, version: '1.0.0', detail: null };
   }
 
   async safeToStop(baseUrl: string, token: string): Promise<SafeToStopAnswer> {
@@ -141,8 +142,8 @@ export class FakeProbe implements DaemonProbe {
     return this.safeByUrl.get(baseUrl) ?? { kind: 'safe', checkpointed: true };
   }
 
-  async upgrade(baseUrl: string, _token: string, version: string): Promise<UpgradeAnswer> {
-    this.calls.push(`upgrade ${baseUrl} ${version}`);
+  async upgrade(baseUrl: string, _token: string, target: UpgradeTarget): Promise<UpgradeAnswer> {
+    this.calls.push(`upgrade ${baseUrl} ${target.version} ${target.sha256}`);
     if (this.upgradeAnswer.kind === 'started' && this.healthAfterUpgrade) {
       this.healthByUrl.set(baseUrl, this.healthAfterUpgrade);
     }

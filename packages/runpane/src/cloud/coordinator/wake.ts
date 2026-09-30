@@ -49,6 +49,7 @@ export interface WakeOptions {
   ignoreSandboxIds: readonly string[];
   pinnedVersion: string | null;
   pinnedDebUrl: string | null;
+  pinnedDebSha256: string | null;
   defaultTimeoutMs: number;
   maxTimeoutMs: number;
   daemonDownGraceMs: number;
@@ -167,11 +168,10 @@ export class WakeService {
       });
       return { ok: false, code: verdict.code, message: verdict.message };
     }
-    const minute = Math.floor(this.deps.clock.now() / 60_000);
     // Idle-stop may hold the sandbox for a few seconds; wait for it rather than racing its stop call.
     for (let attempt = 0; attempt < 120; attempt += 1) {
       const outcome = await this.deps.activity.exclusive(entry.sandboxId, async () => {
-        await this.deps.provider.resume(entry.sandboxId, `rpc-wake-${entry.sandboxId}-${minute}`);
+        await this.deps.provider.resume(entry.sandboxId);
       }).catch((error: unknown) => ({ ran: true as const, error }));
       if (!outcome.ran) {
         await this.deps.clock.sleep(500);
@@ -210,20 +210,17 @@ export class WakeService {
   private async applyPinnedVersion(entry: DirectoryEntry, report: CloudHostReport, deadline: number): Promise<CloudHostReport> {
     const pinned = entry.pinnedVersion ?? this.options.pinnedVersion;
     if (!pinned || report.version === pinned) return report;
-    if (!entry.coordinatorToken) {
-      report.detail = `version-mismatch: running ${report.version ?? 'unknown'}, pinned ${pinned} (no coordinator token)`;
+    const { pinnedDebUrl: url, pinnedDebSha256: sha256 } = this.options;
+    if (!entry.coordinatorToken || !url || !sha256) {
+      report.detail = `version-mismatch: running ${report.version ?? 'unknown'}, pinned ${pinned} `
+        + `(${entry.coordinatorToken ? 'no pinnedDebUrl/pinnedDebSha256 configured' : 'no coordinator token'})`;
+      this.alertVersionMismatch(entry, report.detail);
       return report;
     }
-    const answer = await this.deps.probe.upgrade(entry.baseUrl, entry.coordinatorToken, pinned, this.options.pinnedDebUrl);
+    const answer = await this.deps.probe.upgrade(entry.baseUrl, entry.coordinatorToken, { version: pinned, url, sha256 });
     if (answer.kind !== 'started') {
       report.detail = `version-mismatch: running ${report.version ?? 'unknown'}, pinned ${pinned}; upgrade ${answer.kind}: ${answer.error}`;
-      this.deps.alerts.emit({
-        level: 'warn',
-        code: 'version-mismatch',
-        message: `${entry.label}: ${report.detail}`,
-        sandboxId: entry.sandboxId,
-        sessionId: entry.sessionId,
-      });
+      this.alertVersionMismatch(entry, report.detail);
       return report;
     }
     const upgradeDeadline = Math.max(deadline, this.deps.clock.now() + this.options.upgradeTimeoutMs);
@@ -237,6 +234,16 @@ export class WakeService {
     }
     const status: CloudHostStatus = health.reachable ? 'waking' : 'daemon-down';
     return this.report(entry, status, health.reachable ? health.version : null, `upgrade to ${pinned} did not finish in time`);
+  }
+
+  private alertVersionMismatch(entry: DirectoryEntry, detail: string): void {
+    this.deps.alerts.emit({
+      level: 'warn',
+      code: 'version-mismatch',
+      message: `${entry.label}: ${detail}`,
+      sandboxId: entry.sandboxId,
+      sessionId: entry.sessionId,
+    });
   }
 
   private async classify(entry: DirectoryEntry, sandbox: ProviderSandbox): Promise<CloudHostReport> {
@@ -253,7 +260,7 @@ export class WakeService {
         break;
     }
     const health = await this.deps.probe.health(entry.baseUrl);
-    if (health.reachable && health.ready) return this.report(entry, 'awake', health.version, 'daemon ready');
+    if (health.reachable && health.ready) return this.report(entry, 'awake', health.version, health.detail ?? 'daemon ready');
     const sinceUp = this.deps.activity.msSinceWoken(entry.sandboxId)
       ?? (sandbox.updatedAt ? this.deps.clock.now() - Date.parse(sandbox.updatedAt) : null);
     const grace = health.reachable ? this.options.daemonDownGraceMs * 2 : this.options.daemonDownGraceMs;

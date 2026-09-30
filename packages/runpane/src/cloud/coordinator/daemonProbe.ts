@@ -1,5 +1,5 @@
 import { boundary, decodeBoundary } from '../../boundaryDecoder';
-import type { DaemonHealth, DaemonProbe, SafeToStopAnswer, UpgradeAnswer } from './types';
+import type { DaemonHealth, DaemonProbe, SafeToStopAnswer, UpgradeAnswer, UpgradeTarget } from './types';
 
 // Talks to a cloud Session's Pane daemon over the tailnet: GET /health (unauthenticated) and
 // POST /invoke with the coordinator's own paired-client bearer token.
@@ -13,7 +13,10 @@ const healthSchema = boundary.object({
   ready: boundary.optional(boundary.boolean),
   composersReady: boundary.optional(boundary.boolean),
   version: boundary.optional(boundary.nullable(boundary.string)),
-  readiness: boundary.optional(boundary.nullable(boundary.jsonObject)),
+  readiness: boundary.optional(boundary.nullable(boundary.object({
+    state: boundary.optional(boundary.string),
+    ready: boundary.optional(boundary.boolean),
+  }))),
 });
 
 const invokeSchema = boundary.object({
@@ -25,43 +28,42 @@ const invokeSchema = boundary.object({
   })),
 });
 
-const reasonSchema = boundary.union(
-  boundary.string,
-  boundary.object({
-    code: boundary.optional(boundary.string),
-    detail: boundary.optional(boundary.string),
-    message: boundary.optional(boundary.string),
-  }),
-);
-
+// m2-safestop-health's result: blockers name the refusing condition; `flush` is non-null once the
+// daemon has checkpointed SQLite's WAL and fsynced (which only happens when safe).
 const safeToStopResultSchema = boundary.object({
   safe: boundary.boolean,
-  reasons: boundary.optional(boundary.array(reasonSchema)),
-  checkpointed: boundary.optional(boundary.boolean),
+  blockers: boundary.optional(boundary.array(boundary.object({
+    condition: boundary.optional(boundary.string),
+    message: boundary.optional(boundary.string),
+  }))),
+  flush: boundary.optional(boundary.nullable(boundary.jsonObject)),
 });
 
 /**
- * Readiness means "agents are usable", not just "the HTTP server answers". Accepts the /health shapes
- * the daemon may report: an explicit `ready` flag, `composersReady`, or a `readiness.ready` object;
- * a daemon without any of these (pre-M2 builds) is ready when `status` is "ready".
+ * Readiness means "agents are usable", not just "the HTTP server answers". M2 daemons report
+ * `readiness.state` ("starting" | "ready" | "degraded"; degraded = awake, but some agent panels did
+ * not come back). Their `status` stays "ready" for old clients, so it only counts for pre-M2 daemons.
  */
 export function decodeHealth(body: unknown): DaemonHealth {
   const health = decodeBoundary(body, healthSchema);
-  const readinessReady = health.readiness && typeof health.readiness.ready === 'boolean'
-    ? health.readiness.ready
-    : undefined;
+  const version = health.version ?? null;
+  const state = health.readiness?.state;
+  if (state !== undefined) {
+    return { reachable: true, ready: state !== 'starting', version, detail: state === 'ready' ? null : `readiness ${state}` };
+  }
+  if (health.readiness?.ready !== undefined) {
+    return { reachable: true, ready: health.readiness.ready, version, detail: null };
+  }
   const statusReady = health.status === undefined ? health.ok === true : health.status === 'ready';
-  const ready = health.ready ?? readinessReady ?? (statusReady && (health.composersReady ?? true));
-  return { reachable: true, ready, version: health.version ?? null };
+  const ready = health.ready ?? (statusReady && (health.composersReady ?? true));
+  return { reachable: true, ready, version, detail: 'daemon reports no readiness (pre-M2 build)' };
 }
 
 export function decodeSafeToStop(result: unknown): SafeToStopAnswer {
   const decoded = decodeBoundary(result, safeToStopResultSchema);
-  if (decoded.safe) return { kind: 'safe', checkpointed: decoded.checkpointed ?? false };
-  const reasons = (decoded.reasons ?? []).map((reason) => (
-    typeof reason === 'string'
-      ? reason
-      : [reason.code, reason.detail ?? reason.message].filter(Boolean).join(': ')
+  if (decoded.safe) return { kind: 'safe', checkpointed: decoded.flush !== undefined && decoded.flush !== null };
+  const reasons = (decoded.blockers ?? []).map((blocker) => (
+    [blocker.condition, blocker.message].filter(Boolean).join(': ')
   ));
   return { kind: 'unsafe', reasons: reasons.length > 0 ? reasons : ['daemon reported unsafe without reasons'] };
 }
@@ -102,8 +104,8 @@ export class HttpDaemonProbe implements DaemonProbe {
     }
   }
 
-  async upgrade(baseUrl: string, token: string, version: string, debUrl: string | null): Promise<UpgradeAnswer> {
-    const answer = await this.invoke(baseUrl, token, UPGRADE_CHANNEL, [{ version, debUrl }]);
+  async upgrade(baseUrl: string, token: string, target: UpgradeTarget): Promise<UpgradeAnswer> {
+    const answer = await this.invoke(baseUrl, token, UPGRADE_CHANNEL, [{ ...target }]);
     return answer.kind === 'ok' ? { kind: 'started' } : answer;
   }
 

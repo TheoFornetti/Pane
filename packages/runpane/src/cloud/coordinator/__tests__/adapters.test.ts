@@ -24,7 +24,7 @@ describe('boat provider', () => {
     assert.equal(mapBoatState('cancelled'), 'failed');
   });
 
-  it('pages through the list, sends the bearer key and idempotency key, and maps 404 to missing', async () => {
+  it('pages through the list, sends the bearer key, and maps 404 to missing', async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const provider = new BoatCoordinatorProvider({
       apiBase: 'https://boat.test/api/v1',
@@ -44,20 +44,22 @@ describe('boat provider', () => {
     const list = await provider.list();
     assert.deepEqual(list.map((item) => `${item.id}:${item.state}`), ['bx_a:running', 'bx_b:stopped']);
     assert.equal((await provider.get('bx_gone')).state, 'missing');
-    await provider.resume('bx_b', 'idem-1');
+    await provider.resume('bx_b');
     const resume = requests.at(-1);
     assert.ok(resume);
     assert.equal(resume.url, 'https://boat.test/api/v1/sandboxes/bx_b/resume');
     const headers = new Headers(resume.init.headers);
     assert.equal(headers.get('authorization'), 'Bearer boat_key');
-    assert.equal(headers.get('idempotency-key'), 'idem-1');
     assert.equal('delete' in provider, false);
   });
 });
 
 describe('daemon probe decoding', () => {
   it('treats today\'s /health as ready and honours explicit readiness fields', () => {
-    assert.deepEqual(decodeHealth({ ok: true, status: 'ready', transport: 'http+sse' }), { reachable: true, ready: true, version: null });
+    assert.equal(readyOf(decodeHealth({ ok: true, status: 'ready', transport: 'http+sse' })), true);
+    assert.equal(readyOf(decodeHealth({ ok: true, status: 'ready', version: '2.5.0', readiness: { state: 'starting' } })), false);
+    assert.equal(readyOf(decodeHealth({ ok: true, status: 'ready', version: '2.5.0', readiness: { state: 'degraded' } })), true);
+    assert.equal(readyOf(decodeHealth({ ok: true, status: 'ready', readiness: { state: 'ready', agents: { expected: 1 } } })), true);
     assert.equal(readyOf(decodeHealth({ ok: true, status: 'ready', version: '2.5.0', ready: false })), false);
     assert.equal(readyOf(decodeHealth({ ok: true, status: 'ready', composersReady: false })), false);
     assert.equal(readyOf(decodeHealth({ ok: true, status: 'starting' })), false);
@@ -65,9 +67,13 @@ describe('daemon probe decoding', () => {
   });
 
   it('decodes safe-to-stop answers', () => {
-    assert.deepEqual(decodeSafeToStop({ safe: true, checkpointed: true }), { kind: 'safe', checkpointed: true });
     assert.deepEqual(
-      decodeSafeToStop({ safe: false, reasons: [{ code: 'agent-working', detail: 'panel p1' }, 'lock-held'] }),
+      decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: { walCheckpoint: null, fsynced: [], syncedFilesystem: true, durationMs: 3 } }),
+      { kind: 'safe', checkpointed: true },
+    );
+    assert.deepEqual(decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: null }), { kind: 'safe', checkpointed: false });
+    assert.deepEqual(
+      decodeSafeToStop({ ok: true, safe: false, blockers: [{ condition: 'agent-working', message: 'panel p1' }, { condition: 'lock-held' }], flush: null }),
       { kind: 'unsafe', reasons: ['agent-working: panel p1', 'lock-held'] },
     );
   });

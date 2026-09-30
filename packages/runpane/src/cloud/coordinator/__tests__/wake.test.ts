@@ -24,6 +24,7 @@ function setup(sandboxes: ProviderSandbox[], options: Partial<WakeOptions> = {},
     ignoreSandboxIds: [],
     pinnedVersion: null,
     pinnedDebUrl: null,
+    pinnedDebSha256: null,
     defaultTimeoutMs: 90_000,
     maxTimeoutMs: 300_000,
     daemonDownGraceMs: 60_000,
@@ -83,7 +84,7 @@ describe('WakeService.wake', () => {
     const result = await wake.wake('s1', { wait: true });
     assert.equal(status(result), 'awake');
     assert.equal(provider.mutations().length, 1);
-    assert.match(provider.mutations()[0], /^resume bx_a rpc-wake-bx_a-/);
+    assert.deepEqual(provider.mutations(), ['resume bx_a']);
   });
 
   it('returns waking immediately without wait', async () => {
@@ -116,7 +117,7 @@ describe('WakeService.wake', () => {
 
   it('times out as waking when readiness never comes', async () => {
     const { wake, probe } = setup([sandbox('bx_a', 'stopped')]);
-    probe.healthByUrl.set(URL_A, { reachable: true, ready: false, version: '1.0.0' });
+    probe.healthByUrl.set(URL_A, { reachable: true, ready: false, version: '1.0.0', detail: null });
     const result = await wake.wake('s1', { wait: true, timeoutMs: 10_000 });
     assert.equal(status(result), 'waking');
     assert.ok(result.ok && /timed out/.test(result.detail));
@@ -143,17 +144,17 @@ describe('WakeService.wake', () => {
   });
 
   it('upgrades to the pinned version after wake when the daemon supports it', async () => {
-    const { wake, probe } = setup([sandbox('bx_a', 'stopped')], { pinnedVersion: '2.0.0' });
+    const { wake, probe } = setup([sandbox('bx_a', 'stopped')], { pinnedVersion: '2.0.0', pinnedDebUrl: 'https://x/p.deb', pinnedDebSha256: 'abc' });
     probe.upgradeAnswer = { kind: 'started' };
-    probe.healthAfterUpgrade = { reachable: true, ready: true, version: '2.0.0' };
+    probe.healthAfterUpgrade = { reachable: true, ready: true, version: '2.0.0', detail: null };
     const result = await wake.wake('s1', { wait: true });
     assert.equal(status(result), 'awake');
     assert.ok(result.ok && result.version === '2.0.0');
-    assert.ok(probe.calls.includes(`upgrade ${URL_A} 2.0.0`));
+    assert.ok(probe.calls.includes(`upgrade ${URL_A} 2.0.0 abc`));
   });
 
   it('reports version-mismatch but still wakes when the daemon has no upgrade hook', async () => {
-    const { wake, alerts } = setup([sandbox('bx_a', 'stopped')], { pinnedVersion: '2.0.0' });
+    const { wake, alerts } = setup([sandbox('bx_a', 'stopped')], { pinnedVersion: '2.0.0', pinnedDebUrl: 'https://x/p.deb', pinnedDebSha256: 'abc' });
     const result = await wake.wake('s1', { wait: true });
     assert.equal(status(result), 'awake');
     assert.ok(result.ok && /version-mismatch/.test(result.detail));

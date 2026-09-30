@@ -51,7 +51,7 @@ describe('IdleStopper', () => {
       (probe: FakeProbe) => probe.safeByUrl.set('https://rp-s1.tail.ts.net', { kind: 'error', error: 'timeout' }),
       (probe: FakeProbe) => probe.safeByUrl.set('https://rp-s1.tail.ts.net', { kind: 'unsupported', error: 'ERR_UNKNOWN_CHANNEL' }),
       (probe: FakeProbe) => probe.healthByUrl.set('https://rp-s1.tail.ts.net', { reachable: false, error: 'ECONNREFUSED' }),
-      (probe: FakeProbe) => probe.healthByUrl.set('https://rp-s1.tail.ts.net', { reachable: true, ready: false, version: null }),
+      (probe: FakeProbe) => probe.healthByUrl.set('https://rp-s1.tail.ts.net', { reachable: true, ready: false, version: null, detail: null }),
     ]) {
       const { idle, provider, probe } = setup({ requiredConsecutiveSafe: 1 });
       setupProbe(probe);

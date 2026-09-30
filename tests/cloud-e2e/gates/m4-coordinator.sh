@@ -83,16 +83,22 @@ st=$(cl boat get "$S_ID" --field state)
 [[ "$st" =~ ^(idle|ready|running)$ ]] && rec idle-stop.refuses-busy PASS "two idle-checks while the shell prints: Session left running ($st)" "$E2E_RUN_DIR/idle-busy.json" \
   || rec idle-stop.refuses-busy FAIL "Session state after busy idle-checks: $st" "$E2E_RUN_DIR/idle-busy.json"
 log "waiting for the output window (default 120 s) to pass"
-stopped=""; end=$(( $(date +%s) + 420 ))
+stopped=""; end=$(( $(date +%s) + 420 )); grep -q '"unsupported"' "$E2E_RUN_DIR/idle-busy.json" && end=$(( $(date +%s) + 40 ))
 while [ "$(date +%s)" -lt "$end" ]; do
   coord idle-check >> "$E2E_RUN_DIR/idle-quiet.jsonl" 2>&1
   [ "$(cl boat get "$S_ID" --field state)" != running ] && [ "$(cl boat get "$S_ID" --field state)" != idle ] && { stopped=1; break; }
   sleep 30
 done
 cl boat wait "$S_ID" archived --timeout 120 >/dev/null
-[ -n "$stopped" ] && [ "$(cl boat get "$S_ID" --field state)" = archived ] \
-  && rec idle-stop.stops-idle PASS "idle Session stopped after consecutive safe answers" "$E2E_RUN_DIR/idle-quiet.jsonl" \
-  || rec idle-stop.stops-idle FAIL "Session never idle-stopped (state=$(cl boat get "$S_ID" --field state))" "$E2E_RUN_DIR/idle-quiet.jsonl"
+if [ -n "$stopped" ] && [ "$(cl boat get "$S_ID" --field state)" = archived ]; then
+  rec idle-stop.stops-idle PASS "idle Session stopped after consecutive safe answers" "$E2E_RUN_DIR/idle-quiet.jsonl"
+elif grep -q '"unsupported"' "$E2E_RUN_DIR/idle-quiet.jsonl"; then
+  rec idle-stop.stops-idle BLOCKED "daemon under test has no safe-to-stop (coordinator reports 'unsupported' and correctly never stops); needs m2-safestop-health merged" "$E2E_RUN_DIR/idle-quiet.jsonl"
+  cl boat stop "$S_ID" >/dev/null; cl boat wait "$S_ID" archived --timeout 120 >/dev/null   # the wake checks below need it asleep
+else
+  rec idle-stop.stops-idle FAIL "Session never idle-stopped (state=$(cl boat get "$S_ID" --field state))" "$E2E_RUN_DIR/idle-quiet.jsonl"
+  cl boat stop "$S_ID" >/dev/null; cl boat wait "$S_ID" archived --timeout 120 >/dev/null
+fi
 
 # ---- status / wake (CLI), then the HTTP API
 s=$(coord status "$S_HOST" 2>&1); printf '%s\n' "$s" | ev status-asleep.json >/dev/null

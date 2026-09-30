@@ -5,8 +5,8 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { boundary } from '../boundaryDecoder';
-import { invokeDaemon, PaneDaemonClientError } from '../daemonClient';
+import { boundary, decodeBoundary, type JsonValue } from '../boundaryDecoder';
+import { invokeDaemon } from '../daemonClient';
 import { resolveDaemonTarget, type DaemonTarget } from './hostDirectory';
 import {
   nodeHttpTransport,
@@ -14,7 +14,7 @@ import {
   type RemoteHttpRequest,
   type RemoteHttpResponse,
 } from './remoteDaemonClient';
-import { configureDaemonTarget, invokeRemote, resetDaemonTarget, RemoteTargetError } from './target';
+import { configureDaemonTarget, invokeRemote, resetDaemonTarget } from './target';
 
 const B_URL = 'https://rp-bbbbbbbb.tail.ts.net';
 const COORD_URL = 'http://rp-coord.tail.ts.net:47300';
@@ -39,7 +39,7 @@ interface FakeHost {
   transport: (request: RemoteHttpRequest) => Promise<RemoteHttpResponse>;
   calls: RemoteHttpRequest[];
   /** /invoke requests whose connection opened (the host saw them). */
-  delivered: Array<{ channel: string; args: unknown[] }>;
+  delivered: Array<{ channel: string; args: JsonValue[] }>;
 }
 
 /** A cloud host that is asleep until the coordinator wakes it. */
@@ -62,7 +62,7 @@ function sleepingCloudHost(options: { wakeStatus?: string; failConnectsAfterWake
       if (awake) connectFailuresLeft -= 1;
       throw new RemoteConnectError('connect ETIMEDOUT', 'ETIMEDOUT');
     }
-    const body = JSON.parse(request.body ?? '{}') as { channel: string; args: unknown[] };
+    const body = decodeBoundary(JSON.parse(request.body ?? '{}'), invokeBodySchema);
     delivered.push(body);
     if (body.channel === 'runpane:panels:list') {
       return { status: 200, body: JSON.stringify({ ok: true, result: { ok: true, paneId: 'p', panels: [{ id: 'orch-1', title: 'Claude' }] } }) };
@@ -70,6 +70,14 @@ function sleepingCloudHost(options: { wakeStatus?: string; failConnectsAfterWake
     return { status: 200, body: JSON.stringify({ ok: true, result: { ok: true, echoed: body.args } }) };
   };
   return { transport, calls, delivered };
+}
+
+const invokeBodySchema = boundary.object({ channel: boundary.string, args: boundary.array(boundary.json) });
+const submitBodySchema = boundary.object({ args: boundary.array(boundary.object({ idempotencyKey: boundary.string })) });
+
+function listeningAddress(server: http.Server): AddressInfo {
+  // SAFETY: every server here listens on 127.0.0.1:<port>, which reports an AddressInfo, never a pipe path.
+  return server.address() as AddressInfo;
 }
 
 const fast = { timeoutMs: 5_000, wakeWaitMs: 5_000, resendIntervalMs: 1, retryDelayMs: 1 };
@@ -88,7 +96,7 @@ describe('invokeRemote wake policy', () => {
     assert.equal(host.delivered.length, 1);
     const invokeKeys = host.calls
       .filter((call) => call.url === `${B_URL}/invoke`)
-      .map((call) => (JSON.parse(call.body ?? '{}') as { args: Array<{ idempotencyKey: string }> }).args[0]!.idempotencyKey);
+      .map((call) => decodeBoundary(JSON.parse(call.body ?? '{}'), submitBodySchema).args[0]!.idempotencyKey);
     // First attempt + 2 failed resends + the delivered one, all the same key.
     assert.equal(invokeKeys.length, 4);
     assert.equal(new Set(invokeKeys).size, 1);
@@ -109,7 +117,7 @@ describe('invokeRemote wake policy', () => {
       const host = sleepingCloudHost();
       await assert.rejects(
         invokeRemote(cloudTarget(), channel, [{}], { ...fast, transport: host.transport }),
-        (error: unknown) => error instanceof RemoteTargetError && error.code === 'ERR_RUNPANE_HOST_ASLEEP' && /runpane cloud wake/.test(error.message),
+        { name: 'RemoteTargetError', code: 'ERR_RUNPANE_HOST_ASLEEP', message: /runpane cloud wake/ },
       );
       assert.equal(host.calls.some((call) => call.url.endsWith('/cloud/wake')), false, channel);
       assert.equal(host.calls.filter((call) => call.url === `${COORD_URL}/cloud/status?host=bbbbbbbbbb`).length, 1, channel);
@@ -122,7 +130,7 @@ describe('invokeRemote wake policy', () => {
       const host = sleepingCloudHost({ wakeStatus: status });
       await assert.rejects(
         invokeRemote(cloudTarget(), 'runpane:panels:submit', [{ panelId: 'x', input: 'hi' }], { ...fast, transport: host.transport }),
-        (error: unknown) => error instanceof RemoteTargetError && error.code === `ERR_RUNPANE_HOST_${status.toUpperCase().replace('-', '_')}`,
+        { name: 'RemoteTargetError', code: `ERR_RUNPANE_HOST_${status.toUpperCase().replace('-', '_')}` },
       );
       assert.equal(host.delivered.length, 0);
     }
@@ -137,7 +145,7 @@ describe('invokeRemote wake policy', () => {
     };
     await assert.rejects(
       invokeRemote(cloudTarget(), 'runpane:panels:submit', [{ panelId: 'x', input: 'hi' }], { ...fast, transport }),
-      (error: unknown) => error instanceof RemoteTargetError && error.code === 'ERR_RUNPANE_REMOTE_UNCONFIRMED',
+      { name: 'RemoteTargetError', code: 'ERR_RUNPANE_REMOTE_UNCONFIRMED' },
     );
     assert.equal(invokes, 1);
   });
@@ -161,7 +169,7 @@ describe('invokeRemote wake policy', () => {
     });
     await assert.rejects(
       invokeRemote(cloudTarget(), 'runpane:panels:submit', [{ panelId: 'shell', input: 'ls' }], { ...fast, transport }),
-      (error: unknown) => error instanceof RemoteTargetError && error.code === 'ERR_PEER_PANEL_FORBIDDEN',
+      { name: 'RemoteTargetError', code: 'ERR_PEER_PANEL_FORBIDDEN' },
     );
   });
 
@@ -169,7 +177,7 @@ describe('invokeRemote wake policy', () => {
     const transport = async (): Promise<RemoteHttpResponse> => ({ status: 401, body: JSON.stringify({ ok: false, error: { message: 'Unauthorized' } }) });
     await assert.rejects(
       invokeRemote(cloudTarget(), 'runpane:panels:list', [{}], { ...fast, transport }),
-      (error: unknown) => error instanceof RemoteTargetError && error.code === 'ERR_RUNPANE_REMOTE_AUTH',
+      { name: 'RemoteTargetError', code: 'ERR_RUNPANE_REMOTE_AUTH' },
     );
   });
 
@@ -177,7 +185,7 @@ describe('invokeRemote wake policy', () => {
     const host = sleepingCloudHost();
     await invokeRemote(cloudTarget(), 'runpane:panels:submit', [{ panelId: 'orchestrator', input: 'hi' }], { ...fast, transport: host.transport });
     assert.deepEqual(host.delivered.map((call) => call.channel), ['runpane:panels:list', 'runpane:panels:submit']);
-    assert.equal((host.delivered[1]!.args[0] as { panelId: string }).panelId, 'orch-1');
+    assert.equal(decodeBoundary(host.delivered[1]!.args[0], boundary.object({ panelId: boundary.string })).panelId, 'orch-1');
   });
 
   it('says a plain unreachable host cannot be woken', async () => {
@@ -187,7 +195,7 @@ describe('invokeRemote wake policy', () => {
     const target: DaemonTarget = { host: { id: 'h', label: 'laptop', baseUrl: 'http://127.0.0.1:1', token: 't' }, source: 'test' };
     await assert.rejects(
       invokeRemote(target, 'runpane:panels:submit', [{ panelId: 'x', input: 'hi' }], { ...fast, transport }),
-      (error: unknown) => error instanceof RemoteTargetError && error.code === 'ERR_RUNPANE_HOST_UNREACHABLE',
+      { name: 'RemoteTargetError', code: 'ERR_RUNPANE_HOST_UNREACHABLE' },
     );
   });
 });
@@ -270,13 +278,13 @@ describe('invokeDaemon over HTTP (real sockets)', () => {
       });
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address() as AddressInfo;
+    const { port } = listeningAddress(server);
     try {
       const target: DaemonTarget = { host: { id: 'h', label: 'h', baseUrl: `http://127.0.0.1:${port}`, token: 'sekrit' }, source: 'test' };
       const result = await invokeDaemon('runpane:panels:list', [{ paneId: 'p1' }], boundary.object({ paneId: boundary.string }), { target });
       assert.deepEqual(result, { paneId: 'p1' });
       assert.equal(seen[0]!.auth, 'Bearer sekrit');
-      const body = JSON.parse(seen[0]!.body) as { channel: string; args: unknown[]; runtimeId: string };
+      const body = decodeBoundary(JSON.parse(seen[0]!.body), boundary.object({ channel: boundary.string, args: boundary.array(boundary.json), runtimeId: boundary.string }));
       assert.equal(body.channel, 'runpane:panels:list');
       assert.deepEqual(body.args, [{ paneId: 'p1' }]);
       assert.match(body.runtimeId, /^runpane-cli-[0-9a-f]{16}$/);
@@ -288,12 +296,12 @@ describe('invokeDaemon over HTTP (real sockets)', () => {
   it('maps an unreachable host to a PaneDaemonClientError code', async () => {
     const server = http.createServer();
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address() as AddressInfo;
+    const { port } = listeningAddress(server);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     const target: DaemonTarget = { host: { id: 'h', label: 'gone', baseUrl: `http://127.0.0.1:${port}`, token: 't' }, source: 'test' };
     await assert.rejects(
       invokeDaemon('runpane:panels:list', [{}], boundary.json, { target }),
-      (error: unknown) => error instanceof PaneDaemonClientError && error.code === 'ERR_RUNPANE_HOST_UNREACHABLE',
+      { name: 'PaneDaemonClientError', code: 'ERR_RUNPANE_HOST_UNREACHABLE' },
     );
   });
 });
@@ -302,19 +310,19 @@ describe('nodeHttpTransport', () => {
   it('tells a refused connection apart from one that opened and then broke', async () => {
     const server = http.createServer((request) => request.socket.destroy());
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address() as AddressInfo;
+    const { port } = listeningAddress(server);
     const base = { method: 'POST' as const, headers: {}, body: '{}', connectTimeoutMs: 2_000, timeoutMs: 2_000 };
     try {
       await assert.rejects(
         nodeHttpTransport({ ...base, url: `http://127.0.0.1:${port}/invoke` }),
-        (error: unknown) => error instanceof Error && !(error instanceof RemoteConnectError),
+        { name: 'Error', message: /socket hang up/ },
       );
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
     await assert.rejects(
       nodeHttpTransport({ ...base, url: `http://127.0.0.1:${port}/invoke` }),
-      (error: unknown) => error instanceof RemoteConnectError && error.code === 'ECONNREFUSED',
+      { name: 'RemoteConnectError', code: 'ECONNREFUSED' },
     );
   });
 
@@ -322,7 +330,7 @@ describe('nodeHttpTransport', () => {
     // 10.255.255.1 is unroutable, so the SYN goes unanswered like an offline tailnet node.
     await assert.rejects(
       nodeHttpTransport({ url: 'http://10.255.255.1:9/invoke', method: 'GET', headers: {}, connectTimeoutMs: 300, timeoutMs: 5_000 }),
-      (error: unknown) => error instanceof RemoteConnectError,
+      { name: 'RemoteConnectError' },
     );
   });
 });

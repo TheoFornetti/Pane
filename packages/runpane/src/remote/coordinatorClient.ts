@@ -52,8 +52,10 @@ export class CoordinatorClient {
   }
 
   private async call(method: 'GET' | 'POST', path: string, body: string | undefined, timeoutMs: number): Promise<CloudHostState> {
-    const headers: Record<string, string> = { Authorization: `Bearer ${this.coordinator.token}` };
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const authorization = `Bearer ${this.coordinator.token}`;
+    const headers = body === undefined
+      ? { Authorization: authorization }
+      : { Authorization: authorization, 'Content-Type': 'application/json' };
     let response;
     try {
       response = await this.transport({

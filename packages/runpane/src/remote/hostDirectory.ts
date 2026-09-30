@@ -284,12 +284,6 @@ export function decodePairingCode(code: string): DirectoryHost {
 }
 
 function readTextFile(filePath: string): string | null {
-  try {
-    return fs.readFileSync(filePath, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR') {
-      return null;
-    }
-    throw error;
-  }
+  const stat = fs.statSync(filePath, { throwIfNoEntry: false });
+  return stat?.isFile() ? fs.readFileSync(filePath, 'utf8') : null;
 }

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
-import { boundary, decodeBoundary, type JsonValue } from '../boundaryDecoder';
+import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../boundaryDecoder';
 import { CoordinatorClient, CoordinatorError, type CloudHostState } from './coordinatorClient';
 import { resolveDaemonTarget, type DaemonTarget } from './hostDirectory';
 import {
@@ -10,6 +10,7 @@ import {
   RemoteRequestError,
   RemoteUnconfirmedResultError,
   nodeHttpTransport,
+  type RemoteDaemonClientOptions,
   type RemoteHttpTransport,
 } from './remoteDaemonClient';
 
@@ -90,13 +91,16 @@ export async function invokeRemote(
   const transport = options.transport ?? nodeHttpTransport;
   const startedAt = Date.now();
   let baseUrl = target.host.baseUrl;
-  const client = () => new RemoteDaemonClient({
-    profile: { ...target.host, baseUrl },
-    runtimeId: cliRuntimeId(),
-    clientLabel: `runpane CLI (${os.hostname()})`,
-    transport,
-    ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
-  });
+  const client = () => {
+    const clientOptions: RemoteDaemonClientOptions = {
+      profile: { ...target.host, baseUrl },
+      runtimeId: cliRuntimeId(),
+      clientLabel: `runpane CLI (${os.hostname()})`,
+      transport,
+    };
+    if (options.retryDelayMs !== undefined) clientOptions.retryDelayMs = options.retryDelayMs;
+    return new RemoteDaemonClient(clientOptions);
+  };
 
   // The key is fixed once, so every resend is the same logical submit.
   const requestArgs = withIdempotencyKey(channel, args);
@@ -109,7 +113,7 @@ export async function invokeRemote(
   try {
     return await deliver();
   } catch (error) {
-    if (!(error instanceof RemoteConnectError)) throw toTargetError(error, target);
+    if (!(error instanceof RemoteConnectError)) throw error instanceof Error ? toTargetError(error, target) : error;
   }
 
   // The connection never opened, so the host cannot have seen the request.
@@ -154,7 +158,7 @@ export async function invokeRemote(
     try {
       return await deliver();
     } catch (error) {
-      if (!(error instanceof RemoteConnectError)) throw toTargetError(error, target);
+      if (!(error instanceof RemoteConnectError)) throw error instanceof Error ? toTargetError(error, target) : error;
       if (Date.now() + (options.resendIntervalMs ?? RESEND_INTERVAL_MS) > deadline) {
         throw new RemoteTargetError(
           `${target.host.label} woke up but its daemon did not accept connections in time (${error.message}).`,
@@ -204,7 +208,7 @@ function hostStateError(target: DaemonTarget, state: CloudHostState, woke: boole
   }
 }
 
-function toTargetError(error: unknown, target: DaemonTarget): unknown {
+function toTargetError(error: Error, target: DaemonTarget): Error {
   if (error instanceof RemoteRequestError) {
     return new RemoteTargetError(error.message, error.code ?? `ERR_RUNPANE_REMOTE_HTTP_${error.status}`);
   }
@@ -220,9 +224,18 @@ function toTargetError(error: unknown, target: DaemonTarget): unknown {
 /** A submit over HTTP always carries an idempotency key, so a resend after a wake delivers once. */
 function withIdempotencyKey(channel: string, args: unknown[]): unknown[] {
   if (channel !== IDEMPOTENT_SUBMIT_CHANNEL) return args;
-  const [request, ...rest] = args;
-  if (!isPlainObject(request) || typeof request.idempotencyKey === 'string') return args;
-  return [{ ...request, idempotencyKey: `runpane-cli:${randomUUID()}` }, ...rest];
+  const request = firstRequestObject(args);
+  if (!request || request.idempotencyKey !== undefined) return args;
+  return [{ ...request, idempotencyKey: `runpane-cli:${randomUUID()}` }, ...args.slice(1)];
+}
+
+/** The request object a runpane channel takes as its first argument, or null. */
+function firstRequestObject(args: unknown[]): JsonObject | null {
+  try {
+    return decodeBoundary(args[0], boundary.jsonObject);
+  } catch {
+    return null;
+  }
 }
 
 const panelListSchema = boundary.object({
@@ -239,8 +252,8 @@ async function resolveOrchestratorPanel(
   listPanels: (args: unknown[]) => Promise<JsonValue | undefined>,
 ): Promise<unknown[]> {
   if (!WAKING_CHANNELS.has(channel)) return args;
-  const [request, ...rest] = args;
-  if (!isPlainObject(request) || request.panelId !== ORCHESTRATOR_PANEL_SELECTOR) return args;
+  const request = firstRequestObject(args);
+  if (!request || request.panelId !== ORCHESTRATOR_PANEL_SELECTOR) return args;
   const { panels } = decodeBoundary(await listPanels([{}]), panelListSchema);
   if (panels.length !== 1) {
     const found = panels.map((panel) => `${panel.id}${panel.title ? ` (${panel.title})` : ''}`).join(', ') || 'none';
@@ -249,16 +262,12 @@ async function resolveOrchestratorPanel(
       'ERR_RUNPANE_ORCHESTRATOR_AMBIGUOUS',
     );
   }
-  return [{ ...request, panelId: panels[0]!.id }, ...rest];
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return [{ ...request, panelId: panels[0]!.id }, ...args.slice(1)];
 }
 
 /** Stable per machine and user without writing a file: the daemon keys remote viewers by it. */
 function cliRuntimeId(): string {
-  const uid = typeof process.getuid === 'function' ? String(process.getuid()) : os.userInfo().username;
+  const uid = process.getuid ? String(process.getuid()) : os.userInfo().username;
   return `runpane-cli-${createHash('sha256').update(`${os.hostname()}:${uid}`).digest('hex').slice(0, 16)}`;
 }
 

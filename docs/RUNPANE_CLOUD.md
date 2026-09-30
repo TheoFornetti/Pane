@@ -167,6 +167,9 @@ runpane cloud pair "api work"     # prints the pane-remote:// code; treat it lik
 2. Open https://runpane.com/app/ (on iPhone: Safari, Share, Add to Home Screen).
 3. Paste the code from `runpane cloud pair <host>`.
 
+The phone app needs the Session on HTTPS: it can't open an `http://` Session (see
+[HTTPS certificates and `--transport`](#https-certificates-and---transport)).
+
 ### From the CLI
 
 Every daemon command takes `--host <cloud Session>`:
@@ -337,6 +340,30 @@ Destroy costs no boat start.
 (including a coordinator wake) is one start. `stop`, `destroy`, `list` and `status` are free. The limits
 are **12 a minute, 60 an hour and 200 a day**. Past them boat answers HTTP 429 and `new`/`wake` exit 1
 with boat's message; the CLI does not retry. Wait and run it again.
+
+## HTTPS certificates and `--transport`
+
+Tailscale Serve gets each Session's HTTPS certificate from Let's Encrypt, which issues at most **50
+certificates per week for your tailnet's domain** (`<tailnet>.ts.net`). Every new Session host name needs one,
+so creating and destroying many Sessions in a week (tests, CI) uses the quota up, and new Sessions then can't
+get a certificate. The limit lifts on its own after a few days.
+
+`runpane cloud new --transport` (also a `setup` default):
+
+- `auto` (default): tries HTTPS. If it doesn't answer within about 45 s while the Session's Pane is healthy,
+  the Session switches to **plain HTTP inside the tailnet**: Tailscale Serve forwards TCP port 42137 to the
+  daemon, and the host's address becomes `http://<host>.<tailnet>.ts.net:42137`. WireGuard still encrypts
+  everything end to end; there's just no TLS layer on top.
+- `https`: HTTPS only; `new` fails if no certificate comes.
+- `http`: plain HTTP inside the tailnet from the start (uses no certificate).
+
+`runpane cloud status <host>` shows which one a Session uses. Pane desktop and `runpane --host` work with both.
+**The phone app at https://runpane.com/app can't reach an `http://` Session**: a page loaded over HTTPS
+may not call plain HTTP (mixed content). Use Pane desktop or the CLI for such a Session, or create it again
+(`--transport https`) once certificates are available.
+
+To avoid the limit: keep long-lived Sessions and let them sleep instead of destroying and recreating them, and
+run tests that churn Sessions in a separate tailnet.
 
 ## Tailnet policy
 

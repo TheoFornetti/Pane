@@ -1594,6 +1594,12 @@ export class TerminalPanelManager extends EventEmitter {
     return this.terminals.has(panelId);
   }
 
+  /** The PTY's root process id, for callers that inspect what runs under a panel. */
+  getPanelPid(panelId: string): number | undefined {
+    const terminal = this.terminals.get(panelId);
+    return terminal && !terminal.isPtyHost ? terminal.pty.pid : undefined;
+  }
+
   getLastOutputAt(panelId: string): string | undefined {
     return this.terminals.get(panelId)?.lastOutputAt?.toISOString();
   }

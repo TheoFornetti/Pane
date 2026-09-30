@@ -11,7 +11,14 @@ import type { PaneCommandRegistry, PaneCommandValue } from '../commandRegistry';
 import { isPeerClientRecord, type UserClientActivityTracker } from './clientActivity';
 import { flushDurableState } from './durableFlush';
 import type { CloudDaemonHealthState, ReadinessAgentPanel } from './readiness';
-import { runSafeToStop, type SafeToStopSources, type SafeToStopTerminal, type SafeToStopUserClient } from './safeToStop';
+import { findAgentSpawnedShells, readProcessTable, type ProcessEntry } from './processTree';
+import {
+  runSafeToStop,
+  type SafeToStopRunningCommand,
+  type SafeToStopSources,
+  type SafeToStopTerminal,
+  type SafeToStopUserClient,
+} from './safeToStop';
 import {
   CloudUpgradeError,
   downloadToFile,
@@ -33,6 +40,8 @@ const terminalCustomStateSchema = boundary.object({
 
 interface TerminalReader {
   getAllPanelIds(): string[];
+  getPanelPid(panelId: string): number | undefined;
+  getForegroundProcess(panelId: string): { name: string; isShell: boolean } | undefined;
   isTerminalInitialized(panelId: string): boolean;
   getAgentStatus(panelId: string): AgentState | undefined;
   getLastOutputAt(panelId: string): string | undefined;
@@ -53,6 +62,7 @@ export interface CloudDaemonDependencies {
   remoteConfig(): RemoteDaemonConfig | undefined;
   checkpointWal(): CloudWalCheckpoint | null;
   paneDirectory: string;
+  readProcesses?: () => ProcessEntry[];
   now?: () => number;
 }
 
@@ -106,6 +116,7 @@ function createSafeToStopSources(dependencies: CloudDaemonDependencies, now: () 
         lastOutputAt: lastOutputAt ? Date.parse(lastOutputAt) : undefined,
       };
     }),
+    runningCommands: () => runningCommands(dependencies),
     locks: () => dependencies.listLocks().map(lock => ({
       name: lock.name,
       ownerLabel: lock.owner.label ?? lock.owner.paneId,
@@ -130,6 +141,33 @@ function createSafeToStopSources(dependencies: CloudDaemonDependencies, now: () 
       return [...streams, ...invokes];
     },
   };
+}
+
+/**
+ * Work that prints nothing still counts: an agent's tool shell (Claude moves long commands to the
+ * background and ends its turn, so its screen reads idle) or a program in the foreground of a shell panel.
+ */
+function runningCommands(dependencies: CloudDaemonDependencies): SafeToStopRunningCommand[] {
+  let table: ProcessEntry[] | undefined;
+  const commands: SafeToStopRunningCommand[] = [];
+  for (const panelId of dependencies.terminals.getAllPanelIds()) {
+    const panel = dependencies.getPanel(panelId);
+    const paneId = panel?.sessionId;
+    if (panel && isAgentPanel(panel)) {
+      const ptyPid = dependencies.terminals.getPanelPid(panelId);
+      if (ptyPid === undefined) continue;
+      table ??= (dependencies.readProcesses ?? readProcessTable)();
+      for (const shell of findAgentSpawnedShells(table, ptyPid)) {
+        commands.push({ panelId, paneId, kind: 'agent-shell', command: `${shell.name} pid ${shell.pid}` });
+      }
+      continue;
+    }
+    const foreground = dependencies.terminals.getForegroundProcess(panelId);
+    if (foreground && !foreground.isShell) {
+      commands.push({ panelId, paneId, kind: 'foreground', command: foreground.name });
+    }
+  }
+  return commands;
 }
 
 function readinessPanels(dependencies: CloudDaemonDependencies): ReadinessAgentPanel[] {

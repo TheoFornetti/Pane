@@ -24,6 +24,14 @@ export interface SafeToStopTerminal {
   lastOutputAt?: number;
 }
 
+/** A command still running without printing: an agent's (background) shell, or a program in a shell panel. */
+export interface SafeToStopRunningCommand {
+  panelId: string;
+  paneId?: string;
+  kind: 'agent-shell' | 'foreground';
+  command: string;
+}
+
 export interface SafeToStopLock {
   name: string;
   ownerLabel?: string;
@@ -52,6 +60,7 @@ export interface SafeToStopUserClient {
 /** Live daemon state the check reads. Every source excludes peers already. */
 export interface SafeToStopSources {
   terminals(): SafeToStopTerminal[];
+  runningCommands(): SafeToStopRunningCommand[];
   locks(): SafeToStopLock[];
   watchers(): SafeToStopWatcher[];
   pendingPrChecks(): Promise<SafeToStopPendingPr[]>;
@@ -101,6 +110,17 @@ async function collectSafeToStopBlockers(
         ...where,
       });
     }
+  }
+
+  for (const command of sources.runningCommands()) {
+    blockers.push({
+      condition: 'command-running',
+      message: command.kind === 'agent-shell'
+        ? `Agent in panel ${command.panelId} still runs a shell (${command.command})`
+        : `Panel ${command.panelId} is running ${command.command}`,
+      paneId: command.paneId,
+      panelId: command.panelId,
+    });
   }
 
   for (const lock of sources.locks()) {

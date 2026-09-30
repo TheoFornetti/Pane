@@ -8624,7 +8624,7 @@
             "required": ["condition", "message"],
             "properties": {
               "condition": {
-                "enum": ["agent-working", "recent-terminal-output", "lock-held", "watcher-active", "pr-checks-pending", "user-client-attached"]
+                "enum": ["agent-working", "command-running", "recent-terminal-output", "lock-held", "watcher-active", "pr-checks-pending", "user-client-attached"]
               },
               "message": { "type": "string" },
               "paneId": { "type": "string" },
@@ -13056,7 +13056,7 @@
       "cloud safe-to-stop": {
         "name": "cloud safe-to-stop",
         "summary": "Inside a Runpane Cloud sandbox: check whether stopping it is safe now and, when it is, make the daemon's state durable.",
-        "details": "Refuses while an agent is working, a terminal printed output in the last 2 minutes, a named lock is held, a workspace or panel wait is running, a PR has checks still running, or a user client (not a peer) has an open event stream or called the daemon in the last 15 minutes. When safe it checkpoints the SQLite WAL, fsyncs the Pane directory, and syncs the filesystem, so a provider snapshot taken right after keeps every write. The coordinator calls the same check over /invoke as runpane:cloud:safe-to-stop.",
+        "details": "Refuses while an agent is working, an agent or shell panel still runs a command (including an agent's background shell), a terminal printed output in the last 2 minutes, a named lock is held, a workspace or panel wait is running, a PR has checks still running, or a user client (not a peer) has an open event stream or called the daemon in the last 15 minutes. When safe it checkpoints the SQLite WAL, fsyncs the Pane directory, and syncs the filesystem, so a provider snapshot taken right after keeps every write. The coordinator calls the same check over /invoke as runpane:cloud:safe-to-stop.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [

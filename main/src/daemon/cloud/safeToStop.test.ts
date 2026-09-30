@@ -20,6 +20,7 @@ const FLUSHED: CloudDurableFlushResult = {
 function idleSources(overrides: Partial<SafeToStopSources> = {}): SafeToStopSources {
   return {
     terminals: () => [{ panelId: 'claude-1', paneId: 'pane-1', agentState: 'idle', lastOutputAt: NOW - DEFAULT_RECENT_OUTPUT_MS }],
+    runningCommands: () => [],
     locks: () => [],
     watchers: () => [{ channel: 'runpane:workspace:wait', inFlight: 0 }],
     pendingPrChecks: async () => [],
@@ -51,6 +52,9 @@ describe('runSafeToStop', () => {
 
   it.each([
     ['agent-working', { terminals: () => [{ panelId: 'claude-1', paneId: 'pane-1', agentState: 'working' as const }] }],
+    ['command-running', {
+      runningCommands: () => [{ panelId: 'claude-1', paneId: 'pane-1', kind: 'agent-shell' as const, command: 'bash pid 42' }],
+    }],
     ['recent-terminal-output', { terminals: () => [{ panelId: 'shell-1', paneId: 'pane-1', lastOutputAt: NOW - 5_000 }] }],
     ['lock-held', { locks: () => [{ name: 'deploy', ownerLabel: 'worker', paneId: 'pane-1' }] }],
     ['watcher-active', { watchers: () => [{ channel: 'runpane:workspace:wait', inFlight: 1 }] }],

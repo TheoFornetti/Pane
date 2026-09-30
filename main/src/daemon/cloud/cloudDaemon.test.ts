@@ -8,6 +8,7 @@ import { PaneCommandRegistry } from '../commandRegistry';
 import { UserClientActivityTracker } from './clientActivity';
 import { registerCloudDaemonHandlers, type CloudDaemonDependencies } from './cloudDaemon';
 import { CloudDaemonHealthState } from './readiness';
+import type { ProcessEntry } from './processTree';
 
 const NOW = 50_000_000;
 
@@ -44,12 +45,23 @@ function setup(overrides: Partial<CloudDaemonDependencies> = {}) {
   config.host.clients = [client('desktop'), client('peer-a', 'peer')];
   const connected: RemoteDaemonConnectedClient[] = [];
   const checkpointWal = vi.fn(() => ({ busy: 0, log: 0, checkpointed: 0 }));
+  const processes: ProcessEntry[] = [
+    { pid: 100, ppid: 1, name: 'bash' },
+    { pid: 101, ppid: 100, name: 'claude' },
+    { pid: 102, ppid: 101, name: 'node' },
+  ];
+  let foreground = { name: 'bash', isShell: true };
+  const setForeground = (value: { name: string; isShell: boolean }) => {
+    foreground = value;
+  };
   const dependencies: CloudDaemonDependencies = {
     commandRegistry,
     health,
     clientActivity,
     terminals: {
       getAllPanelIds: () => [...running],
+      getPanelPid: panelId => (panelId === 'claude-1' ? 100 : 200),
+      getForegroundProcess: panelId => (panelId === 'shell-1' ? foreground : undefined),
       isTerminalInitialized: panelId => running.has(panelId),
       getAgentStatus: panelId => agentStates.get(panelId),
       getLastOutputAt: () => new Date(NOW - 10 * 60_000).toISOString(),
@@ -63,13 +75,14 @@ function setup(overrides: Partial<CloudDaemonDependencies> = {}) {
     remoteConfig: () => config,
     checkpointWal,
     paneDirectory: '/nonexistent-pane-dir',
+    readProcesses: () => processes,
     now: () => NOW,
     ...overrides,
   };
   registerCloudDaemonHandlers(dependencies);
   const safeToStop = (request: CloudSafeToStopRequest = { flush: 'never' }) =>
     commandRegistry.invoke('runpane:cloud:safe-to-stop', [request]);
-  return { commandRegistry, health, clientActivity, agentStates, running, connected, config, checkpointWal, safeToStop };
+  return { commandRegistry, health, clientActivity, agentStates, running, connected, config, checkpointWal, safeToStop, processes, setForeground };
 }
 
 function stream(clientId: string | null, label: string): RemoteDaemonConnectedClient {
@@ -94,6 +107,25 @@ describe('registerCloudDaemonHandlers', () => {
 
     agentStates.set('claude-1', 'working');
     await expect(safeToStop()).resolves.toMatchObject({ safe: false, blockers: [{ condition: 'agent-working' }] });
+  });
+
+  it('blocks while an agent\'s background shell runs after its turn ended', async () => {
+    const { safeToStop, processes } = setup();
+    await expect(safeToStop()).resolves.toMatchObject({ safe: true });
+
+    processes.push({ pid: 103, ppid: 101, name: 'bash' }, { pid: 104, ppid: 103, name: 'sleep' });
+    await expect(safeToStop()).resolves.toMatchObject({
+      blockers: [{ condition: 'command-running', message: 'Agent in panel claude-1 still runs a shell (bash pid 103)', panelId: 'claude-1' }],
+    });
+  });
+
+  it('blocks while a shell panel runs a silent program', async () => {
+    const { safeToStop, setForeground } = setup();
+    setForeground({ name: 'make', isShell: false });
+
+    await expect(safeToStop()).resolves.toMatchObject({
+      blockers: [{ condition: 'command-running', message: 'Panel shell-1 is running make' }],
+    });
   });
 
   it('reports a busy shell as recent output, not as a working agent', async () => {

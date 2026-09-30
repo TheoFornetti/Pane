@@ -7,6 +7,7 @@
 /** Why a daemon refuses to be stopped. Peers never count toward any of these. */
 export type CloudSafeToStopCondition =
   | 'agent-working'
+  | 'command-running'
   | 'recent-terminal-output'
   | 'lock-held'
   | 'watcher-active'

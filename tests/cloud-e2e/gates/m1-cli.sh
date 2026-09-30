@@ -7,6 +7,7 @@
 . "$(dirname "$0")/../lib/common.sh"
 . "$E2E_LIB/cli.sh"
 e2e_init M1-cli
+wait_start_budget $((1 + ${E2E_CYCLES:-3}))
 CYCLES="${E2E_CYCLES:-3}"; REPO="${E2E_REPO:-https://github.com/octocat/Hello-World.git}"
 
 cli_resolve || { rec cli BLOCKED "runpane CLI under test not installable"; exit 1; }
@@ -15,7 +16,9 @@ if ! rpc cloud --help >/dev/null 2>&1 && ! rpc help cloud 2>/dev/null | grep -q 
   rec cli BLOCKED "this runpane build has no 'cloud' command ($E2E_CLI_SOURCE)"; exit 0
 fi
 
-DEB="${E2E_DAEMON_DEB_URL:-$(dist_url deb)}"; GOLDEN="${E2E_GOLDEN:-$(dist_url golden)}"
+GOLDEN="${E2E_GOLDEN:-$(dist_url golden)}"
+# with a golden image the daemon is preinstalled; only pass a .deb when asked explicitly
+if [ -n "$GOLDEN" ]; then DEB="${E2E_DAEMON_DEB_URL:-}"; else DEB="${E2E_DAEMON_DEB_URL:-$(dist_url deb)}"; fi
 setup_flags=(); [ -n "$DEB" ] && setup_flags+=(--pane-deb-url "$DEB")
 if [ -n "$GOLDEN" ]; then setup_flags+=(--golden "$GOLDEN"); else setup_flags+=(--no-golden); fi
 out=$(cloud_setup_from_loop_secrets "${setup_flags[@]}" 2>&1); rc=$?

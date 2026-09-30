@@ -9,6 +9,7 @@
 GOLDEN="${E2E_GOLDEN:-$(dist_url golden)}"
 export E2E_TARGET="${GOLDEN:-no-golden}"
 e2e_init M1-golden
+wait_start_budget 2
 [ -n "$GOLDEN" ] || { rec golden BLOCKED "no golden image named in $E2E_DIST_CURRENT yet"; exit 0; }
 ids=()
 for n in 1 2; do

@@ -28,6 +28,7 @@ fi
 . "$HERE/lib/common.sh"
 . "$HERE/lib/cli.sh"
 e2e_init SMOKE-morning
+wait_start_budget 2
 
 if [ "$LOOP" = 1 ]; then
   cli_resolve || { rec cli FAIL "could not install the runpane build under test"; exit 1; }

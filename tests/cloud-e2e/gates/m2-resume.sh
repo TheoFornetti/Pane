@@ -12,6 +12,7 @@
 export E2E_DAEMON_DEB_URL="${E2E_DAEMON_DEB_URL-$(dist_url deb)}"
 E2E_TARGET="${E2E_TARGET:-${E2E_DAEMON_DEB_URL:-runpane@latest}}"; E2E_TARGET="${E2E_TARGET##*/}"
 e2e_init M2-resume
+wait_start_budget 2
 
 provision_manual m2r "${E2E_SIZE:-default}" || exit 1
 h0=$(cl remote wait-health "$SB_PAIRING" --timeout 120); printf '%s\n' "$h0" | ev health-initial.json >/dev/null

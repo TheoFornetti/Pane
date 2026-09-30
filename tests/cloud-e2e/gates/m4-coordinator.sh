@@ -12,6 +12,7 @@
 . "$E2E_LIB/provision.sh"; . "$E2E_LIB/fixtures.sh"; . "$E2E_LIB/cli.sh"
 export E2E_DAEMON_DEB_URL="${E2E_DAEMON_DEB_URL-$(dist_url deb)}"
 e2e_init M4-coordinator
+wait_start_budget 6
 cli_resolve || { rec cli BLOCKED "runpane CLI under test not installable"; exit 1; }
 E2E_TARGET="${E2E_TARGET_OVERRIDE:-${E2E_CLI_SOURCE##*/}}"; export E2E_TARGET
 

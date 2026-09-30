@@ -12,6 +12,7 @@
 export E2E_DAEMON_DEB_URL="${E2E_DAEMON_DEB_URL-$(dist_url deb)}"
 E2E_TARGET="${E2E_TARGET:-${E2E_DAEMON_DEB_URL:-runpane@latest}}"; E2E_TARGET="${E2E_TARGET##*/}"
 e2e_init M3-peers
+wait_start_budget 3
 
 provision_manual m3b "${E2E_SIZE:-small}" || exit 1
 B_ID=$SB_ID; B_HOST=$SB_HOST; B_PAIR=$SB_PAIRING; B_BASE=$SB_BASE

@@ -11,6 +11,7 @@
 . "$E2E_LIB/fixtures.sh"
 E2E_TARGET="${E2E_TARGET:-${E2E_DAEMON_DEB_URL:+fork-deb}}"; E2E_TARGET="${E2E_TARGET:-runpane@latest}"
 e2e_init M0-harness
+wait_start_budget 2
 G=M0
 
 provision_manual m0 "${E2E_SIZE:-default}" || exit 1

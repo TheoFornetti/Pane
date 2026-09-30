@@ -13,6 +13,7 @@
 export E2E_DAEMON_DEB_URL="${E2E_DAEMON_DEB_URL-$(dist_url deb)}"
 E2E_TARGET="${E2E_TARGET:-${E2E_DAEMON_DEB_URL:-runpane@latest}}"; E2E_TARGET="${E2E_TARGET##*/}"
 e2e_init M2-safestop
+wait_start_budget 2
 
 provision_manual m2s "${E2E_SIZE:-default}" || exit 1
 cl remote wait-health "$SB_PAIRING" --timeout 120 >/dev/null

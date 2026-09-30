@@ -7,14 +7,14 @@ import type { JsonObject, JsonValue } from '../../../../shared/validation/bounda
  * may do on this host. Everything not listed here is refused before the
  * command registry runs. See final-plan S3 and docs/SELF_HOSTED_REMOTE_DAEMON.md.
  */
-export const PEER_ALLOWED_CHANNELS = [
+const PEER_ALLOWED_CHANNELS = [
   'runpane:panels:list',
   'runpane:panels:submit',
   'runpane:workspace:wait',
 ] as const;
 
-export const DEFAULT_PEER_SUBMIT_LIMIT = 10;
-export const DEFAULT_PEER_SUBMIT_WINDOW_MS = 60_000;
+const DEFAULT_PEER_SUBMIT_LIMIT = 10;
+const DEFAULT_PEER_SUBMIT_WINDOW_MS = 60_000;
 const MAX_PEER_LABEL_LENGTH = 80;
 
 /** The slice of a Session record the peer gate needs. */
@@ -53,7 +53,7 @@ export function isPeerAllowedChannel(channel: string): boolean {
   return PEER_ALLOWED_CHANNEL_SET.has(channel);
 }
 
-export function peerDenial(statusCode: number, code: string, message: string): PeerDenial {
+function peerDenial(statusCode: number, code: string, message: string): PeerDenial {
   return { ok: false, statusCode, code, message };
 }
 
@@ -190,7 +190,7 @@ export function framePeerMessage(label: string, input: string): string {
   return `[peer message from ${sanitizePeerLabel(label)}] ${stripControlCharacters(input)}`;
 }
 
-export function sanitizePeerLabel(label: string): string {
+function sanitizePeerLabel(label: string): string {
   const cleaned = stripControlCharacters(label).replace(/[\r\n\t[\]]/g, ' ').replace(/\s+/g, ' ').trim();
   return (cleaned || 'unnamed peer').slice(0, MAX_PEER_LABEL_LENGTH);
 }

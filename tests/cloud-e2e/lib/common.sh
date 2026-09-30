@@ -64,7 +64,10 @@ sb_create() {
 }
 
 # sbx <sandbox-id> [timeout] <<'SH' ... SH   : run a script inside the sandbox (stdin), stream output
-sbx() { cl boat exec "$1" - --timeout "${2:-600}"; }
+sbx() {
+  { echo 'export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus'; cat; } \
+    | cl boat exec "$1" - --timeout "${2:-600}"
+}
 
 # Tailnet join via a single-use tag:rp-session key. Key goes through a 0600 file and is shredded.
 sb_tailnet_join() {

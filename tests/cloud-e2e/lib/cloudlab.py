@@ -383,6 +383,8 @@ def main() -> None:
     x = rsub.add_parser("ws"); x.add_argument("target"); x.add_argument("path"); x.add_argument("--token-file")
     x.add_argument("--no-token", action="store_true")
     x = rsub.add_parser("pairing-mode"); x.add_argument("file")
+    x = rsub.add_parser("hold"); x.add_argument("target"); x.add_argument("path"); x.add_argument("--seconds", type=float, default=20)
+    x.add_argument("--token-file"); x.add_argument("--no-token", action="store_true")
 
     x = sub.add_parser("record"); x.add_argument("gate"); x.add_argument("check"); x.add_argument("status")
     x.add_argument("detail"); x.add_argument("--evidence", default=""); x.add_argument("--metric", action="append", default=[])
@@ -504,6 +506,8 @@ def main() -> None:
             print(json.dumps({"http": status, "seconds": round(secs, 3), "head": text}))
         elif a.op == "ws":
             print(json.dumps(ws_probe(a)))
+        elif a.op == "hold":
+            print(json.dumps(hold_stream(a)))
         elif a.op == "pairing-mode":
             mode = oct(os.stat(a.file).st_mode & 0o777)
             pairing = read_pairing(a.file)
@@ -548,6 +552,34 @@ def ws_probe(a: argparse.Namespace) -> dict[str, Any]:
         return {"http": 0, "error": str(err)}
     finally:
         conn.close()
+
+
+def hold_stream(a: argparse.Namespace) -> dict[str, Any]:
+    """Open a streaming GET (e.g. /events) and keep reading for N seconds. Returns status + bytes read."""
+    base, token = resolve_base(a.target)
+    tok = pathlib.Path(a.token_file).read_text().strip() if a.token_file else (None if a.no_token else token)
+    headers = {"Accept": "text/event-stream"}
+    if tok:
+        headers["Authorization"] = f"Bearer {tok}"
+    req = urllib.request.Request(base + a.path, headers=headers)
+    start = time.monotonic()
+    got = 0
+    try:
+        with urllib.request.urlopen(req, timeout=a.seconds + 5, context=ssl.create_default_context()) as resp:
+            status = resp.status
+            while time.monotonic() - start < a.seconds:
+                try:
+                    chunk = resp.read1(4096) if hasattr(resp, "read1") else resp.read(1)
+                except (TimeoutError, OSError):
+                    break
+                if not chunk:
+                    break
+                got += len(chunk)
+    except urllib.error.HTTPError as err:
+        return {"http": err.code, "body": err.read().decode(errors="replace")[:300], "seconds": round(time.monotonic() - start, 2)}
+    except (urllib.error.URLError, OSError) as err:
+        return {"http": 0, "error": str(err), "seconds": round(time.monotonic() - start, 2)}
+    return {"http": status, "bytes": got, "seconds": round(time.monotonic() - start, 2)}
 
 
 if __name__ == "__main__":

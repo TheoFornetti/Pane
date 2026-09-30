@@ -1,6 +1,6 @@
 import { CLOUD_SIZES, type CloudSize } from './provider';
 
-const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'destroy', 'pair', 'sync', 'coordinator'] as const;
+const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'destroy', 'pair', 'sync', 'coordinator', 'peers'] as const;
 type CloudSubcommand = typeof CLOUD_SUBCOMMANDS[number];
 
 /** Subcommands that act on one host, named by a positional argument or --host. */
@@ -32,11 +32,12 @@ export interface CloudArgs {
   tailscaleSecretFile?: string;
   tailscaleTailnet?: string;
   anthropicKeyFile?: string;
+  claudeTokenFile?: string;
   golden?: string;
   maxLive?: number;
   coordinator?: boolean;
   noVerify: boolean;
-  /** `runpane cloud coordinator ...`: everything after `coordinator`, passed through untouched. */
+  /** `runpane cloud coordinator|peers ...`: everything after the subcommand, parsed by its own module. */
   passthrough: string[];
 }
 
@@ -64,6 +65,7 @@ const VALUE_FLAGS = new Map<string, ValueFlag>([
   ['--tailscale-secret-file', 'tailscaleSecretFile'],
   ['--tailscale-tailnet', 'tailscaleTailnet'],
   ['--anthropic-key-file', 'anthropicKeyFile'],
+  ['--claude-token-file', 'claudeTokenFile'],
   ['--golden', 'golden'],
   ['--max-live', 'maxLive'],
 ]);
@@ -83,7 +85,7 @@ const BOOLEAN_FLAGS = new Map<string, BooleanFlag>([
 
 /** Flags each subcommand accepts, beyond --json. */
 const ALLOWED = {
-  setup: ['--boat-key-file', '--tailscale-client-id', '--tailscale-secret-file', '--tailscale-tailnet', '--anthropic-key-file',
+  setup: ['--boat-key-file', '--tailscale-client-id', '--tailscale-secret-file', '--tailscale-tailnet', '--anthropic-key-file', '--claude-token-file',
     '--golden', '--no-golden', '--size', '--name-prefix', '--pane-deb-url', '--pane-npm-spec', '--pane-preinstalled', '--max-live',
     '--coordinator', '--no-coordinator', '--no-verify'],
   new: ['--label', '--repo', '--ref', '--size', '--from', '--no-golden', '--name-prefix', '--pane-deb-url', '--pane-npm-spec',
@@ -96,6 +98,7 @@ const ALLOWED = {
   pair: ['--host'],
   sync: ['--desktop-dir'],
   coordinator: [],
+  peers: [],
 } satisfies Record<CloudSubcommand, readonly string[]>;
 
 function isCloudSubcommand(value: string | undefined): value is CloudSubcommand {
@@ -121,7 +124,7 @@ export function parseCloudArgs(argv: readonly string[]): CloudArgs {
     noVerify: false,
     passthrough: [],
   };
-  if (first === 'coordinator') {
+  if (first === 'coordinator' || first === 'peers') {
     parsed.passthrough = [...rest];
     return parsed;
   }

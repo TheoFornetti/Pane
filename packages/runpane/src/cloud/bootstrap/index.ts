@@ -1,2 +1,2 @@
 export { waitForDaemonHealth } from './health';
-export { cloudHostname, provisionSandbox } from './provision';
+export { cloudHostname, joinSandboxToTailnet, provisionSandbox } from './provision';

@@ -11,6 +11,8 @@ import type { CloudSize } from './provider';
  *   <dir>/settings.json           0600  non-secret defaults (golden snapshot, size, name prefix, Pane source)
  *   <dir>/hosts/<hostname>.json    0600  one record per cloud Session: the saved remote host profile plus CLI metadata
  *   <dir>/hosts/<hostname>.pairing 0600  the pane-remote:// code, written by bootstrap and never printed unless `pair` asks
+ *   <dir>/coordinator.json         0600  {baseUrl, token} of the deployed coordinator (this machine's user caller token)
+ *   <dir>/coordinator-secret       0600  the coordinator's caller-token HMAC secret, to mint each Session's peer-caller token
  *
  * The dir is `$RUNPANE_CLOUD_DIR`, else `$XDG_CONFIG_HOME/runpane-cloud`, else `~/.config/runpane-cloud` (0700).
  */
@@ -19,6 +21,8 @@ export interface CloudCredentials {
   boat?: { apiKey: string };
   tailscale?: { clientId: string; clientSecret: string; tailnet?: string };
   anthropic?: { apiKey: string };
+  /** A Claude subscription token (`claude setup-token`), the alternative to an Anthropic API key. */
+  claude?: { oauthToken: string };
 }
 
 export type PaneSource =
@@ -33,7 +37,30 @@ export interface CloudSettings {
   paneSource?: PaneSource;
   /** Largest number of live cloud sandboxes `new` may leave running (final-plan §4 runaway guard). */
   maxLiveSandboxes?: number;
-  coordinator?: { enabled: boolean };
+  coordinator?: { enabled: boolean; deployment?: CoordinatorDeployment };
+}
+
+/** The coordinator sandbox `runpane cloud coordinator deploy` created (final-plan S2). */
+export interface CoordinatorDeployment {
+  sandboxId: string;
+  hostname: string;
+  nodeId: string;
+  /** http://<MagicDNS name>:<port>, reachable from tailnet members and rp-session nodes. */
+  baseUrl: string;
+  /** The scoped provider key (read/stop/resume only) the coordinator holds; revoked on destroy. */
+  scopedKeyId: string;
+  /** Sandboxes whose name starts with this are the coordinator's to idle-stop and reconcile. */
+  managedPrefix: string;
+  reconcile: boolean;
+  deployedAt: string;
+  appVersion: string;
+  pin?: PinnedPane;
+}
+
+export interface PinnedPane {
+  version: string;
+  debUrl: string;
+  sha256: string;
 }
 
 export const DEFAULT_NAME_PREFIX = 'rp';
@@ -75,6 +102,21 @@ interface CloudHostMeta {
   daemonVersion?: string;
   pinnedVersion?: string;
   repo?: { url: string; ref?: string };
+  /** Sessions this one may message (J3): each is a peer record minted on the target host. */
+  peers?: PeerGrant[];
+}
+
+export interface PeerGrant {
+  /** Target cloud host (tailnet hostname). */
+  host: string;
+  /** Peer client record id on the target's daemon (revoke deletes it). */
+  peerId: string;
+  /** Pane Session id on the target that the peer may submit to. */
+  targetSessionId: string;
+  grantedAt: string;
+  /** The peer credential for the target's daemon; only ever written into the source's 0600 peers list. */
+  baseUrl: string;
+  token: string;
 }
 
 export interface CloudHostRecord {
@@ -95,7 +137,15 @@ export interface CloudStore {
   pairingPath(hostname: string): string;
   coordinatorPairingPath(hostname: string): string;
   readPairing(hostname: string): Promise<string>;
+  /** `<dir>/coordinator.json`: the coordinator client config m4's client reads. */
+  readonly coordinatorClientPath: string;
+  readSecretText(name: SecretTextName): Promise<string | undefined>;
+  writeSecretText(name: SecretTextName, value: string): Promise<void>;
+  removeSecretText(name: SecretTextName): Promise<void>;
 }
+
+/** Secret files kept next to credentials.json, one value each (0600). */
+export type SecretTextName = 'coordinator.json' | 'coordinator-secret';
 
 function defaultCloudDir(env: NodeJS.ProcessEnv = process.env): string {
   if (env.RUNPANE_CLOUD_DIR) return path.resolve(env.RUNPANE_CLOUD_DIR);
@@ -154,14 +204,33 @@ export function createCloudStore(dir: string = defaultCloudDir()): CloudStore {
     async readPairing(hostname) {
       return (await fs.readFile(hostFile(hostname, '.pairing'), 'utf8')).trim();
     },
+    coordinatorClientPath: path.join(dir, 'coordinator.json'),
+    async readSecretText(name) {
+      try {
+        return (await fs.readFile(path.join(dir, name), 'utf8')).trim() || undefined;
+      } catch (error) {
+        if (isNotFound(error)) return undefined;
+        throw error;
+      }
+    },
+    async writeSecretText(name, value) {
+      await writePrivateText(path.join(dir, name), `${value.trim()}\n`);
+    },
+    async removeSecretText(name) {
+      await fs.rm(path.join(dir, name), { force: true });
+    },
   };
 }
 
 /** Writes JSON through a 0600 temp file and a rename, creating parent dirs 0700. */
 async function writePrivateJson(filePath: string, value: CloudCredentials | CloudSettings | CloudHostRecord): Promise<void> {
+  await writePrivateText(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function writePrivateText(filePath: string, content: string): Promise<void> {
   await ensurePrivateDir(path.dirname(filePath));
   const tmp = `${filePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-  await fs.writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  await fs.writeFile(tmp, content, { mode: 0o600 });
   await fs.chmod(tmp, 0o600);
   await fs.rename(tmp, filePath);
 }

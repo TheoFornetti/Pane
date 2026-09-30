@@ -57,6 +57,20 @@ export interface BootstrapPort {
   provision(sandbox: SandboxHandle, request: ProvisionRequest, tailnet: TailnetCredentials): Promise<ProvisionOutcome>;
   waitForDaemonHealth(baseUrl: string, options?: { timeoutMs?: number; intervalMs?: number }): Promise<HealthResult>;
   createTailnet(credentials: TailnetCredentials): TailnetPort;
+  /** Joins a sandbox to the tailnet as tag:rp-session without installing Pane (the coordinator's box). */
+  joinTailnet(sandbox: SandboxHandle, request: JoinTailnetRequest, tailnet: TailnetCredentials): Promise<JoinedNode>;
+}
+
+export interface JoinTailnetRequest {
+  sessionId: string;
+  hostname: string;
+  onStep?: (step: string) => void;
+}
+
+interface JoinedNode {
+  nodeId: string;
+  magicDnsName: string;
+  tailscaleIps: string[];
 }
 
 type TailnetCredentials = NonNullable<CloudCredentials['tailscale']>;

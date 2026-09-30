@@ -30,10 +30,23 @@ interface FakeWorld {
   scripts: { sandboxId: string; script: string }[];
   healthy: Set<string>;
   failProvision?: string;
+  /** Files written into sandboxes, by `<sandboxId>:<path>`. */
+  files: Map<string, string>;
+  /** Fake daemons: Sessions and peer records per sandbox hostname. */
+  daemons: Map<string, FakeDaemon>;
+  coordinatorHealthy: boolean;
+}
+
+export interface FakeDaemon {
+  sessions: { id: string; name: string; archived?: boolean }[];
+  peers: { id: string; label: string; sessions: string[] }[];
 }
 
 function createFakeWorld(): FakeWorld {
-  return { sandboxes: new Map(), devices: [], calls: [], scripts: [], healthy: new Set() };
+  return {
+    sandboxes: new Map(), devices: [], calls: [], scripts: [], healthy: new Set(),
+    files: new Map(), daemons: new Map(), coordinatorHealthy: true,
+  };
 }
 
 function createFakeProvider(world: FakeWorld): CloudProvider {
@@ -56,10 +69,14 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
     async runScript(script) {
       world.calls.push(`script ${id}`);
       world.scripts.push({ sandboxId: id, script });
-      return { exitCode: 0, stdout: '', stderr: '' };
+      if (script.includes('tailscale ip -4')) return { exitCode: 0, stdout: '100.64.0.9\n', stderr: '' };
+      const install = /install -m 600 (\S+) (\S+peers\.json)/u.exec(script);
+      if (install) world.files.set(`${id}:${install[2]}`, world.files.get(`${id}:${install[1]}`) ?? '');
+      return { exitCode: 0, stdout: script.includes('RP_AGENT_ENV') ? 'RP_AGENT_ENV ok\n' : 'RP_COORD ok\n', stderr: '' };
     },
-    async writeFile(filePath) {
+    async writeFile(filePath, content) {
       world.calls.push(`write ${id} ${filePath}`);
+      world.files.set(`${id}:${filePath}`, content);
     },
   });
   return {
@@ -119,6 +136,13 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       world.sandboxes.delete(id);
     },
     handle,
+    async createScopedKey(request) {
+      world.calls.push(`scoped-key ${request.name} ${request.actions.join(',')}`);
+      return { id: 'sak_fake1', secret: 'scoped-secret-value' };
+    },
+    async revokeKey(keyId) {
+      world.calls.push(`revoke-key ${keyId}`);
+    },
   };
 }
 
@@ -138,6 +162,13 @@ function createFakeBootstrap(world: FakeWorld): BootstrapPort {
   return {
     cloudHostname: (sessionId, prefix) => `${prefix}-${sessionId.slice(0, 8)}`,
     createTailnet: () => createFakeTailnet(world),
+    async joinTailnet(sandbox, request) {
+      world.calls.push(`join ${sandbox.id} ${request.hostname}`);
+      const nodeId = `n${request.hostname.replace(/-/g, '')}CNTRL`;
+      const magicDnsName = `${request.hostname}.tailtest.ts.net`;
+      world.devices.push({ nodeId, hostname: request.hostname, name: magicDnsName, online: true });
+      return { nodeId, magicDnsName, tailscaleIps: ['100.64.0.9'] };
+    },
     async waitForDaemonHealth(baseUrl) {
       const host = new URL(baseUrl).hostname.split('.')[0];
       const sandbox = [...world.sandboxes.values()].find((candidate) => candidate.name === host);
@@ -223,6 +254,37 @@ export async function createTestHarness(): Promise<TestHarness> {
       world.pushedDirectories.push(directory);
       const sessions = directory.sessions;
       return { pushed: true, sessions: Array.isArray(sessions) ? sessions.length : 0 };
+    },
+    async packCoordinatorApp() {
+      return { archiveBase64: 'ZmFrZQ==', version: '2.4.141-test' };
+    },
+    async probeCoordinatorHealth() {
+      return world.coordinatorHealthy ? { ok: true, status: 200, version: '2.4.141-test' } : { ok: false };
+    },
+    async invokeDaemon(profile, channel, args) {
+      const host = new URL(profile.baseUrl).hostname.split('.')[0];
+      world.calls.push(`invoke ${host} ${channel}`);
+      const daemon = world.daemons.get(host);
+      if (!daemon) throw new Error('connect ECONNREFUSED');
+      const request = args[0] ?? {};
+      switch (channel) {
+        case 'runpane:sessions:list':
+          return { ok: true, sessions: daemon.sessions.map((session) => ({ ...session })) };
+        case 'runpane:peers:mint': {
+          const peer = { id: `peer-${daemon.peers.length + 1}`, label: String(request.label), sessions: Array.isArray(request.sessions) ? request.sessions.filter((value): value is string => typeof value === 'string') : [] };
+          daemon.peers.push(peer);
+          const connectionCode = encodePairingCode({ v: 1, label: host, baseUrl: profile.baseUrl, token: `peer-token-${peer.id}`, transport: 'http+sse' });
+          return { ok: true, peer: { id: peer.id, label: peer.label, scope: 'peer', allowedSessionIds: peer.sessions }, connectionCode };
+        }
+        case 'runpane:peers:revoke': {
+          const before = daemon.peers.length;
+          daemon.peers = daemon.peers.filter((peer) => peer.id !== request.peer);
+          if (daemon.peers.length === before) throw new Error('Unknown peer');
+          return { ok: true, revoked: true, peerId: String(request.peer) };
+        }
+        default:
+          throw new Error(`fake daemon: unexpected ${channel}`);
+      }
     },
   };
   return { deps, world, out, err, root, desktopDir: path.join(root, 'desktop') };

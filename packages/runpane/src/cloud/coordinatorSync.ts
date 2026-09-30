@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import type { JsonObject } from '../boundaryDecoder';
+import type { CloudDeps } from './commands';
 import { decodePairingCode } from './pairing';
 import { isNotFound, type CloudHostRecord } from './store';
 
@@ -42,5 +43,15 @@ async function readCoordinatorToken(pairingPath: string | undefined): Promise<st
   } catch (error) {
     if (isNotFound(error)) return null;
     throw error;
+  }
+}
+
+/** Pushes the whole directory after a change. Never throws: the change itself already happened. */
+export async function pushDirectory(deps: Pick<CloudDeps, 'store' | 'now' | 'pushCoordinatorDirectory'>): Promise<CoordinatorPushResult> {
+  try {
+    const directory = await buildCoordinatorDirectory(await deps.store.listHosts(), new Date(deps.now()));
+    return await deps.pushCoordinatorDirectory(directory);
+  } catch (error) {
+    return { pushed: false, reason: error instanceof Error ? error.message : String(error) };
   }
 }

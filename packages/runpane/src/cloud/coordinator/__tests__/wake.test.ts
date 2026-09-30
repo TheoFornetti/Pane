@@ -161,6 +161,20 @@ describe('WakeService.wake', () => {
     assert.ok(alerts.alerts.some((alert) => alert.code === 'version-mismatch'));
   });
 
+  it('does not upgrade a per-Session pin with the coordinator-wide artifact of another version', async () => {
+    const { wake, probe, directory } = setup([sandbox('bx_a', 'stopped')], {
+      pinnedVersion: '2.0.0',
+      pinnedDebUrl: 'https://x/p-2.0.0.deb',
+      pinnedDebSha256: 'abc',
+    });
+    directory.result = { ok: true, generatedAt: null, entries: [entry('s1', 'bx_a', { pinnedVersion: '3.0.0' })] };
+    probe.upgradeAnswer = { kind: 'started' };
+    const result = await wake.wake('s1', { wait: true });
+    assert.equal(status(result), 'awake');
+    assert.ok(result.ok && /no pinnedDebUrl\/pinnedDebSha256 configured for 3.0.0/.test(result.detail));
+    assert.ok(!probe.calls.some((call) => call.startsWith('upgrade')));
+  });
+
   it('a wake keeps idle-stop away for the grace period', async () => {
     const { wake, provider, probe, directory, activity, alerts, clock } = setup([sandbox('bx_a', 'stopped')]);
     const idle = new IdleStopper({ directory, provider, probe, activity, alerts }, {

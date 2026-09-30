@@ -210,10 +210,15 @@ export class WakeService {
   private async applyPinnedVersion(entry: DirectoryEntry, report: CloudHostReport, deadline: number): Promise<CloudHostReport> {
     const pinned = entry.pinnedVersion ?? this.options.pinnedVersion;
     if (!pinned || report.version === pinned) return report;
-    const { pinnedDebUrl: url, pinnedDebSha256: sha256 } = this.options;
+    // The configured .deb belongs to the coordinator-wide pin; a per-Session pin to another version has no artifact.
+    const artifactMatches = pinned === this.options.pinnedVersion;
+    const url = artifactMatches ? this.options.pinnedDebUrl : null;
+    const sha256 = artifactMatches ? this.options.pinnedDebSha256 : null;
     if (!entry.coordinatorToken || !url || !sha256) {
-      report.detail = `version-mismatch: running ${report.version ?? 'unknown'}, pinned ${pinned} `
-        + `(${entry.coordinatorToken ? 'no pinnedDebUrl/pinnedDebSha256 configured' : 'no coordinator token'})`;
+      const reason = !entry.coordinatorToken
+        ? 'no coordinator token'
+        : `no pinnedDebUrl/pinnedDebSha256 configured for ${pinned}`;
+      report.detail = `version-mismatch: running ${report.version ?? 'unknown'}, pinned ${pinned} (${reason})`;
       this.alertVersionMismatch(entry, report.detail);
       return report;
     }

@@ -57,7 +57,7 @@ boat limits sandbox starts per account: 12 per minute, 60 per hour, 200 per day 
 by every peer counts. One `make-golden.sh` run costs **2 starts** (the source sandbox and the gate fork). A build costs
 none, because it reuses the devbox. Both creates go through `sb-create-retry.sh`: it waits out `429 rate_limited`
 (`START_WAIT_MAX_S`, default 1 h, polled every `START_WAIT_STEP_S`, default 120 s), so a limit hit between the
-snapshot and the gate doesn't abort the run and waste the start already spent. Other create errors still fail at once.
+snapshot and the gate doesn't abort the run and waste the start already spent. Other create errors still fail at once. Before every start it also runs `$RC_BIN/starts-left.sh` if that exists: exit 3 (the hour window is used up) waits, and exit 4 (the day reserve is reached) refuses.
 
 ## Environment
 

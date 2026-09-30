@@ -5,6 +5,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
+import { getDaemonTarget } from './remote/target';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { hasCadenceValueFlag, type ParsedArgs, type RunpaneAgent } from './commands';
 import type { BoundarySchema, JsonValue } from './boundaryDecoder';
@@ -2456,13 +2457,14 @@ export async function runPanesFocus(parsed: ParsedArgs): Promise<number> {
 }
 
 export async function runPanelsList(parsed: ParsedArgs): Promise<number> {
-  if (!parsed.paneId) {
+  // A peer token lists the target Session's orchestrator panel without a Pane id.
+  if (!parsed.paneId && !getDaemonTarget()) {
     throw new Error('runpane panels list requires --pane.');
   }
 
-  const result = await invokeDaemon('runpane:panels:list', [{
+  const result = await invokeDaemon('runpane:panels:list', [parsed.paneId ? {
     paneId: parsed.paneId,
-  }], panelListResultSchema, {
+  } : {}], panelListResultSchema, {
     paneDir: parsed.paneDir,
   });
 

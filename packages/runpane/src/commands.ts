@@ -25,6 +25,10 @@ export interface ParsedArgs {
   json: boolean;
   contextCommand?: string;
   paneDir?: string;
+  /** --host: a remote daemon to call over HTTP (see remote/hostDirectory.ts). */
+  host?: string;
+  /** --thread: like --host, cloud Sessions only. */
+  thread?: string;
   repo?: string;
   paneId?: string;
   sessionId?: string;
@@ -159,7 +163,7 @@ const DEFAULTS: Omit<ParsedArgs, 'command'> = {
 };
 
 export function parseRunpaneArgs(argv: string[]): ParsedArgs {
-  const args = [...argv];
+  const args = moveLeadingTargetFlags(argv);
   const first = args[0];
 
   if (!first || first === '-h' || first === '--help') {
@@ -393,6 +397,23 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
   }
 }
 
+const TARGET_FLAGS = new Set(['--host', '--thread']);
+
+/**
+ * `runpane --host B panels list` reads like `ssh host cmd`, so a leading
+ * --host/--thread pair moves behind the command, where it parses as a local
+ * flag (commands that take no target still reject it).
+ */
+function moveLeadingTargetFlags(argv: string[]): string[] {
+  const leading: string[] = [];
+  let index = 0;
+  while (TARGET_FLAGS.has(argv[index] ?? '') && argv[index + 1] !== undefined) {
+    leading.push(argv[index]!, argv[index + 1]!);
+    index += 2;
+  }
+  return [...argv.slice(index), ...leading];
+}
+
 function matchCommand(args: string[]): { name: string; tokens: string[] } | undefined {
   return COMMAND_MATCHERS.find((command) =>
     command.tokens.every((token, index) => args[index] === token)
@@ -524,6 +545,14 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
 function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): void {
   if (flag === '--pane-dir') {
     parsed.paneDir = value;
+    return;
+  }
+  if (flag === '--host') {
+    parsed.host = value;
+    return;
+  }
+  if (flag === '--thread') {
+    parsed.thread = value;
     return;
   }
   if (flag === '--repo') {
@@ -840,6 +869,18 @@ function parseNonNegativeIntegerFlag(flag: string, value: string): number {
 /** True when any cadence flag that needs a named daemon cursor was given. */
 export function hasCadenceValueFlag(parsed: ParsedArgs): boolean {
   return [parsed.settleMs, parsed.blockedSettleMs, parsed.minIntervalMs].some(value => value !== undefined);
+}
+
+/**
+ * Commands that honour --host/--thread/$RUNPANE_HOST: every daemon-control
+ * command except the ones that inspect or repair the local install, and the
+ * `runpane cloud` family, which manages hosts rather than calling one.
+ */
+export function takesDaemonTarget(command: RunpaneCommand): boolean {
+  return isRunpaneLocalCommand(command)
+    && command !== 'doctor'
+    && command !== 'daemon repair'
+    && !command.startsWith('cloud');
 }
 
 function isRunpaneLocalCommand(command: RunpaneCommand): boolean {

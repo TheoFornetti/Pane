@@ -204,6 +204,24 @@ On your local desktop machine:
 
 If the tunnel is not reachable yet, Pane still saves the profile and shows the connection error. Start the printed SSH/Tailscale tunnel and click `Connect` on the saved profile.
 
+## Drive a Remote Daemon from the `runpane` CLI
+
+Every daemon-control command (`panels`, `panes`, `repos`, `sessions`, `watch`, `workspace`, ...) can call a remote daemon over its HTTP `/invoke` API instead of the local socket:
+
+```bash
+runpane --host ~/pairing.code panels list --pane <pane-id>      # a file holding a pane-remote:// code
+runpane --host "My Server" panels submit --panel <id> --text "hi" --yes   # a saved desktop profile, by label or id
+RUNPANE_HOST=pane-remote://... runpane watch --follow
+```
+
+`--host` resolves, first match wins: a literal `pane-remote://` code or a file holding one; the runpane cloud host directories (`$RUNPANE_CLOUD_DIR/peers.json`, then `$RUNPANE_CLOUD_DIR/hosts/*.json`; `RUNPANE_CLOUD_DIR` defaults to `~/.config/runpane-cloud`); then the desktop's saved profiles in `$PANE_DIR/config.json`. Names match a profile id, label, cloud Session id, tailnet host name, or the base URL's host. `--thread <cloud-session>` does the same but only matches cloud Sessions. With a remote target, the local `PANE_SESSION_ID`/`PANE_PANEL_ID` are ignored, because they name panels on this machine.
+
+Delivery rules:
+- A submit over HTTP always carries an idempotency key, so a resend never types twice.
+- A request is resent only when its connection never opened; anything that failed after the host received it is reported as unconfirmed.
+- For a cloud host (a directory entry with a `cloud` field and a coordinator), only `panels submit` wakes a sleeping host: the CLI asks the coordinator's `POST /cloud/wake`, waits for readiness, then delivers. Every other command asks `GET /cloud/status` and fails with `ERR_RUNPANE_HOST_ASLEEP`, `_WAKING`, `_DAEMON_DOWN` or `_LOST` without waking it. Run `runpane cloud wake <host>` to wake one on purpose.
+- A peer token (see `runpane peers`) lists and submits only to the target Session's orchestrator panel: `runpane --thread <session> panels list`, then `panels submit --panel orchestrator ...`.
+
 ## Use the Mobile / Browser App
 
 The same connection code works in the Remote Pane PWA:

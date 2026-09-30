@@ -5,6 +5,8 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import type { BoundarySchema, JsonObject, JsonValue } from './boundaryDecoder';
+import type { DaemonTarget } from './remote/hostDirectory';
+import { getDaemonTarget, invokeRemote, RemoteTargetError } from './remote/target';
 
 interface PaneDaemonRequestFrame {
   type: 'request';
@@ -52,6 +54,8 @@ interface InvokeOptions {
   paneDir?: string;
   timeoutMs?: number;
   eventInclude?: string[] | null;
+  /** A remote daemon to call over HTTP; defaults to the process target from --host/--thread. */
+  target?: DaemonTarget | null;
 }
 
 interface TimeoutReference {
@@ -133,6 +137,10 @@ export async function invokeDaemon<T>(
   resultSchema: BoundarySchema<T>,
   options: InvokeOptions = {},
 ): Promise<T> {
+  const target = options.target === undefined ? getDaemonTarget() : options.target;
+  if (target) {
+    return invokeDaemonOverHttp(target, channel, args, resultSchema, options);
+  }
   const endpoint = getPaneDaemonEndpoint(resolvePaneDirectory(options.paneDir));
   const request: PaneDaemonRequestFrame = {
     type: 'request',
@@ -208,6 +216,24 @@ export async function invokeDaemon<T>(
       }
     });
   });
+}
+
+async function invokeDaemonOverHttp<T>(
+  target: DaemonTarget,
+  channel: string,
+  args: unknown[],
+  resultSchema: BoundarySchema<T>,
+  options: InvokeOptions,
+): Promise<T> {
+  try {
+    const result = await invokeRemote(target, channel, args, { timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+    return decodeBoundary(result, resultSchema);
+  } catch (error) {
+    if (error instanceof RemoteTargetError) {
+      throw new PaneDaemonClientError(error.message, error.code);
+    }
+    throw error;
+  }
 }
 
 function resolveAppDirectory(appDirectory: string, platform: NodeJS.Platform): string {

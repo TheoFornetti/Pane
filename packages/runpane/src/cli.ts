@@ -8,7 +8,7 @@ import { runAgentsSend, runAgentsStart, runAgentsStatus } from './agentTasks';
 import { daemonActionFor, runDaemonAction } from './daemonActions';
 import { runDocsRead, runDocsSearch } from './docs';
 import { runLinksCreate } from './links';
-import { helpText, parseRunpaneArgs, type ParsedArgs } from './commands';
+import { helpText, parseRunpaneArgs, takesDaemonTarget, type ParsedArgs } from './commands';
 import { boundary, decodeBoundary, type JsonObject } from './boundaryDecoder';
 import { PaneDaemonClientError } from './daemonClient';
 import { downloadArtifact } from './download';
@@ -69,6 +69,7 @@ import {
   type WrapperTelemetryContext
 } from './telemetry';
 import { printVersion } from './version';
+import { configureDaemonTarget } from './remote/target';
 
 const SOURCE = 'npm' as const;
 
@@ -145,6 +146,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'version') {
     return printVersion(parsed.panePath);
+  }
+
+  if (takesDaemonTarget(parsed.command)) {
+    configureDaemonTarget(parsed);
   }
 
   if (parsed.command === 'doctor') {

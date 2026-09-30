@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { createBoatProvider } from './boat';
 import { cloudHostname, provisionSandbox, waitForDaemonHealth } from './bootstrap';
+import { runCoordinatorCommand } from './coordinator';
 import type { CloudDeps } from './commands';
 import { defaultDesktopDir } from './desktop';
 import type { BootstrapPort } from './ports';
@@ -56,6 +57,7 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
     now: () => Date.now(),
     env,
     defaultDesktopDir: defaultDesktopDir(env),
+    runCoordinator: (argv) => runCoordinatorCommand(argv),
   };
 }
 

@@ -202,6 +202,21 @@ environment file for the Pane daemon (never on a command line) and pre-answers C
 prompts, so a Claude panel works right away. Without either, open a terminal in the cloud Session and run
 `claude` once to log in; that sign-in lives on the sandbox disk and survives sleep and wake.
 
+`new` marks only the repository it cloned (`--repo`) as trusted for Claude Code. Trust is per repository
+root, and trusting `/home/user` does not cover folders under it. The first Claude panel in a repository you
+add later (`runpane --host <Session> repos add --path ...`) stops at Claude's "Do you trust this folder?"
+dialog, whose default answer exits Claude. Answer it from the CLI: send Down, then Enter.
+
+```bash
+printf '\033[B' | runpane --host "api work" panels input --panel <panel id> --input-file - --yes
+printf '\r'     | runpane --host "api work" panels input --panel <panel id> --input-file - --yes
+```
+
+Later panels in that repository, including new worktrees, start without the dialog.
+
+The sandbox has no git identity, so an agent's `git commit` fails with "Author identity unknown" until you
+set one: `git config --global user.name ...` and `user.email ...` in a terminal in the Session.
+
 ### Other secrets for agents (`cloud secrets`)
 
 Agents often need more keys than the sign-in: a model router, a test service, a read-only token. Give them

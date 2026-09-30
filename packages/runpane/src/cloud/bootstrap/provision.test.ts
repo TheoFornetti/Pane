@@ -14,7 +14,7 @@ const PAIRING_TOKEN = 'FAKE-user-token';
 const PAIRING = encodePairingCode({
   v: 1,
   label: 'Cloud k3j9',
-  baseUrl: 'https://rp-k3j9x0q2.tail03bf19.ts.net',
+  baseUrl: 'https://rp-k3j9x0q2.tailnet-example.ts.net',
   token: PAIRING_TOKEN,
   transport: 'http+sse',
 });
@@ -58,7 +58,7 @@ class FakeSandbox implements SandboxHandle {
           backendState: 'Running',
           nodeId: 'nNEW11CNTRL',
           hostname: this.state.hostname,
-          magicDnsName: `${this.state.hostname}${this.state.dnsSuffix}.tail03bf19.ts.net`,
+          magicDnsName: `${this.state.hostname}${this.state.dnsSuffix}.tailnet-example.ts.net`,
           tailscaleIps: ['100.64.0.9'],
           tags: ['tag:rp-session'],
           runSsh: this.state.runSsh,
@@ -125,7 +125,7 @@ class FakeTailscale implements TailscaleApi {
 }
 
 function device(nodeId: string, hostname: string): TailscaleDevice {
-  return { nodeId, id: '1', hostname, name: `${hostname}.tail03bf19.ts.net`, addresses: [], tags: ['tag:rp-session'] };
+  return { nodeId, id: '1', hostname, name: `${hostname}.tailnet-example.ts.net`, addresses: [], tags: ['tag:rp-session'] };
 }
 
 const invokeBodySchema = boundary.object({ channel: boundary.string, args: boundary.array(boundary.json) });
@@ -181,8 +181,8 @@ test('provisionSandbox runs every step in order and writes the pairing file 0600
   assert.deepEqual(sandbox.steps[4].slice(2), ['rp-k3j9x0q2']);
   assert.deepEqual(sandbox.steps[5].slice(1), ['deb-url', 'https://example.test/pane.deb', 'ff', '', 'Cloud k3j9']);
   assert.deepEqual(sandbox.steps[9].slice(1), ['https://github.com/example/app.git', 'main', '/home/user/app']);
-  assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tail03bf19.ts.net');
-  assert.equal(result.baseUrl, 'https://rp-k3j9x0q2.tail03bf19.ts.net');
+  assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tailnet-example.ts.net');
+  assert.equal(result.baseUrl, 'https://rp-k3j9x0q2.tailnet-example.ts.net');
   assert.equal(result.nodeId, 'nNEW11CNTRL');
   assert.equal(result.daemonVersion, '2.4.141-rc.1');
   assert.equal(result.runSsh, false);
@@ -194,7 +194,7 @@ test('provisionSandbox runs every step in order and writes the pairing file 0600
   // The clone is registered with the daemon once it is healthy, so `panes create --repo app` works.
   assert.deepEqual(seen.slice(-4), ['health:start', 'health:done', 'register-repo:start', 'register-repo:done']);
   assert.equal(invoke.requests.length, 1);
-  assert.equal(invoke.requests[0].url, 'https://rp-k3j9x0q2.tail03bf19.ts.net/invoke');
+  assert.equal(invoke.requests[0].url, 'https://rp-k3j9x0q2.tailnet-example.ts.net/invoke');
   assert.equal(invoke.requests[0].headers.Authorization, `Bearer ${PAIRING_TOKEN}`);
   const body = decodeBoundary(JSON.parse(invoke.requests[0].body ?? '{}'), invokeBodySchema);
   assert.equal(body.channel, 'runpane:repos:add');
@@ -280,7 +280,7 @@ test('reenrolSandbox deletes the old device before wiping state, and keeps the n
   assert.deepEqual(result.deletedNodeIds, ['nOLD11CNTRL']);
   assert.deepEqual(tailscale.log, ['delete nOLD11CNTRL', 'mint']);
   assert.deepEqual(sandbox.steps.map((step) => step[0]), ['tailscale-reset', 'tailscale-up', 'serve-restore']);
-  assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tail03bf19.ts.net');
+  assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tailnet-example.ts.net');
 });
 
 test('step results parse from the last RP_RESULT line and errors are redacted', () => {

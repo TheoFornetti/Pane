@@ -25,7 +25,13 @@ if [ -n "$health" ]; then
   pid=$(pgrep -u "$(id -u)" -f -- "--daemon-headless --pane-dir $D" | head -1)
   exe=$(readlink "/proc/$pid/exe" 2>/dev/null)
   echo "INFO daemon pid=$pid exe=$exe version=$(pane $F --version 2>/dev/null | tail -1)"
-  case "$exe" in /opt/Pane/*) echo "PASS daemon runs the installed .deb ($exe)";; *) echo "FAIL daemon exe '$exe'"; fail=1;; esac
+  # boat's lazy restore hydrates forked files in the background and then swaps the finished file into place;
+  # a daemon started before that keeps the moved-aside inode under /var/lib/ascii-lazy/retired/<original path>.
+  case "$exe" in
+    /opt/Pane/*) echo "PASS daemon runs the installed .deb ($exe)";;
+    /var/lib/ascii-lazy/retired/opt/Pane/*) echo "PASS daemon runs the installed .deb (lazily restored copy: $exe)";;
+    *) echo "FAIL daemon exe '$exe'"; fail=1;;
+  esac
   hv=$(printf '%s' "$health" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("version",""))' 2>/dev/null)
   [ -n "$hv" ] && { [ "$hv" = "$EXPECT" ] && echo "PASS /health version = $hv" || { echo "FAIL /health version $hv != $EXPECT"; fail=1; }; }
 else

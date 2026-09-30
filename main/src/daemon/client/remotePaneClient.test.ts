@@ -1,6 +1,7 @@
 import http, { type IncomingMessage, type ServerResponse } from 'http';
 import { EventEmitter } from 'events';
 import { hostname as getOsHostname } from 'os';
+import type { LookupFunction } from 'net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
 import type { PaneEventSink } from '../../core/eventSink';
@@ -70,6 +71,14 @@ describe('RemotePaneClient', () => {
     activeServers.push(server);
     const serverUrl = new URL(server.baseUrl);
     const tailscaleHost = 'pane-unresolvable-for-test.invalid.ts.net';
+    // Fail the lookup here instead of asking real DNS: a slow NXDOMAIN outlasted the test timeout.
+    const unresolvableLookup: LookupFunction = (hostname, _options, callback) => {
+      const error: NodeJS.ErrnoException = Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), {
+        code: 'ENOTFOUND',
+        hostname,
+      });
+      process.nextTick(() => callback(error, '', 0));
+    };
 
     const client = new RemotePaneClient({
       id: 'profile-tailscale-fallback',
@@ -82,7 +91,7 @@ describe('RemotePaneClient', () => {
         selected: true,
         tailscaleIp: '127.0.0.1',
       },
-    });
+    }, { lookup: unresolvableLookup });
 
     await expect(client.invoke('sessions:get-all', ['session-1'])).resolves.toEqual({
       channel: 'sessions:get-all',

@@ -40,6 +40,8 @@ interface RemotePaneClientOptions {
     metadata?: RemoteConnectionStateMetadata,
   ) => void;
   onResyncRequired?: () => void;
+  /** Hostname lookup for requests; tests pass one that never asks real DNS. Defaults to dns.lookup. */
+  lookup?: LookupFunction;
 }
 
 interface RemotePaneClientConnectOptions {
@@ -117,6 +119,7 @@ type RemoteRequestOptions = RequestOptions & {
 export class RemotePaneClient {
   private readonly normalizedBaseUrl: URL;
   private readonly eventSink: PaneEventSink;
+  private readonly lookup: LookupFunction;
   private readonly initialHandshakeTimeoutMs: number;
   private readonly heartbeatStaleTimeoutMs: number;
   private readonly reconnectInitialDelayMs: number;
@@ -151,6 +154,7 @@ export class RemotePaneClient {
   ) {
     this.normalizedBaseUrl = normalizeBaseUrl(profile.baseUrl);
     this.eventSink = options.eventSink ?? noopPaneEventSink;
+    this.lookup = options.lookup ?? defaultLookup;
     this.initialHandshakeTimeoutMs = options.initialHandshakeTimeoutMs
       ?? REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS;
     this.heartbeatStaleTimeoutMs = options.heartbeatStaleTimeoutMs
@@ -445,7 +449,7 @@ export class RemotePaneClient {
   }
 
   private buildRequestOptions(endpoint: URL, options: RequestOptions): RemoteRequestOptions {
-    const lookup = createTailscaleFallbackLookup(this.profile, endpoint);
+    const lookup = createTailscaleFallbackLookup(this.profile, endpoint, this.lookup);
     const requestOptions: RemoteRequestOptions = { ...options };
     if (lookup) {
       requestOptions.lookup = lookup;
@@ -873,6 +877,7 @@ function buildRemoteEndpoint(baseUrl: URL, path: 'invoke' | 'events'): URL {
 function createTailscaleFallbackLookup(
   profile: RemotePaneConnectionProfile,
   endpoint: URL,
+  baseLookup: LookupFunction,
 ): LookupFunction | undefined {
   const hostname = normalizeLookupHostname(endpoint.hostname);
   if (isIP(hostname) !== 0) {
@@ -888,7 +893,7 @@ function createTailscaleFallbackLookup(
   }
 
   return (lookupHostname, options, callback) => {
-    defaultLookup(lookupHostname, options, (error, address, family) => {
+    baseLookup(lookupHostname, options, (error, address, family) => {
       if (!error) {
         callback(null, address, family);
         return;

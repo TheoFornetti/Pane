@@ -265,6 +265,11 @@ function parseCloudEntry(args: string[]): ParsedArgs {
   }
   const matched = matchCommand(args);
   if (!matched) {
+    // `runpane cloud peers|github|git` alone, or with --help: the usage of each of its subcommands.
+    const group = `cloud ${args[1]}`;
+    if (commandGroupUsage(group) && (args.length === 2 || args.slice(2).some(wantsHelp))) {
+      return { command: 'help', helpTopic: group, ...DEFAULTS };
+    }
     throw new Error(`Unknown cloud command: ${args[1]}\n\n${helpText('cloud')}`);
   }
   const rest = args.slice(matched.tokens.length);
@@ -1011,5 +1016,21 @@ export function helpText(topic?: string): string {
   const topicLines = topic
     ? Object.entries(helpTopics).find(([key]) => key === topic)?.[1]
     : undefined;
+  if (!topicLines && topic) {
+    const group = commandGroupUsage(topic);
+    if (group) return group;
+  }
   return (topicLines ?? helpTopics.default).join('\n');
+}
+
+/** Help for a command group with no topic of its own (e.g. `cloud github`): its subcommands' usage lines. */
+function commandGroupUsage(group: string): string | undefined {
+  const commands = RUNPANE_CONTRACT.commands.filter((command) => command.name.startsWith(`${group} `));
+  if (commands.length === 0) return undefined;
+  return [
+    'Usage:',
+    ...commands.flatMap((command) => command.usage.map((usage) => `  ${usage}`)),
+    '',
+    `Run "runpane help ${group} <command>" for options.`,
+  ].join('\n');
 }

@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -93,15 +93,16 @@ export class GitHubApiError extends Error {
 
 export function createGitHubApi(token: string, fetchImpl: typeof fetch = fetch): GitHubApi {
   async function request(method: 'GET' | 'POST' | 'DELETE', route: string, body?: Record<string, string | boolean>, okStatuses = [200, 201, 204]) {
+    const headers = new Headers({
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'runpane-cloud',
+    });
+    if (body) headers.set('Content-Type', 'application/json');
     const response = await fetchImpl(`${GITHUB_API}${route}`, {
       method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'runpane-cloud',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-      },
+      headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });
@@ -189,11 +190,17 @@ export async function pushBundle(request: BundlePushRequest, remoteBase = 'https
     GIT_CONFIG_GLOBAL: os.devNull,
     RUNPANE_CLOUD_GITHUB_TOKEN: request.token,
   };
-  const git = async (args: string[]) => (await execFileAsync('git', [
-    '-c', 'credential.helper=',
-    '-c', 'credential.helper=!f() { test "$1" = get && printf "username=x-access-token\\npassword=%s\\n" "$RUNPANE_CLOUD_GITHUB_TOKEN"; }; f',
-    ...args,
-  ], { cwd: work, env, timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 })).stdout;
+  const git = async (args: string[]): Promise<string> => {
+    const result = spawnSync('git', [
+      '-c', 'credential.helper=',
+      '-c', 'credential.helper=!f() { test "$1" = get && printf "username=x-access-token\\npassword=%s\\n" "$RUNPANE_CLOUD_GITHUB_TOKEN"; }; f',
+      ...args,
+    ], { cwd: work, env, timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8' });
+    if (result.status !== 0) {
+      throw new Error(gitFailure(result.stderr || result.error?.message || `git ${args[0]} exited ${String(result.status)}`, request.token));
+    }
+    return result.stdout;
+  };
   try {
     await git(['init', '-q', '--bare', '.']);
     if (request.prerequisites.length > 0) {
@@ -216,17 +223,14 @@ export async function pushBundle(request: BundlePushRequest, remoteBase = 'https
       case '=': return 'up-to-date';
       default: return 'fast-forward';
     }
-  } catch (error) {
-    throw new Error(gitFailure(error, request.token));
   } finally {
     await fs.rm(work, { recursive: true, force: true });
   }
 }
 
 /** git's stderr, with the token scrubbed in case a helper or remote ever echoed it. */
-function gitFailure(error: unknown, token: string): string {
-  const stderr = typeof error === 'object' && error !== null && 'stderr' in error ? String(error.stderr) : '';
-  const message = (stderr.trim() || (error instanceof Error ? error.message : String(error))).split(token).join('***');
+function gitFailure(stderr: string, token: string): string {
+  const message = stderr.trim().split(token).join('***');
   return `git push from this machine failed: ${message.split('\n').slice(-6).join(' ').trim()}`;
 }
 

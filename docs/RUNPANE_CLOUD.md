@@ -36,7 +36,7 @@ gh release list -R jamari-morrison/Pane --limit 5      # newest first
 gh release view rc-<sha> -R jamari-morrison/Pane       # check "branch rc/integration", copy the npm line
 npm i -g https://github.com/jamari-morrison/Pane/releases/download/rc-<sha>/runpane-<version>.tgz
 runpane version          # 2.4.141-rc.<date>.g<commit>
-runpane cloud --help     # lists setup, new, list, status, stop, wake, destroy, pair, sync, coordinator, peers
+runpane cloud --help     # lists setup, new, list, status, stop, wake, destroy, pair, sync, coordinator, peers, github, git
 ```
 
 Run `runpane cloud` from a normal terminal, not from a terminal inside Pane desktop. Pane puts its own
@@ -104,7 +104,8 @@ install and the first TLS certificate, or the switch to plain HTTP when no certi
    tailnet as `tag:rp-session`, with a single-use key and Tailscale SSH off;
 3. starts the Pane daemon, reachable at `https://rp-<id>.<your-tailnet>.ts.net` (or
    `http://rp-<id>.<your-tailnet>.ts.net:42137` when it fell back to plain HTTP; `new` prints which);
-4. clones `--repo` (public HTTPS repositories only; add `--ref <branch>` for a branch) into
+4. clones `--repo` (a public HTTPS repository, or a private GitHub one with `--github`: see
+   [GitHub access](#8-github-access-private-repositories-and-pushing); add `--ref <branch>` for a branch) into
    `/home/user/<repo>` and registers it with the Session's Pane, so `runpane --host <Session> panes create
    --repo <repo> ...` works right away (full command under [From the CLI](#from-the-cli));
 5. saves the host in `~/.config/runpane-cloud/hosts/` and the pairing code in
@@ -324,14 +325,105 @@ With a coordinator, that submit wakes B if it is asleep and delivers once; `pane
 never wake it.
 <!-- peers:end -->
 
-## 8. Destroy
+## 8. GitHub access (private repositories and pushing)
+
+A cloud Session never gets your own GitHub credential (your `gh` login or token reaches every repository
+you can). Instead it gets access to **one repository at a time**, and your laptop publishes its work.
+
+### Let a Session read a repository (deploy key, the default)
+
+```bash
+runpane cloud github connect "api work" --repo <owner>/<repo>
+```
+
+1. The Session generates an ed25519 key pair inside its sandbox. The private key never leaves it
+   (`~/.ssh/rp_github_<owner>-<repo>`, 0600).
+2. Your laptop registers the public key on the repository as a **read-only deploy key**, with your `gh`
+   login (`gh auth status`) or `--token-file <file>`. Adding a deploy key needs admin on the repository.
+   Your credential stays on the laptop.
+3. The Session gets an ssh host alias with github.com's host keys pinned (fetched from GitHub's API over
+   HTTPS; `StrictHostKeyChecking yes`), and `connect` checks it can read the repository with the key.
+
+Inside the Session, clone and fetch over the alias it prints:
+
+```bash
+git clone git@github.com-<owner>-<repo>:<owner>/<repo>.git
+```
+
+A read-only key can't push: GitHub refuses `git push` from the Session. That is on purpose. Publish work
+with `runpane cloud git push` (below).
+
+For a new Session, `runpane cloud new --repo https://github.com/<owner>/<repo> --github --yes` does the
+same before it clones, so private repositories work. `new` checks your credential can add a deploy key
+before it creates a sandbox.
+
+```bash
+runpane cloud github list                                  # which Session can reach which repository
+runpane cloud github disconnect "api work" [--repo <owner>/<repo>]
+```
+
+`disconnect` deletes the deploy key on GitHub (also while the Session sleeps) and removes the key files from
+the Session. `runpane cloud destroy` deletes a Session's deploy keys first. The key is listed on GitHub
+under the repository's Settings > Deploy keys as `runpane-cloud <host> (read-only)`.
+
+`--read-write` registers a writable deploy key instead. Anything in the Session (any agent) could then push
+to **any branch, including the default branch**, and deploy keys ignore most branch rules on free plans.
+Prefer the read-only default.
+
+### Publish a Session's branch (mediated push)
+
+```bash
+runpane cloud git push "api work" --path <repo dir> --branch <branch>
+```
+
+1. The Session bundles `<branch>` with `git bundle`, only the commits the repository doesn't have yet.
+2. The laptop downloads the bundle through the sandbox provider's files API (in 4 MiB parts, checked with
+   sha256).
+3. The laptop pushes it with **your** credential to `cloud/<host>/<branch>` and prints a compare URL to
+   open a pull request from.
+
+- `--path` is the repository directory in the Session (`api` means `/home/user/api`).
+- The repository comes from the directory's `origin` remote, or `--repo <owner>/<repo>`.
+- `--prefix <prefix/>` changes `cloud/<host>/`. The target is always `<prefix><branch>`, and
+  `git push` **refuses the repository's default branch, `main` and `master`**, whatever the prefix.
+- A branch that diverged from what was pushed before is refused; `--force` overwrites it (only ever the
+  branch under the prefix).
+- The Session must be awake.
+
+### Or: a fine-grained personal access token
+
+If you'd rather give the Session a token (for example to push over HTTPS from inside it), make a
+**fine-grained** token for just that repository:
+
+1. Open https://github.com/settings/personal-access-tokens/new (GitHub > your avatar > Settings >
+   Developer settings > Personal access tokens > Fine-grained tokens > **Generate new token**).
+2. **Token name**: e.g. `runpane-cloud api work`. **Expiration**: as short as you like (e.g. 30 days).
+3. **Resource owner**: the account or organization that owns the repository.
+4. **Repository access**: **Only select repositories**, then pick the one repository.
+5. **Permissions** > **Repository permissions** > **Contents**: **Read-only** (clone and fetch), or
+   **Read and write** to push from the Session. Leave everything else at *No access* (Metadata: Read-only
+   is added automatically).
+6. **Generate token**, copy it into a file (`umask 077; pbpaste > ~/rp-token` on macOS), then:
+
+```bash
+runpane cloud github connect "api work" --repo <owner>/<repo> --pat-file ~/rp-token && rm ~/rp-token
+```
+
+The token is checked against the repository from the laptop, then copied into the Session as a 0600 file
+(`~/.config/runpane-cloud-git/`) behind a git credential helper that answers only for
+`https://github.com/<owner>/<repo>`. It never appears in remotes, command lines or logs. Classic tokens
+(`ghp_...`) and `gh` login tokens are refused: they reach every repository. Organizations can require an
+owner's approval for fine-grained tokens. `disconnect` shreds the file; **delete the token itself** on
+GitHub (Settings > Developer settings > Fine-grained tokens), since GitHub gives no API for that.
+
+## 9. Destroy
 
 ```bash
 runpane cloud destroy "api work" --yes
 ```
 
-This deletes the tailnet device first, then the sandbox and its disk, checks both are gone, then removes the
-local record and the Pane desktop profile. It can't be undone: push any work to your git remote first.
+This deletes the Session's GitHub deploy keys, then the tailnet device, then the sandbox and its disk, checks both are gone, then removes the
+local record and the Pane desktop profile. It can't be undone: push any work first (`runpane cloud git push`).
 Destroy costs no boat start.
 
 ## Costs
@@ -422,6 +514,10 @@ Session (wake it first). Run it once on Sessions created with an older `runpane`
 | The phone app can't connect | The phone must be on the same tailnet (Tailscale app signed in and connected) |
 | After a wake the Session (or the coordinator) doesn't answer; `tailscale status` in the sandbox says "Logged out" | boat sometimes restores a stopped sandbox with an empty Tailscale state file. `runpane cloud wake <host>` (or `runpane cloud coordinator start`) detects it and re-enrols the node under the same name; the pairing keeps working |
 | `status` says `daemon-down` | The sandbox runs but the Pane daemon doesn't answer. Wake it again (`stop --yes`, then `wake`), or open the sandbox in boat's console and run `systemctl --user status pane-remote-daemon` |
+| `github connect` says your credential cannot add deploy keys | Deploy keys need admin on the repository. Use an admin's token (`--token-file`), or a fine-grained token (`--pat-file`) |
+| `git clone git@github.com:<owner>/<repo>` in a Session asks for a password or says `Permission denied (publickey)` | Clone over the alias `connect` printed: `git@github.com-<owner>-<repo>:<owner>/<repo>.git`. Plain `github.com` has no key |
+| `git push` inside a Session fails with `ERROR: The key you are authenticating with has been marked as read only` | Expected with the default read-only key. Run `runpane cloud git push <host> --path <dir> --branch <branch>` from the laptop |
+| `cloud git push` fails fetching commits (`not our ref` / `unadvertised object`) | The Session's `origin/*` refs name commits GitHub no longer has (a force-push or deleted branch upstream). Run `git fetch --prune origin` in the Session, then push again |
 | `status` says `lost` | The sandbox is gone on boat's side. `runpane cloud destroy <host> --yes` removes the tailnet device and the local record |
 | A tailnet host name got a `-1` suffix | A device with that name already existed. `destroy` deletes the device first; if you re-enrol a node by hand, delete the old device in the Tailscale admin console first |
 | Files written just before a stop are missing | boat powers off without warning ~4 s after the stop call. Don't use `stop --force`; let `stop` flush |
@@ -441,4 +537,5 @@ readiness (`readiness.state`: `starting`, `ready` or `degraded`).
 | `~/.config/runpane-cloud/settings.json` | golden image, default size, name prefix, runaway guard |
 | `~/.config/runpane-cloud/hosts/<host>.json`, `.pairing` | one saved cloud Session and its pairing code (0600) |
 | `~/.config/runpane-cloud/coordinator.json` | the coordinator's address and your caller token (0600) |
+| `~/.config/runpane-cloud/hosts/<host>.json` (`meta.github`) | the Session's GitHub connections: repository, deploy key id and fingerprint (no secrets) |
 | `~/.pane/config.json` | Pane desktop's saved remote hosts; `new`, `sync` and `destroy` update it. Override with `--desktop-dir` or `RUNPANE_CLOUD_DESKTOP_DIR` (`PANE_DIR` is ignored on purpose) |

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseRunpaneArgs } from '../commands';
+import { helpText, parseRunpaneArgs } from '../commands';
 import { parseCloudArgs } from './args';
 
 test('host commands take the host as a positional argument or --host', () => {
@@ -42,4 +42,17 @@ test('cloud help resolves to the group or the command topic', () => {
   assert.equal(parseRunpaneArgs(['cloud', '--help']).helpTopic, 'cloud');
   assert.equal(parseRunpaneArgs(['cloud', 'wake', '--help']).helpTopic, 'cloud wake');
   assert.throws(() => parseRunpaneArgs(['cloud', 'explode']), /Unknown cloud command: explode/u);
+});
+
+test('a cloud command group alone or with --help shows its subcommands, and hands real commands through', () => {
+  for (const argv of [['cloud', 'github'], ['cloud', 'github', '--help'], ['cloud', 'peers', '-h']]) {
+    const parsed = parseRunpaneArgs(argv);
+    assert.equal(parsed.command, 'help');
+    assert.equal(parsed.helpTopic, argv.slice(0, 2).join(' '));
+  }
+  assert.match(helpText('cloud github'), /runpane cloud github connect <host> --repo/u);
+  assert.match(helpText('cloud git'), /runpane cloud git push <host> --path <dir> --branch <branch>/u);
+  assert.match(helpText('cloud peers'), /runpane cloud peers revoke/u);
+  assert.throws(() => parseRunpaneArgs(['cloud', 'nope']), /Unknown cloud command: nope/u);
+  assert.deepEqual(parseRunpaneArgs(['cloud', 'git', 'push', 'rp-a', '--path', 'x', '--branch', 'b']).cloudArgv, ['git', 'push', 'rp-a', '--path', 'x', '--branch', 'b']);
 });

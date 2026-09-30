@@ -762,10 +762,11 @@ async function runDestroy(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const peers = await forgetPeerGrants(record, provider, deps);
   const coordinator = await pushDirectory(deps);
   if (!args.json) printCoordinatorOutcome(deps, coordinator);
+  const summary = { ok: true, host: record.profile.cloud.hostname, ...result, desktop: desktopSummary(desktop), coordinator, peers };
   report(
     args,
     deps,
-    { ok: true, host: record.profile.cloud.hostname, ...result, desktop: desktopSummary(desktop), coordinator, peers, ...(github ? { github } : {}) },
+    github ? { ...summary, github } : summary,
     `${record.profile.cloud.hostname} destroyed: tailnet device${result.deletedNodeIds.length === 1 ? '' : 's'} ${result.deletedNodeIds.join(', ') || '(none)'} deleted, sandbox ${record.profile.cloud.sandboxId} ${result.sandbox}.${github?.deletedKeys.length ? ` GitHub deploy keys deleted: ${github.deletedKeys.join(', ')}.` : ''}${github?.pats.length ? ` Delete the personal access token it used for ${github.pats.join(', ')} at https://github.com/settings/personal-access-tokens.` : ''}`,
   );
   return 0;

@@ -43,6 +43,7 @@ function runBundle(sandbox: string, branch: string, xfer: string) {
   const out = execFileSync('bash', ['-c', bundleScript(sandbox, branch, xfer)], { encoding: 'utf8' });
   const line = out.split('\n').find((candidate) => candidate.startsWith('RP_BUNDLE '));
   assert.ok(line, out);
+  // SAFETY: the RP_BUNDLE line is the JSON object bundleScript prints with exactly these fields.
   return JSON.parse(line.slice('RP_BUNDLE '.length)) as { head: string; prerequisites: string[]; commits: number; size: number; parts: string[] };
 }
 
@@ -105,6 +106,7 @@ test('the bundle script fails clearly for a missing branch or directory', async 
     try {
       execFileSync('bash', ['-c', bundleScript(dir, branch, path.join(root, 'xfer'))], { encoding: 'utf8' });
     } catch (error) {
+      // SAFETY: execFileSync rejects with an Error carrying the child's stdout when the script exits non-zero.
       stdout = String((error as { stdout?: string }).stdout);
     }
     assert.match(stdout, new RegExp(`RP_FAIL .*${message}`, 'u'));

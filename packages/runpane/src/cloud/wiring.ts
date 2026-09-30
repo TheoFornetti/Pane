@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { promisify } from 'node:util';
 import * as path from 'node:path';
@@ -97,6 +97,7 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
       return client.invoke(channel, args, { timeoutMs });
     },
     safeToStop: (profile) => askSafeToStop(profile),
+    runLocal,
   };
 }
 
@@ -148,6 +149,19 @@ async function readSecretFile(filePath: string): Promise<string> {
 }
 
 const execFileAsync = promisify(execFile);
+
+/** Runs a local program without a shell and collects its output; a non-zero exit resolves with its code. */
+function runLocal(file: string, args: readonly string[], timeoutMs: number): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, [...args], { stdio: ['ignore', 'pipe', 'pipe'], timeout: timeoutMs });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (exitCode) => resolve({ exitCode, stdout, stderr }));
+  });
+}
 
 /**
  * This CLI's package root (dist/cloud/wiring.js -> ../..), packed without maps and type declarations.

@@ -41,6 +41,8 @@ export interface CloudSettings {
   /** Largest number of live cloud sandboxes `new` may leave running (final-plan §4 runaway guard). */
   maxLiveSandboxes?: number;
   coordinator?: { enabled: boolean; deployment?: CoordinatorDeployment };
+  /** Extra name patterns (`*` wildcards) `cloud secrets set` refuses, on top of the built-in deny-list. */
+  secretsDenyList?: string[];
 }
 
 /** The coordinator sandbox `runpane cloud coordinator deploy` created (final-plan S2). */

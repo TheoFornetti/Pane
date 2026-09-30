@@ -201,6 +201,41 @@ environment file for the Pane daemon (never on a command line) and pre-answers C
 prompts, so a Claude panel works right away. Without either, open a terminal in the cloud Session and run
 `claude` once to log in; that sign-in lives on the sandbox disk and survives sleep and wake.
 
+### Other secrets for agents (`cloud secrets`)
+
+Agents often need more keys than the sign-in: a model router, a test service, a read-only token. Give them
+to one Session with `runpane cloud secrets`. Values are read **on your machine**, so nothing else ever has
+to hold them:
+
+```bash
+# from Doppler, through your local doppler CLI (dev configs only)
+runpane cloud secrets set rp-a1b2c3d4 OPENROUTER_API_KEY --from-doppler my-app/dev
+# from this shell's variable of the same name (the default), or another variable, or a file / stdin
+runpane cloud secrets set rp-a1b2c3d4 SENTRY_DSN LINEAR_API_KEY
+runpane cloud secrets set rp-a1b2c3d4 GITHUB_READ_TOKEN --from-env MY_READ_ONLY_PAT
+runpane cloud secrets set rp-a1b2c3d4 SERVICE_ACCOUNT_JSON --from-file ./sa.json
+runpane cloud secrets list rp-a1b2c3d4          # names only; values are never shown
+runpane cloud secrets rm rp-a1b2c3d4 LINEAR_API_KEY
+```
+
+- **Where they go:** a staged file written through boat's files API, which a script in the sandbox merges
+  into `~/.runpane-cloud/secrets.env` (0600, in a 0700 directory) and then shreds. Values are never in
+  boat's sandbox metadata or environment, on a command line, or in a log.
+- **Who sees them:** every panel shell started after the change. A block at the top of `~/.bashrc` and
+  `~/.zshenv` loads the file, so a new Claude or Codex panel has them without restarting the daemon.
+  Panels that were already open keep the environment they started with: open a new panel. `rm` works the
+  same way.
+- **Refused names:** production, infrastructure and secret-manager credentials never enter a Session:
+  `PRODUCTION_*`, `CLOUDFLARE_*`, `SHOPIFY_ADMIN*`, `VERCEL_*`, `NEON_*`, `DOPPLER_TOKEN` (and any
+  `DOPPLER_*`), `*_MANAGEMENT_*`, plus shell and Pane variables such as `PATH` or `PANE_*`. The check also
+  covers the name read with `--from-env`, and happens before anything is sent. Add your own patterns in
+  `~/.config/runpane-cloud/settings.json`: `"secretsDenyList": ["E2B_*", "STRIPE_SECRET_KEY"]`.
+- **`--from-doppler` refuses** configs named `prd`, `prod`, `stg`, `stage`, `staging` or `production`
+  (and branch configs of them such as `prd_hotfix`). A dev config can still hold production values:
+  pick names one by one, never "everything in the config".
+- The Session must be awake (`runpane cloud wake <host>` first). Secrets live on its disk and survive
+  sleep and wake; `destroy` deletes them with the disk.
+
 ## 5. Sleep and wake
 
 ```bash
@@ -429,6 +464,8 @@ Session (wake it first). Run it once on Sessions created with an older `runpane`
 | `runpane --host X ...` fails to connect, or says `ERR_RUNPANE_HOST_ASLEEP` | X is asleep. Only `panels submit` with a coordinator wakes a Session; otherwise run `runpane cloud wake X` |
 | A coordinator command says `no coordinator client config at .../coordinator.json` | `~/.config/runpane-cloud/coordinator.json` is missing; see [section 6](#6-the-coordinator-idle-stop-and-wake-on-submit) |
 | `new`, `destroy` or `sync` warns "Retry with: runpane cloud sync" | The coordinator was unreachable. The change itself succeeded; run `runpane cloud sync` when it is back |
+| An agent panel doesn't see a secret you just set | The panel was open before `secrets set`; open a new panel. Check the name with `runpane cloud secrets list <host>`; a login shell other than bash or zsh does not read the loader |
+| `secrets set` says "Refusing ...: it matches the deny-list pattern" | On purpose: that family of credentials never enters a Session. Use a narrower, non-production key under another name only if it really is not a production credential |
 
 To check a daemon by hand: `curl https://rp-<id>.<your-tailnet>.ts.net/health` returns its version and
 readiness (`readiness.state`: `starting`, `ready` or `degraded`).
@@ -438,7 +475,8 @@ readiness (`readiness.state`: `starting`, `ready` or `degraded`).
 | Path | What |
 |---|---|
 | `~/.config/runpane-cloud/credentials.json` | boat key, Tailscale OAuth client, Anthropic key (0600). Override the directory with `RUNPANE_CLOUD_DIR` |
-| `~/.config/runpane-cloud/settings.json` | golden image, default size, name prefix, runaway guard |
+| `~/.config/runpane-cloud/settings.json` | golden image, default size, name prefix, runaway guard, `secretsDenyList` |
+| `~/.runpane-cloud/secrets.env`, `secrets.json` (in the sandbox) | agent secrets from `runpane cloud secrets` (0600); loaded by a block at the top of `~/.bashrc` and `~/.zshenv` |
 | `~/.config/runpane-cloud/hosts/<host>.json`, `.pairing` | one saved cloud Session and its pairing code (0600) |
 | `~/.config/runpane-cloud/coordinator.json` | the coordinator's address and your caller token (0600) |
 | `~/.pane/config.json` | Pane desktop's saved remote hosts; `new`, `sync` and `destroy` update it. Override with `--desktop-dir` or `RUNPANE_CLOUD_DESKTOP_DIR` (`PANE_DIR` is ignored on purpose) |

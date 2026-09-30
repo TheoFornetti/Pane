@@ -4,7 +4,7 @@ import { CLOUD_SIZES, type CloudSize } from './provider';
 const CLOUD_TRANSPORTS = ['auto', 'https', 'http'] as const;
 export type CloudTransport = (typeof CLOUD_TRANSPORTS)[number];
 
-const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'repair', 'destroy', 'pair', 'sync', 'coordinator', 'peers'] as const;
+const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'repair', 'destroy', 'pair', 'sync', 'coordinator', 'peers', 'secrets'] as const;
 type CloudSubcommand = typeof CLOUD_SUBCOMMANDS[number];
 
 /** Subcommands that act on one host, named by a positional argument or --host. */
@@ -42,7 +42,7 @@ export interface CloudArgs {
   maxLive?: number;
   coordinator?: boolean;
   noVerify: boolean;
-  /** `runpane cloud coordinator|peers ...`: everything after the subcommand, parsed by its own module. */
+  /** `runpane cloud coordinator|peers|secrets ...`: everything after the subcommand, parsed by its own module. */
   passthrough: string[];
 }
 
@@ -106,6 +106,7 @@ const ALLOWED = {
   sync: ['--desktop-dir'],
   coordinator: [],
   peers: [],
+  secrets: [],
 } satisfies Record<CloudSubcommand, readonly string[]>;
 
 function isCloudSubcommand(value: string | undefined): value is CloudSubcommand {
@@ -131,7 +132,7 @@ export function parseCloudArgs(argv: readonly string[]): CloudArgs {
     noVerify: false,
     passthrough: [],
   };
-  if (first === 'coordinator' || first === 'peers') {
+  if (first === 'coordinator' || first === 'peers' || first === 'secrets') {
     parsed.passthrough = [...rest];
     return parsed;
   }

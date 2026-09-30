@@ -35,6 +35,9 @@ interface FakeWorld {
   /** Fake daemons: Sessions and peer records per sandbox hostname. */
   daemons: Map<string, FakeDaemon>;
   coordinatorHealthy: boolean;
+  /** Shared by every fake provider instance, so ids stay unique across `createProvider` calls. */
+  sandboxCounter: number;
+  createdByKey: Map<string, string>;
 }
 
 export interface FakeDaemon {
@@ -45,13 +48,12 @@ export interface FakeDaemon {
 function createFakeWorld(): FakeWorld {
   return {
     sandboxes: new Map(), devices: [], calls: [], scripts: [], healthy: new Set(),
-    files: new Map(), daemons: new Map(), coordinatorHealthy: true,
+    files: new Map(), daemons: new Map(), coordinatorHealthy: true, sandboxCounter: 0, createdByKey: new Map(),
   };
 }
 
 function createFakeProvider(world: FakeWorld): CloudProvider {
-  let counter = 0;
-  const createdByKey = new Map<string, string>();
+  const createdByKey = world.createdByKey;
   const need = (id: string): FakeSandbox => {
     const sandbox = world.sandboxes.get(id);
     if (!sandbox) throw new Error(`fake: no sandbox ${id}`);
@@ -88,9 +90,9 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       world.calls.push(`create ${request.name} ${request.size} ${request.fromSnapshot ?? '-'}`);
       const existing = createdByKey.get(request.idempotencyKey);
       if (existing) return snapshot(need(existing));
-      counter += 1;
+      world.sandboxCounter += 1;
       const sandbox: FakeSandbox = {
-        id: `bx_fake${String(counter).padStart(4, '0')}`,
+        id: `bx_fake${String(world.sandboxCounter).padStart(4, '0')}`,
         name: request.name,
         state: 'starting',
         providerState: 'provisioning',

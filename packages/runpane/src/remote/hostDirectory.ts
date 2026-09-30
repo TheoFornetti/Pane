@@ -5,7 +5,7 @@ import { boundary, decodeBoundary, type BoundarySchema } from '../boundaryDecode
 import type { RemoteHostProfile } from './remoteDaemonClient';
 
 /** Where a saved profile's cloud Session lives. Written by `runpane cloud` (single writer). */
-export interface CloudHostRef {
+interface CloudHostRef {
   provider: string;
   sandboxId: string;
   sessionId: string;
@@ -19,7 +19,7 @@ export interface CoordinatorRef {
   token: string;
 }
 
-export interface DirectoryHost extends RemoteHostProfile {
+interface DirectoryHost extends RemoteHostProfile {
   cloud?: CloudHostRef;
 }
 
@@ -32,7 +32,7 @@ export interface DaemonTarget {
   source: string;
 }
 
-export interface HostDirectory {
+interface HostDirectory {
   coordinator?: CoordinatorRef;
   hosts: DirectoryHost[];
 }
@@ -92,12 +92,12 @@ export interface ResolveTargetOptions {
   cloudOnly?: boolean;
 }
 
-export function cloudDirectory(env: NodeJS.ProcessEnv = process.env): string {
+function cloudDirectory(env: NodeJS.ProcessEnv = process.env): string {
   return env.RUNPANE_CLOUD_DIR?.trim() || path.join(os.homedir(), '.config', 'runpane-cloud');
 }
 
 /** The peers list the coordinator pushes into a cloud Session's sandbox. */
-export function peersFilePath(env: NodeJS.ProcessEnv = process.env): string {
+function peersFilePath(env: NodeJS.ProcessEnv = process.env): string {
   return env.RUNPANE_PEERS_FILE?.trim() || path.join(cloudDirectory(env), 'peers.json');
 }
 
@@ -194,7 +194,7 @@ function readCoordinatorFile(filePath: string): CoordinatorRef | null {
   }
 }
 
-export function readDirectoryFile(filePath: string): HostDirectory | null {
+function readDirectoryFile(filePath: string): HostDirectory | null {
   const raw = readTextFile(filePath);
   if (raw === null) return null;
   let decoded;
@@ -264,7 +264,7 @@ function readPairingSelector(selector: string): DirectoryHost | null {
   return decodePairingCode(raw.trim());
 }
 
-export function decodePairingCode(code: string): DirectoryHost {
+function decodePairingCode(code: string): DirectoryHost {
   const encoded = code.trim().slice(PAIRING_PREFIX.length);
   if (!encoded) throw new Error('The pane-remote:// connection code is empty.');
   let payload;

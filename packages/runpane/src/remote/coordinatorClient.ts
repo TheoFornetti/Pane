@@ -3,7 +3,7 @@ import type { CoordinatorRef } from './hostDirectory';
 import { DEFAULT_CONNECT_TIMEOUT_MS, nodeHttpTransport, type RemoteHttpHeaders, type RemoteHttpTransport } from './remoteDaemonClient';
 
 /** `awake` is the coordinator's success answer; the other four are the plan's sleep states. */
-export type CloudHostStatus = 'awake' | 'asleep' | 'waking' | 'daemon-down' | 'lost';
+type CloudHostStatus = 'awake' | 'asleep' | 'waking' | 'daemon-down' | 'lost';
 
 export interface CloudHostState {
   status: CloudHostStatus;

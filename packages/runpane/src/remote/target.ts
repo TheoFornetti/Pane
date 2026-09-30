@@ -27,7 +27,7 @@ export class RemoteTargetError extends Error {
 const WAKING_CHANNELS = new Set(['runpane:panels:submit', 'runpane:panels:submit-composer']);
 const IDEMPOTENT_SUBMIT_CHANNEL = 'runpane:panels:submit';
 /** `--panel orchestrator` names the target Session's orchestrator panel. */
-export const ORCHESTRATOR_PANEL_SELECTOR = 'orchestrator';
+const ORCHESTRATOR_PANEL_SELECTOR = 'orchestrator';
 const DEFAULT_WAKE_WAIT_MS = 90_000;
 const RESEND_INTERVAL_MS = 2_000;
 // Local Pane terminal ids name panels on this host, never on the target.

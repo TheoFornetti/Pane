@@ -214,11 +214,11 @@ export class RemoteDaemonClient {
   }
 }
 
-export function isAuthFailureResponse(status: number): boolean {
+function isAuthFailureResponse(status: number): boolean {
   return status === 401 || status === 403;
 }
 
-export function getRemoteAuthFailureMessage(serverMessage?: string): string {
+function getRemoteAuthFailureMessage(serverMessage?: string): string {
   const detail = serverMessage && serverMessage !== 'Remote request failed'
     ? ` (${serverMessage})`
     : '';
@@ -255,6 +255,13 @@ function delay(ms: number): Promise<void> {
  * from "connected, then failed", which decides whether a resend is safe.
  * No keep-alive agent: every call opens its own connection.
  */
+function outgoingHeaders(request: RemoteHttpRequest): http.OutgoingHttpHeaders {
+  const headers: http.OutgoingHttpHeaders = { Authorization: request.headers.Authorization };
+  if (request.headers['Content-Type']) headers['Content-Type'] = request.headers['Content-Type'];
+  if (request.body !== undefined) headers['Content-Length'] = String(Buffer.byteLength(request.body));
+  return headers;
+}
+
 export const nodeHttpTransport: RemoteHttpTransport = (request) => new Promise((resolve, reject) => {
   const url = new URL(request.url);
   const secure = url.protocol === 'https:';
@@ -276,9 +283,7 @@ export const nodeHttpTransport: RemoteHttpTransport = (request) => new Promise((
 
   const req = requestFn(url, {
     method: request.method,
-    headers: request.body === undefined
-      ? request.headers
-      : { ...request.headers, 'Content-Length': String(Buffer.byteLength(request.body)) },
+    headers: outgoingHeaders(request),
     agent: false,
   }, (res) => {
     const chunks: Buffer[] = [];

@@ -446,7 +446,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         session: clone(record),
         status,
         panes,
-        activity: [...record.activity].sort((left, right) => right.at.localeCompare(left.at)),
+        // Reverse first: the sort is stable, so entries with the same timestamp keep newest-appended first.
+        activity: [...record.activity].reverse().sort((left, right) => right.at.localeCompare(left.at)),
         report,
         refreshedAt: new Date().toISOString(),
       };

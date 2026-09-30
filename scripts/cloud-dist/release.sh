@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One shot for an integration head: build + publish the fork prerelease, build the golden image, prove it LIVE,
-# then prune older rp-loop-golden-* named snapshots (keeps the newest KEEP_GOLDENS, default 2).
+# then prune older integration goldens rp-loop-golden-<sha8> (keeps the newest KEEP_GOLDENS, default 2).
+# Only prunes after an rc/integration run; branch goldens (rp-loop-golden-br-*) are never pruned here.
 # Usage: scripts/cloud-dist/release.sh --devbox <sandboxId> --ref <branch>   (e.g. --ref rc/integration)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -10,10 +11,12 @@ KEEP_GOLDENS=${KEEP_GOLDENS:-2}
 url=$("$HERE/publish-release.sh" "$@" | tail -1)
 tag=${url##*/}
 "$HERE/make-golden.sh" --tag "$tag"
+case " $* " in *" ${INTEGRATION_REF:-rc/integration} "*) ;; *) echo "release: done $tag (branch build; no pruning)"; exit 0;; esac
 curl -sS -H @"$BOAT_HDR" https://boat.dev/api/v1/named-snapshots |
   python3 -c '
 import json,sys
-snaps=[s for s in json.load(sys.stdin).get("snapshots",[]) if s["name"].startswith("rp-loop-golden-") and s.get("status")=="ready"]
+import re
+snaps=[s for s in json.load(sys.stdin).get("snapshots",[]) if re.fullmatch(r"rp-loop-golden-[0-9a-f]{8}", s["name"]) and s.get("status")=="ready"]
 snaps.sort(key=lambda s: s["createdAt"], reverse=True)
 print("\n".join(s["name"] for s in snaps[int(sys.argv[1]):]))' "$KEEP_GOLDENS" |
   while read -r old; do

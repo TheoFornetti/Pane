@@ -94,6 +94,7 @@ export class PanelResume {
   private enabled = false;
   private status: PanelResumeStatus = { phase: 'idle', panels: [] };
   private readonly inFlight = new Map<string, Promise<void>>();
+  private readonly phaseListeners = new Set<(phase: PanelResumeStatus['phase']) => void>();
 
   constructor(private readonly deps: PanelResumeDeps) {}
 
@@ -104,6 +105,12 @@ export class PanelResume {
 
   isEnabled(): boolean {
     return this.enabled;
+  }
+
+  /** Called with `resuming` when start-up resume begins and `done` when every panel settled. */
+  onPhaseChange(listener: (phase: PanelResumeStatus['phase']) => void): () => void {
+    this.phaseListeners.add(listener);
+    return () => this.phaseListeners.delete(listener);
   }
 
   getStatus(): PanelResumeStatus {
@@ -162,10 +169,12 @@ export class PanelResume {
       })),
     };
     this.deps.log(`[PanelResume] Resuming ${candidates.length} interrupted agent panel(s)`);
+    this.emitPhase();
 
     // initializeTerminal caps concurrent spawns itself.
     await Promise.all(candidates.map(({ panel, session }) => this.start(panel, session).catch(() => undefined)));
     this.status = { ...this.status, phase: 'done', finishedAt: new Date().toISOString() };
+    this.emitPhase();
     return this.getStatus();
   }
 
@@ -263,6 +272,16 @@ export class PanelResume {
     if (exists !== false) return;
     this.deps.log(`[PanelResume] Panel ${panel.id} has no Claude transcript for ${state.agentSessionId}; starting a new conversation with that id`);
     await this.deps.updateCustomState(panel, { ...state, hasClaudeSessionId: false });
+  }
+
+  private emitPhase(): void {
+    for (const listener of this.phaseListeners) {
+      try {
+        listener(this.status.phase);
+      } catch (error) {
+        this.deps.log('[PanelResume] Phase listener failed', error instanceof Error ? error : new Error(String(error)));
+      }
+    }
   }
 
   private setEntry(panelId: string, update: Pick<PanelResumeEntry, 'state' | 'error'>): void {

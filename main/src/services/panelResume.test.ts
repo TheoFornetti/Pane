@@ -102,6 +102,18 @@ describe('PanelResume.resumeInterruptedAgents', () => {
     expect(h.launches[0]?.state).toMatchObject({ wasInterrupted: true, hasClaudeSessionId: true });
   });
 
+  it('reports resuming, then done, to phase listeners', async () => {
+    const h = harness([pane], [terminalPanel('claude', pane.id, { initialCommand: 'claude', wasInterrupted: true })]);
+    const resume = new PanelResume(h.deps);
+    const phases: string[] = [];
+    resume.onPhaseChange(phase => phases.push(phase));
+
+    const run = resume.resumeInterruptedAgents();
+    expect(phases).toEqual(['resuming']);
+    await run;
+    expect(phases).toEqual(['resuming', 'done']);
+  });
+
   it('starts a Claude panel without a transcript as a new conversation with the same id', async () => {
     const claude = terminalPanel('claude', pane.id, {
       initialCommand: 'claude', wasInterrupted: true, hasClaudeSessionId: true, agentSessionId: CLAUDE_ID,

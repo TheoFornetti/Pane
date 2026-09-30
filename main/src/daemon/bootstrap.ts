@@ -163,6 +163,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     else logger.info(message);
   };
   const panelResume = mode === 'headless' ? createPanelResume(databaseService, sessionManager, logResume) : undefined;
+  const scrollbackCheckpoint = mode === 'headless'
+    ? createScrollbackCheckpoint(SCROLLBACK_CHECKPOINT_INTERVAL_MS, logResume)
+    : undefined;
   if (panelResume) {
     panelResume.enable();
     const interrupted = await panelResume.recoverAfterRestart();
@@ -358,6 +361,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     workspaceCursorStore,
     namedLockService,
     panelResume,
+    scrollbackCheckpoint,
   };
 
   const services: AppServices = {
@@ -427,11 +431,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     },
   });
 
-  const scrollbackCheckpoint = panelResume
-    ? createScrollbackCheckpoint(SCROLLBACK_CHECKPOINT_INTERVAL_MS, logResume)
-    : undefined;
-  if (panelResume && scrollbackCheckpoint) {
-    scrollbackCheckpoint.start();
+  scrollbackCheckpoint?.start();
+  if (panelResume) {
     // Not awaited: the socket is up already, and a submit to a panel that is
     // still coming back waits for that panel on its own.
     void panelResume.resumeInterruptedAgents().then(status => {

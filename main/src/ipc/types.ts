@@ -8,6 +8,7 @@ import type { WorkspaceStateReader } from '../services/workspaceStateReader';
 import type { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import type { NamedLockService } from '../services/namedLockService';
 import type { PanelResume } from '../services/panelResume';
+import type { ScrollbackCheckpoint } from '../services/panelResumeCheckpoint';
 
 export interface DaemonHostServices extends CoreServices {
   taskQueue: TaskQueue | null;
@@ -20,6 +21,8 @@ export interface DaemonHostServices extends CoreServices {
   namedLockService?: NamedLockService;
   /** Headless only: restarts terminal panels after a daemon restart or sandbox wake. */
   panelResume?: PanelResume;
+  /** Headless only: saves live terminal scrollback; `checkpoint()` flushes now. */
+  scrollbackCheckpoint?: ScrollbackCheckpoint;
 }
 
 export interface AppServices extends DaemonHostServices {

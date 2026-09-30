@@ -97,6 +97,7 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
       return client.invoke(channel, args, { timeoutMs });
     },
     safeToStop: (profile) => askSafeToStop(profile),
+    runLocal,
   };
 }
 
@@ -148,6 +149,18 @@ async function readSecretFile(filePath: string): Promise<string> {
 }
 
 const execFileAsync = promisify(execFile);
+
+/** Runs a local program without a shell; a non-zero exit resolves (with its code) instead of rejecting. */
+async function runLocal(file: string, args: readonly string[], timeoutMs: number): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await execFileAsync(file, [...args], { timeout: timeoutMs, maxBuffer: 1024 * 1024, encoding: 'utf8' });
+    return { exitCode: 0, stdout, stderr };
+  } catch (error) {
+    const failed = error as { code?: number | string; message?: string; stdout?: string; stderr?: string };
+    if (typeof failed.code !== 'number') throw new Error(failed.code === 'ENOENT' ? `${file}: ENOENT (not installed)` : `${file} did not run: ${String(failed.code ?? failed.message)}`);
+    return { exitCode: failed.code, stdout: failed.stdout ?? '', stderr: failed.stderr ?? '' };
+  }
+}
 
 /**
  * This CLI's package root (dist/cloud/wiring.js -> ../..), packed without maps and type declarations.

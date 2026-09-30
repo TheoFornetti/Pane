@@ -42,4 +42,8 @@ test('cloud help resolves to the group or the command topic', () => {
   assert.equal(parseRunpaneArgs(['cloud', '--help']).helpTopic, 'cloud');
   assert.equal(parseRunpaneArgs(['cloud', 'wake', '--help']).helpTopic, 'cloud wake');
   assert.throws(() => parseRunpaneArgs(['cloud', 'explode']), /Unknown cloud command: explode/u);
+  assert.throws(() => parseRunpaneArgs(['cloud', 'secrets']), /Usage:\n {2}runpane cloud secrets set <host> NAME[\s\S]*runpane cloud secrets rm/u);
+  assert.throws(() => parseRunpaneArgs(['cloud', 'peers']), /runpane cloud peers allow/u);
+  assert.equal(parseRunpaneArgs(['cloud', 'secrets', 'set', '--help']).helpTopic, 'cloud secrets set');
+  assert.deepEqual(parseRunpaneArgs(['cloud', 'secrets', 'set', 'rp-x', 'A', '--from-doppler', 'app/dev']).cloudArgv, ['secrets', 'set', 'rp-x', 'A', '--from-doppler', 'app/dev']);
 });

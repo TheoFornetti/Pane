@@ -265,6 +265,9 @@ function parseCloudEntry(args: string[]): ParsedArgs {
   }
   const matched = matchCommand(args);
   if (!matched) {
+    // A command group without its subcommand (`cloud peers`, `cloud secrets`): show the group's usage.
+    const group = RUNPANE_CONTRACT.commands.filter((command) => command.name.startsWith(`cloud ${args[1]} `));
+    if (group.length > 0) throw new Error(`Usage:\n${group.flatMap((command) => command.usage).map((usage) => `  ${usage}`).join('\n')}`);
     throw new Error(`Unknown cloud command: ${args[1]}\n\n${helpText('cloud')}`);
   }
   const rest = args.slice(matched.tokens.length);

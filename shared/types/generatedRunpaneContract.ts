@@ -1501,6 +1501,40 @@ export const RUNPANE_CONTRACT = {
       "wrappers": [
         "npm"
       ]
+    },
+    {
+      "name": "cloud secrets set",
+      "summary": "Store environment variables for a cloud Session's agents. Values are resolved on this machine (env var, file or the local doppler CLI); new agent panels see them at once.",
+      "usage": [
+        "runpane cloud secrets set <host> NAME [NAME...] [--from-env VAR|--from-file <path|->|--from-doppler <project>/<config>] [--json]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud secrets list",
+      "summary": "List the names of a cloud Session's agent secrets; values are never shown.",
+      "usage": [
+        "runpane cloud secrets list <host> [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud secrets rm",
+      "summary": "Remove agent secrets from a cloud Session; new agent panels no longer see them.",
+      "usage": [
+        "runpane cloud secrets rm <host> NAME [NAME...] [--json]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "wrappers": [
+        "npm"
+      ]
     }
   ],
   "flags": {
@@ -3434,6 +3468,41 @@ export const RUNPANE_CONTRACT = {
         "  <host>   Only grants from or to this cloud Session.",
         "  --json   Print machine-readable output."
       ],
+      "cloud secrets set": [
+        "Usage:",
+        "  runpane cloud secrets set <host> NAME [NAME...] [--from-env VAR|--from-file <path|->|--from-doppler <project>/<config>] [--json]",
+        "",
+        "Store environment variables for a cloud Session's agents. Values are resolved on this machine (env var, file or the local doppler CLI); new agent panels see them at once.",
+        "",
+        "Options:",
+        "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  NAME                           Variable(s) to set; with no --from-*, read from this machine's variable of the same name.",
+        "  --from-env <VAR>               One NAME's value from this machine's variable VAR.",
+        "  --from-file <path|->           One NAME's value from a file, or stdin.",
+        "  --from-doppler <proj>/<config> Every NAME from a Doppler dev config via the local doppler CLI.",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud secrets list": [
+        "Usage:",
+        "  runpane cloud secrets list <host> [--json]",
+        "",
+        "List the names of a cloud Session's agent secrets; values are never shown.",
+        "",
+        "Options:",
+        "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud secrets rm": [
+        "Usage:",
+        "  runpane cloud secrets rm <host> NAME [NAME...] [--json]",
+        "",
+        "Remove agent secrets from a cloud Session; new agent panels no longer see them.",
+        "",
+        "Options:",
+        "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  NAME                           Variable(s) to remove.",
+        "  --json                         Print machine-readable output."
+      ],
       "cloud": [
         "Usage:",
         "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator|peers> [options]",
@@ -4688,6 +4757,27 @@ export const RUNPANE_CONTRACT = {
         "",
         "`runpane cloud peers list` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud peers list"
+      ],
+      "cloud secrets set": [
+        "Usage:",
+        "  runpane cloud secrets set <host> NAME [NAME...] [--from-env VAR|--from-file <path|->|--from-doppler <project>/<config>] [--json]",
+        "",
+        "`runpane cloud secrets set` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud secrets set"
+      ],
+      "cloud secrets list": [
+        "Usage:",
+        "  runpane cloud secrets list <host> [--json]",
+        "",
+        "`runpane cloud secrets list` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud secrets list"
+      ],
+      "cloud secrets rm": [
+        "Usage:",
+        "  runpane cloud secrets rm <host> NAME [NAME...] [--json]",
+        "",
+        "`runpane cloud secrets rm` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud secrets rm"
       ],
       "cloud": [
         "Usage:",
@@ -14979,6 +15069,109 @@ export const RUNPANE_CONTRACT = {
           "runpane cloud peers list"
         ],
         "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud secrets set": {
+        "name": "cloud secrets set",
+        "summary": "Store environment variables for a cloud Session's agents. Values are resolved on this machine (env var, file or the local doppler CLI); new agent panels see them at once.",
+        "details": "Resolves each value locally, refuses deny-listed names before anything is sent, writes the values into a staged file in the sandbox, merges them into ~/.runpane-cloud/secrets.env (0600) and shreds the staged file. A block at the top of ~/.bashrc and ~/.zshenv loads the file, so every new panel shell and the agent it starts sees the current set without a daemon restart; open panels keep their environment. Refuses a sleeping Session.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "NAME",
+            "required": true,
+            "description": "Environment variable name(s) to set. With no --from-*, each is read from this machine's variable of the same name."
+          },
+          {
+            "name": "--from-env <VAR>",
+            "required": false,
+            "description": "Read the one NAME's value from this machine's environment variable VAR."
+          },
+          {
+            "name": "--from-file <path|->",
+            "required": false,
+            "description": "Read the one NAME's value from a file, or stdin for -. One trailing newline is removed."
+          },
+          {
+            "name": "--from-doppler <project>/<config>",
+            "required": false,
+            "description": "Read every NAME with the local `doppler secrets get --plain`. prd/prod/stg/staging/production configs are refused."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud secrets set rp-red-zd56pin5 OPENROUTER_API_KEY --from-doppler my-app/dev"
+        ],
+        "notes": [
+          "Values are resolved on this machine and reach the sandbox only in a 0600 file written over the provider files API: never in sandbox metadata, env, command lines or logs. Production, infrastructure and secret-manager names (PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*, plus settings.json secretsDenyList) are refused.",
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud secrets list": {
+        "name": "cloud secrets list",
+        "summary": "List the names of a cloud Session's agent secrets; values are never shown.",
+        "details": "Reads the names from ~/.runpane-cloud/secrets.json in the sandbox over the provider exec API and marks names now on the deny-list. Refuses a sleeping Session.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud secrets list rp-red-zd56pin5"
+        ],
+        "notes": [
+          "Values are resolved on this machine and reach the sandbox only in a 0600 file written over the provider files API: never in sandbox metadata, env, command lines or logs. Production, infrastructure and secret-manager names (PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*, plus settings.json secretsDenyList) are refused.",
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud secrets rm": {
+        "name": "cloud secrets rm",
+        "summary": "Remove agent secrets from a cloud Session; new agent panels no longer see them.",
+        "details": "Removes the names from ~/.runpane-cloud/secrets.json and re-renders secrets.env. Panels already open keep the old values until they restart. Refuses a sleeping Session.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "NAME",
+            "required": true,
+            "description": "Environment variable name(s) to remove."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud secrets rm rp-red-zd56pin5 OPENROUTER_API_KEY"
+        ],
+        "notes": [
+          "Values are resolved on this machine and reach the sandbox only in a 0600 file written over the provider files API: never in sandbox metadata, env, command lines or logs. Production, infrastructure and secret-manager names (PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*, plus settings.json secretsDenyList) are refused.",
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
         ]
       }

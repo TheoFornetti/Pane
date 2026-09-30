@@ -8,6 +8,7 @@ import { NO_COORDINATOR, pushDirectory, type CoordinatorPushResult } from './coo
 import { syncDesktopProfiles, type DesktopImportResult } from './desktop';
 import { decodePairingCode } from './pairing';
 import { pushPeersFile, runPeersCommand } from './peers';
+import { runSecretsCommand } from './secrets';
 import type { BootstrapPort, TailnetDevice, TailnetPort } from './ports';
 import type { CloudProvider, CloudSandbox, CloudSize } from './provider';
 import {
@@ -61,6 +62,11 @@ export interface CloudDeps {
    * Rejects when the daemon can't answer (an older daemon, or it is down).
    */
   safeToStop?(profile: { baseUrl: string; token: string }): Promise<CloudSafeToStopAnswer>;
+  /**
+   * Runs a program on this machine without a shell (e.g. `doppler secrets get` for
+   * `cloud secrets set --from-doppler`). stdout may hold a secret: callers never print it.
+   */
+  runLocal?(file: string, args: readonly string[], timeoutMs: number): Promise<{ exitCode: number | null; stdout: string; stderr: string }>;
 }
 
 interface CoordinatorWakeResult {
@@ -109,6 +115,7 @@ export async function runCloudCommand(args: CloudArgs, deps: CloudDeps): Promise
       if (!deps.runCoordinator) throw new Error('runpane cloud coordinator is not available in this build.');
       return deps.runCoordinator(args.passthrough);
     case 'peers': return runPeersCommand(args.passthrough, deps);
+    case 'secrets': return runSecretsCommand(args.passthrough, deps);
   }
 }
 

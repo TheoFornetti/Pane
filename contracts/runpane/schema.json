@@ -542,7 +542,10 @@
         "cloud coordinator destroy",
         "cloud peers allow",
         "cloud peers revoke",
-        "cloud peers list"
+        "cloud peers list",
+        "cloud secrets set",
+        "cloud secrets list",
+        "cloud secrets rm"
       ],
       "properties": {
         "default": {
@@ -843,6 +846,15 @@
           "$ref": "#/$defs/helpLines"
         },
         "cloud peers list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud secrets set": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud secrets list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud secrets rm": {
           "$ref": "#/$defs/helpLines"
         }
       },

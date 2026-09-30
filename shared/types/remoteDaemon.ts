@@ -63,12 +63,32 @@ export interface RemoteDaemonHostRuntimeState {
   updatedAt: string;
 }
 
+export type RemoteDaemonClientScope = 'peer';
+
 export interface RemoteDaemonClientRecord {
   id: string;
   label: string;
   createdAt: string;
   tokenHash: string;
   lastUsedAt?: string;
+  /** Absent means a full-access paired client. 'peer' is another Pane Session with narrow access. */
+  scope?: RemoteDaemonClientScope;
+  /** Peer records only: orchestration Session ids on this host whose orchestrator panel the peer may reach. */
+  allowedSessionIds?: string[];
+}
+
+/**
+ * Set on profiles that `runpane cloud` created: the host is a cloud Session on a provider sandbox.
+ * Single writer (the runpane cloud CLI, then its coordinator); `version` goes up when the address
+ * changes. The desktop only reads it, for example to say a host is asleep; it never manages machines.
+ */
+export interface RemotePaneCloudInfo {
+  provider: 'boat';
+  sandboxId: string;
+  sessionId: string;
+  nodeId: string;
+  hostname: string;
+  version: number;
 }
 
 export interface RemotePaneConnectionProfile {
@@ -78,6 +98,7 @@ export interface RemotePaneConnectionProfile {
   token: string;
   transport: RemoteDaemonTransport;
   tunnel?: PaneRemoteConnectionImportPayload['tunnel'];
+  cloud?: RemotePaneCloudInfo;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -419,6 +440,8 @@ const remoteClientRecordSchema: BoundarySchema<RemoteDaemonClientRecord> = bound
   createdAt: boundary.nonEmptyString,
   tokenHash: boundary.nonEmptyString,
   lastUsedAt: boundary.optional(boundary.nonEmptyString),
+  scope: boundary.optional(boundary.literal('peer')),
+  allowedSessionIds: boundary.optional(boundary.array(boundary.nonEmptyString)),
 });
 const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportPayload['tunnel']>> = boundary.object({
   kind: boundary.enumeration('ssh', 'tailscale', 'manual'),
@@ -427,6 +450,14 @@ const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportP
   selected: boundary.boolean,
   tailscaleIp: boundary.optional(boundary.nonEmptyString),
 });
+const remoteCloudInfoSchema: BoundarySchema<RemotePaneCloudInfo> = boundary.object({
+  provider: boundary.literal('boat'),
+  sandboxId: boundary.nonEmptyString,
+  sessionId: boundary.nonEmptyString,
+  nodeId: boundary.string,
+  hostname: boundary.nonEmptyString,
+  version: boundary.number,
+});
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundary.object({
   id: boundary.nonEmptyString,
   label: boundary.nonEmptyString,
@@ -434,6 +465,7 @@ const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundar
   token: boundary.nonEmptyString,
   transport: boundary.literal('http+sse'),
   tunnel: boundary.optional(remoteTunnelSchema),
+  cloud: boundary.optional(remoteCloudInfoSchema),
 });
 const remoteImportSchema = boundary.object({
   v: boundary.literal(1),

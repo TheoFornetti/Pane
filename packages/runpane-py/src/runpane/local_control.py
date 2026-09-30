@@ -898,6 +898,8 @@ def run_panels_submit(parsed: Any) -> int:
             f"to panel {result.get('panelId')}.{verified}"
         )
         print_delivery(result.get("delivery"))
+        if result.get("deduplicated"):
+            print("This idempotency key was already used; Pane returned the first result and sent nothing again.")
         if result.get("blocked"):
             print(f"Blocked: {result['blocked'].get('message')}")
         print_prompt_notes(result)
@@ -1017,6 +1019,8 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
         raise ValueError("--keys is for panels input; panels submit sends text followed by Enter.")
     if parsed.as_file_pointer and command != "submit":
         raise ValueError("--as-file-pointer is for panels submit; panels input sends exact bytes.")
+    if parsed.idempotency_key is not None and command != "submit":
+        raise ValueError("--idempotency-key is for panels submit.")
 
     if parsed.keys is not None:
         text = keys_to_bytes(parsed.keys)
@@ -1028,6 +1032,7 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
         "panelId": parsed.panel_id,
         "input": text,
         **optional_value("asFilePointer", True if parsed.as_file_pointer else None),
+        **optional_value("idempotencyKey", parsed.idempotency_key),
     }
 
 

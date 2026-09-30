@@ -3,6 +3,7 @@ import { pipeline, type Duplex, type Writable } from 'stream';
 import { constants as zlibConstants, createGzip, gzip } from 'zlib';
 import type { AddressInfo } from 'net';
 import WebSocket, { type RawData, WebSocketServer } from 'ws';
+import { PaneCommandError } from '../core/commandError';
 import { createFanoutEventSink, noopPaneEventSink, type PaneEventSink } from '../core/eventSink';
 import type { ConfigManager } from '../services/configManager';
 import {
@@ -10,7 +11,7 @@ import {
   type RemotePaneAnalyticsSink,
 } from '../services/remoteAnalytics';
 import { terminalPanelManager } from '../services/terminalPanelManager';
-import type { PaneCommandOrigin, PaneCommandRegistry } from './commandRegistry';
+import type { PaneCommandOrigin, PaneCommandRegistry, PaneCommandValue } from './commandRegistry';
 import { authenticateRemoteDaemonBearerToken } from './auth';
 import { isPaneDaemonEventChannel } from './server';
 import {
@@ -24,11 +25,19 @@ import {
 } from '../../../shared/types/remoteDaemon';
 import { remoteHostRuntimeStateStore } from './remoteHostRuntimeState';
 import { getRemotePwaAssetResponse } from './pwaStaticAssets';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { BoundarySchema, JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { serializeJsonTransport } from './jsonTransport';
 import { cloudDaemonHealth, type CloudHealthFields } from './cloud/readiness';
 import { commandOriginForClient, userClientActivity } from './cloud/clientActivity';
+import {
+  authorizePeerInvoke,
+  isPeerAllowedChannel,
+  isPeerClient,
+  PeerRateLimiter,
+  type PeerSessionInfo,
+} from './peer/peerPolicy';
+import { readPeerSessions } from './peer/peerSessions';
 
 interface RemoteHttpAddress {
   host: string;
@@ -68,6 +77,7 @@ interface RemoteInvokeErrorPayload {
   error: {
     message: string;
     code: string;
+    details?: Record<string, JsonValue>;
   };
 }
 
@@ -84,14 +94,18 @@ interface RemoteHealthPayload extends CloudHealthFields {
   transport: 'http+sse';
 }
 
+interface AuthenticatedRemoteClient {
+  id: string;
+  tokenHash: string;
+  label: string;
+  scope?: 'peer';
+  allowedSessionIds?: string[];
+}
+
 type RemoteRequestAuthResult =
   | {
     ok: true;
-    client: {
-      id: string;
-      tokenHash: string;
-      label: string;
-    } | null;
+    client: AuthenticatedRemoteClient | null;
   }
   | {
     ok: false;
@@ -169,6 +183,9 @@ const REMOTE_DAEMON_CORS_HEADERS = {
 interface PaneRemoteHttpApiServerOptions {
   heartbeatIntervalMs?: number;
   analyticsSink?: RemotePaneAnalyticsSink;
+  /** Sessions a peer gate checks allowlists against; defaults to the registry's runpane:sessions:list. */
+  readPeerSessions?: () => Promise<PeerSessionInfo[]>;
+  peerRateLimiter?: PeerRateLimiter;
 }
 
 type RemoteHttpConfig = Pick<ReturnType<ConfigManager['getConfig']>, 'deepgramApiKey' | 'remoteDaemon'>;
@@ -197,6 +214,8 @@ export class PaneRemoteHttpApiServer {
   private nextClientConnectionId = 1;
   private readonly heartbeatIntervalMs: number;
   private readonly analyticsSink?: RemotePaneAnalyticsSink;
+  private readonly readPeerSessions: () => Promise<PeerSessionInfo[]>;
+  private readonly peerRateLimiter: PeerRateLimiter;
 
   constructor(
     private readonly commandRegistry: PaneCommandRegistry,
@@ -205,6 +224,8 @@ export class PaneRemoteHttpApiServer {
   ) {
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_REMOTE_DAEMON_HEARTBEAT_INTERVAL_MS;
     this.analyticsSink = options.analyticsSink;
+    this.readPeerSessions = options.readPeerSessions ?? (() => readPeerSessions(this.commandRegistry));
+    this.peerRateLimiter = options.peerRateLimiter ?? new PeerRateLimiter();
     this.daemonEventSink = createFanoutEventSink([
       {
         send: (channel, ...args) => {
@@ -361,12 +382,18 @@ export class PaneRemoteHttpApiServer {
 
   private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+    const auth = this.authenticateRequest(request, url.searchParams.get('access_token'));
+    if (auth.ok && isPeerClient(auth.client)) {
+      // Peers never hold a streaming connection to this host.
+      writeRawHttpError(socket, 403, 'Peers may not open WebSocket connections');
+      return;
+    }
+
     if (url.pathname !== VOICE_DEEPGRAM_STREAM_PATH) {
       socket.destroy();
       return;
     }
 
-    const auth = this.authenticateRequest(request, url.searchParams.get('access_token'));
     if (!auth.ok) {
       writeRawHttpError(socket, auth.statusCode, auth.error.message);
       return;
@@ -530,21 +557,89 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
+    if (auth.client && isPeerClient(auth.client)) {
+      await this.handlePeerInvoke(invokeRequest, auth.client, request, response);
+      return;
+    }
+
+    await this.invokeAndRespond(
+      request,
+      response,
+      invokeRequest.channel,
+      this.recordClientInvoke(invokeRequest, auth, request),
+      () => this.getInvokeArgsForRequest(invokeRequest, auth, request),
+    );
+  }
+
+  /**
+   * A peer is another Pane Session. It reaches only the orchestrator panel of
+   * Sessions that allowlist it, plus panels:list and workspace:wait scoped to
+   * those Sessions (final-plan S3, blocking problems 1 and 6).
+   */
+  private async handlePeerInvoke(
+    invokeRequest: RemoteInvokeRequest,
+    peer: AuthenticatedRemoteClient,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const deny = (statusCode: number, code: string, message: string) => {
+      this.writeJson(response, statusCode, {
+        ok: false,
+        error: { message, code },
+      } satisfies RemoteInvokeErrorPayload);
+    };
+    if (!isPeerAllowedChannel(invokeRequest.channel)) {
+      deny(403, 'ERR_PEER_CHANNEL_FORBIDDEN', `Peers may not call ${invokeRequest.channel}.`);
+      return;
+    }
+
+    const decision = authorizePeerInvoke(peer, invokeRequest.channel, invokeRequest.args, await this.readPeerSessions());
+    if (!decision.ok) {
+      deny(decision.statusCode, decision.code, decision.message);
+      return;
+    }
+    if (invokeRequest.channel === 'runpane:panels:submit' && !this.peerRateLimiter.tryAcquire(peer.id)) {
+      deny(429, 'ERR_PEER_RATE_LIMITED', 'This peer is sending too many messages; try again in a minute.');
+      return;
+    }
+
+    const panelFilter = decision.panelFilter;
+    await this.invokeAndRespond(
+      request,
+      response,
+      invokeRequest.channel,
+      'remote-peer',
+      () => namespaceIdempotencyKey(invokeRequest.channel, decision.args, peer.id),
+      panelFilter ? result => filterPanelListResult(result, panelFilter) : undefined,
+    );
+  }
+
+  private async invokeAndRespond(
+    request: IncomingMessage,
+    response: ServerResponse,
+    channel: string,
+    origin: PaneCommandOrigin,
+    buildArgs: () => JsonValue[],
+    transformResult?: (result: PaneCommandValue) => PaneCommandValue,
+  ): Promise<void> {
     try {
-      const result = await this.commandRegistry.invoke(
-        invokeRequest.channel,
-        this.getInvokeArgsForRequest(invokeRequest, auth, request),
-        { origin: this.recordClientInvoke(invokeRequest, auth, request) },
-      );
+      const result = await this.commandRegistry.invoke(channel, buildArgs(), { origin });
       this.writeJson(response, 200, {
         ok: true,
-        result,
+        result: transformResult ? transformResult(result) : result,
       } satisfies RemoteInvokeSuccessPayload, request);
     } catch (error) {
       if (error instanceof RemoteDaemonBadRequestError) {
         this.writeJson(response, error.statusCode, {
           ok: false,
           error: { message: error.message, code: error.code },
+        } satisfies RemoteInvokeErrorPayload);
+        return;
+      }
+      if (error instanceof PaneCommandError) {
+        this.writeJson(response, 409, {
+          ok: false,
+          error: { message: error.message, code: error.code, details: error.details },
         } satisfies RemoteInvokeErrorPayload);
         return;
       }
@@ -606,6 +701,18 @@ export class PaneRemoteHttpApiServer {
     const auth = this.authenticateRequest(request, url.searchParams.get('access_token'));
     if (!auth.ok) {
       this.writeJson(response, auth.statusCode, auth);
+      return;
+    }
+
+    if (isPeerClient(auth.client)) {
+      // The event stream carries every terminal's output; peers never see it.
+      this.writeJson(response, 403, {
+        ok: false,
+        error: {
+          message: 'Peers may not open the event stream; use runpane:workspace:wait.',
+          code: 'ERR_PEER_EVENTS_FORBIDDEN',
+        },
+      } satisfies RemoteInvokeErrorPayload);
       return;
     }
 
@@ -842,7 +949,9 @@ export class PaneRemoteHttpApiServer {
     auth: Extract<RemoteRequestAuthResult, { ok: true }>,
     request: IncomingMessage,
   ): JsonValue[] {
-    const args = [...invokeRequest.args];
+    const args = auth.client
+      ? namespaceIdempotencyKey(invokeRequest.channel, invokeRequest.args, auth.client.id)
+      : [...invokeRequest.args];
     if (invokeRequest.channel.startsWith('mobile:push-')) {
       if (!auth.client) {
         throw new RemoteDaemonBadRequestError(
@@ -914,6 +1023,35 @@ export class PaneRemoteHttpApiServer {
       connected_client_count_bucket: getConnectedClientCountBucket(this.eventClients.size),
     });
   }
+}
+
+/**
+ * Idempotency keys are per paired client: one client can never replay or
+ * observe another client's submit through a guessed key.
+ */
+function namespaceIdempotencyKey(channel: string, args: readonly JsonValue[], clientId: string): JsonValue[] {
+  const next = [...args];
+  if (channel !== 'runpane:panels:submit') return next;
+  const request = decodeOptionalBoundary(next[0], boundary.jsonObject);
+  const key = decodeOptionalBoundary(request?.idempotencyKey, boundary.string);
+  if (!request || key === undefined) return next;
+  next[0] = { ...request, idempotencyKey: `${clientId}:${key}` };
+  return next;
+}
+
+function filterPanelListResult(result: PaneCommandValue, visiblePanelIds: ReadonlySet<string>): PaneCommandValue {
+  const listed = serializeJsonTransport(result, boundary.object({
+    ok: boundary.boolean,
+    paneId: boundary.string,
+    panels: boundary.array(boundary.jsonObject),
+  }));
+  return {
+    ...listed,
+    panels: listed.panels.filter(panel => {
+      const panelId = decodeOptionalBoundary(panel.id, boundary.string);
+      return panelId !== undefined && visiblePanelIds.has(panelId);
+    }),
+  };
 }
 
 function getRemoteClientKind(client: ConnectedRemoteEventClient): 'desktop' | 'browser_pwa' | 'unknown' {

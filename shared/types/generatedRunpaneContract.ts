@@ -445,7 +445,8 @@ export const RUNPANE_CONTRACT = {
       "name": "panels list",
       "summary": "List tool panels inside a Pane session.",
       "usage": [
-        "runpane panels list --pane <pane-id> [--json] [--pane-dir <path>]"
+        "runpane panels list --pane <pane-id> [--json] [--pane-dir <path>]",
+        "runpane panels list (--host <target>|--thread <cloud-session>) [--pane <pane-id>] [--json]"
       ],
       "toolsets": [
         "panels"
@@ -500,7 +501,8 @@ export const RUNPANE_CONTRACT = {
       "name": "panels submit",
       "summary": "Send and submit text to a terminal panel, including idle agent composers.",
       "usage": [
-        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json] [--pane-dir <path>]"
+        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--idempotency-key <key>] --yes [--json] [--pane-dir <path>]",
+        "runpane panels submit (--host <target>|--thread <cloud-session>) --panel <panel-id|orchestrator> (--text <text>|--input-file <path|->) [--idempotency-key <key>] --yes [--json]"
       ],
       "mutates": true,
       "toolsets": [
@@ -1149,6 +1151,91 @@ export const RUNPANE_CONTRACT = {
       ]
     },
     {
+      "name": "peers list",
+      "summary": "List peer records on this host: other Sessions that may message a Session here, and which Sessions allowlist each.",
+      "usage": [
+        "runpane peers list [--json] [--pane-dir <path>]"
+      ],
+      "daemonAction": {
+        "channel": "runpane:peers:list",
+        "args": []
+      },
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "peers mint",
+      "summary": "Create a peer record for another Session and return its pane-remote:// code. The peer can reach nothing until a Session allowlists it.",
+      "usage": [
+        "runpane peers mint --name <sender-session-label> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "daemonAction": {
+        "channel": "runpane:peers:mint",
+        "args": [
+          "--name"
+        ]
+      },
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "peers allow",
+      "summary": "Let a peer submit to a Session's orchestrator panel and wait on that Session.",
+      "usage": [
+        "runpane peers allow --peer <id|label> --session <id|name> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "daemonAction": {
+        "channel": "runpane:peers:allow",
+        "args": [
+          "--peer",
+          "--session"
+        ]
+      },
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "peers deny",
+      "summary": "Remove a Session from a peer's allowlist.",
+      "usage": [
+        "runpane peers deny --peer <id|label> --session <id|name> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "daemonAction": {
+        "channel": "runpane:peers:deny",
+        "args": [
+          "--peer",
+          "--session"
+        ]
+      },
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "peers revoke",
+      "summary": "Delete a peer record; its token stops working immediately.",
+      "usage": [
+        "runpane peers revoke --peer <id|label> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "daemonAction": {
+        "channel": "runpane:peers:revoke",
+        "args": [
+          "--peer"
+        ]
+      },
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
       "name": "lock acquire",
       "summary": "Acquire a named lock on a resource shared between agents, such as one test account, optionally waiting for it.",
       "usage": [
@@ -1204,6 +1291,114 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "cloudSafeToStopResult"
+      ]
+    },
+    {
+      "name": "cloud setup",
+      "summary": "Save the cloud provider key, Tailscale OAuth client and optional Anthropic key locally (0600) for runpane cloud.",
+      "usage": [
+        "runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud new",
+      "summary": "Create a cloud Session: a sandbox from the golden image, joined to your tailnet, running a Pane daemon, saved as a remote host.",
+      "usage": [
+        "runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud list",
+      "summary": "List cloud hosts with their sandbox state.",
+      "usage": [
+        "runpane cloud list [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud status",
+      "summary": "Show one cloud host: sandbox state, tailnet device and daemon health (awake, asleep, waking, daemon-down or lost).",
+      "usage": [
+        "runpane cloud status <host> [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud stop",
+      "summary": "Put a cloud host to sleep: flush its disk, then stop the sandbox (billing stops; disk and tailnet identity are kept).",
+      "usage": [
+        "runpane cloud stop <host> [--force] [--no-wait] --yes [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud wake",
+      "summary": "Wake a sleeping cloud host and wait until its daemon answers /health on the same tailnet name.",
+      "usage": [
+        "runpane cloud wake <host> [--size <small|default|large>] [--timeout-ms <milliseconds>] [--json]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud destroy",
+      "summary": "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host.",
+      "usage": [
+        "runpane cloud destroy <host> [--desktop-dir <path>|--no-import] --yes [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud pair",
+      "summary": "Print a cloud host's pane-remote:// pairing code, for pairing a phone or another Pane app.",
+      "usage": [
+        "runpane cloud pair <host> [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud sync",
+      "summary": "Add or refresh every cloud host in Pane desktop's saved remote hosts.",
+      "usage": [
+        "runpane cloud sync [--desktop-dir <path>] [--json]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator",
+      "summary": "Run or manage the always-on runpane cloud coordinator (idle-stop, reconcile, wake).",
+      "usage": [
+        "runpane cloud coordinator <subcommand> [options]"
+      ],
+      "wrappers": [
+        "npm"
       ]
     }
   ],
@@ -1301,6 +1496,16 @@ export const RUNPANE_CONTRACT = {
         "name": "--pane-dir",
         "value": "<path>",
         "description": "Connect to a Pane daemon using this Pane data directory."
+      },
+      {
+        "name": "--host",
+        "value": "<name|session-id|pane-remote://...|pairing-file>",
+        "description": "Call a remote Pane daemon over HTTP instead of the local socket: a saved or cloud host, a connection code, or a file holding one. Defaults to $RUNPANE_HOST. A submit wakes a sleeping cloud host through the runpane cloud coordinator; other commands report it asleep."
+      },
+      {
+        "name": "--thread",
+        "value": "<cloud-session>",
+        "description": "Like --host, but only matches cloud Sessions (by Session id, host name or label) from the peers list or runpane cloud host records."
       },
       {
         "name": "--repo",
@@ -1527,6 +1732,16 @@ export const RUNPANE_CONTRACT = {
         "description": "Named orchestration Session id or exact name."
       },
       {
+        "name": "--peer",
+        "value": "<id|label>",
+        "description": "Peer record id or exact label."
+      },
+      {
+        "name": "--idempotency-key",
+        "value": "<key>",
+        "description": "Repeat-safe key for panels submit: the same key within 10 minutes returns the first result instead of sending again."
+      },
+      {
         "name": "--ttl",
         "value": "<duration>",
         "description": "How long a named lock is held before it expires: a number with ms, s, m, or h (such as 30m); a bare number is milliseconds. At least 1s, at most 24h."
@@ -1732,6 +1947,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
         "  runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]",
+        "  runpane peers <list|mint|allow|deny|revoke> [options]",
         "  runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]",
@@ -1775,6 +1991,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panes move --pane <pane-id> --folder <folder-id> --yes [--json] [--pane-dir <path>]",
         "  runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]",
         "  runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]",
+        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync> [options]",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -2265,7 +2482,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "panels submit": [
         "Usage:",
-        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json]",
+        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--idempotency-key <key>] --yes [--json]",
         "",
         "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
         "",
@@ -2443,6 +2660,42 @@ export const RUNPANE_CONTRACT = {
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
         "  --agent <codex|claude|cursor>  Agent terminal to use.",
         "  --json                       Print JSON output."
+      ],
+      "peers": [
+        "Usage:",
+        "  runpane peers <list|mint|allow|deny|revoke> [options]",
+        "",
+        "A peer is another Pane Session (usually a Runpane Cloud Session) holding a narrow pairing to this host. It may submit only to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session. It cannot read terminals, open /events, or report. Allowlists start empty."
+      ],
+      "peers list": [
+        "Usage:",
+        "  runpane peers list [--json]",
+        "",
+        "Lists peer records and the Session ids each may reach. Tokens are never shown."
+      ],
+      "peers mint": [
+        "Usage:",
+        "  runpane peers mint --name <sender-session-label> --yes [--json]",
+        "",
+        "Creates a peer record and prints its pane-remote:// code in data.connectionCode. Give the code only to the sending Session and treat it as a secret. The label frames every message the peer sends: [peer message from <label>]. Then run runpane peers allow."
+      ],
+      "peers allow": [
+        "Usage:",
+        "  runpane peers allow --peer <id|label> --session <id|name> --yes [--json]",
+        "",
+        "Adds a Session to the peer's allowlist."
+      ],
+      "peers deny": [
+        "Usage:",
+        "  runpane peers deny --peer <id|label> --session <id|name> --yes [--json]",
+        "",
+        "Removes a Session from the peer's allowlist."
+      ],
+      "peers revoke": [
+        "Usage:",
+        "  runpane peers revoke --peer <id|label> --yes [--json]",
+        "",
+        "Deletes the peer record."
       ],
       "panes git-status": [
         "Usage:",
@@ -2838,6 +3091,150 @@ export const RUNPANE_CONTRACT = {
         "  --force                      Flush even when something blocks (a stop the user asked for).",
         "  --dry-run                    Only check; do not flush.",
         "  --json                       Print JSON output."
+      ],
+      "cloud setup": [
+        "Usage:",
+        "  runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
+        "",
+        "Save the cloud provider key, Tailscale OAuth client and optional Anthropic key locally (0600) for runpane cloud.",
+        "",
+        "Options:",
+        "  --boat-key-file <path|->           File (or - for stdin) holding the boat.dev API key.",
+        "  --tailscale-client-id <id>         Tailscale OAuth client id (auth_keys scope for tag:rp-session).",
+        "  --tailscale-secret-file <path|->   File (or - for stdin) holding the Tailscale OAuth client secret.",
+        "  --tailscale-tailnet <name>         Tailnet name; default is the OAuth client's own tailnet.",
+        "  --anthropic-key-file <path|->      File (or - for stdin) holding an Anthropic API key for cloud Sessions.",
+        "  --golden <snapshot>                Named snapshot new cloud Sessions start from.",
+        "  --no-golden                        Start new cloud Sessions from the plain image.",
+        "  --size <small|default|large>       Default machine size.",
+        "  --name-prefix <prefix>             Prefix for sandbox and tailnet host names (default rp).",
+        "  --pane-deb-url <url>               Install the Pane daemon from this .deb.",
+        "  --pane-npm-spec <spec>             Install the Pane daemon with this runpane npm spec (default runpane@latest).",
+        "  --pane-preinstalled                Use the Pane already in the golden image.",
+        "  --max-live <count>                 Runaway guard: most live cloud sandboxes (default 25).",
+        "  --coordinator                      Mint a coordinator client for each new cloud Session.",
+        "  --no-verify                        Skip the live key checks.",
+        "  --json                             Print machine-readable output."
+      ],
+      "cloud new": [
+        "Usage:",
+        "  runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
+        "",
+        "Create a cloud Session: a sandbox from the golden image, joined to your tailnet, running a Pane daemon, saved as a remote host.",
+        "",
+        "Options:",
+        "  --label <name>                 Name shown in Pane.",
+        "  --repo <https-url>             Public repository to clone into the sandbox.",
+        "  --ref <ref>                    Branch or tag to check out.",
+        "  --size <small|default|large>   Machine size.",
+        "  --from <snapshot>              Named snapshot to start from (default: the saved golden).",
+        "  --no-golden                    Start from the plain image.",
+        "  --name-prefix <prefix>         Prefix for the sandbox and tailnet host name.",
+        "  --pane-deb-url <url>           Install the Pane daemon from this .deb.",
+        "  --pane-npm-spec <spec>         Install with this runpane npm spec.",
+        "  --pane-preinstalled            Use the Pane in the image.",
+        "  --desktop-dir <path>           Desktop Pane data directory whose saved remote hosts to update (default $RUNPANE_CLOUD_DESKTOP_DIR, else ~/.pane; $PANE_DIR is ignored).",
+        "  --no-import                    Do not add the host to Pane desktop.",
+        "  --timeout-ms <milliseconds>    How long to wait for the daemon /health.",
+        "  --keep-on-failure              Keep a sandbox whose setup failed, for debugging.",
+        "  --yes                          Confirm this change; required because it costs money or deletes data.",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud list": [
+        "Usage:",
+        "  runpane cloud list [--json]",
+        "",
+        "List cloud hosts with their sandbox state.",
+        "",
+        "Options:",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud status": [
+        "Usage:",
+        "  runpane cloud status <host> [--json]",
+        "",
+        "Show one cloud host: sandbox state, tailnet device and daemon health (awake, asleep, waking, daemon-down or lost).",
+        "",
+        "Options:",
+        "  <host>   Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud stop": [
+        "Usage:",
+        "  runpane cloud stop <host> [--force] [--no-wait] --yes [--json]",
+        "",
+        "Put a cloud host to sleep: flush its disk, then stop the sandbox (billing stops; disk and tailnet identity are kept).",
+        "",
+        "Options:",
+        "  <host>      Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --force     Skip the disk flush.",
+        "  --no-wait   Return once the stop is accepted.",
+        "  --yes       Confirm this change; required because it costs money or deletes data.",
+        "  --json      Print machine-readable output."
+      ],
+      "cloud wake": [
+        "Usage:",
+        "  runpane cloud wake <host> [--size <small|default|large>] [--timeout-ms <milliseconds>] [--json]",
+        "",
+        "Wake a sleeping cloud host and wait until its daemon answers /health on the same tailnet name.",
+        "",
+        "Options:",
+        "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --size <small|default|large>   Resume onto a different machine size.",
+        "  --timeout-ms <milliseconds>    How long to wait for the daemon /health.",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud destroy": [
+        "Usage:",
+        "  runpane cloud destroy <host> [--desktop-dir <path>|--no-import] --yes [--json]",
+        "",
+        "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host.",
+        "",
+        "Options:",
+        "  <host>                 Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --desktop-dir <path>   Desktop Pane data directory whose saved remote hosts to update (default $RUNPANE_CLOUD_DESKTOP_DIR, else ~/.pane; $PANE_DIR is ignored).",
+        "  --no-import            Leave Pane desktop's saved remote hosts untouched.",
+        "  --yes                  Confirm this change; required because it costs money or deletes data.",
+        "  --json                 Print machine-readable output."
+      ],
+      "cloud pair": [
+        "Usage:",
+        "  runpane cloud pair <host> [--json]",
+        "",
+        "Print a cloud host's pane-remote:// pairing code, for pairing a phone or another Pane app.",
+        "",
+        "Options:",
+        "  <host>   Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud sync": [
+        "Usage:",
+        "  runpane cloud sync [--desktop-dir <path>] [--json]",
+        "",
+        "Add or refresh every cloud host in Pane desktop's saved remote hosts.",
+        "",
+        "Options:",
+        "  --desktop-dir <path>   Desktop Pane data directory whose saved remote hosts to update (default $RUNPANE_CLOUD_DESKTOP_DIR, else ~/.pane; $PANE_DIR is ignored).",
+        "  --json                 Print machine-readable output."
+      ],
+      "cloud coordinator": [
+        "Usage:",
+        "  runpane cloud coordinator <subcommand> [options]",
+        "",
+        "Run or manage the always-on runpane cloud coordinator (idle-stop, reconcile, wake).",
+        "",
+        "Options:",
+        "  <subcommand>   Coordinator subcommand."
+      ],
+      "cloud": [
+        "Usage:",
+        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator> [options]",
+        "",
+        "Run each Pane Session on its own cloud sandbox with a normal Pane daemon, paired to your Pane apps as a remote host.",
+        "Keys stay on this machine (~/.config/runpane-cloud, 0600). Pane desktop only lists the saved remote hosts.",
+        "",
+        "Start with: runpane cloud setup, then runpane cloud new --yes.",
+        "Run \"runpane help cloud <command>\" for options."
       ]
     },
     "pip": {
@@ -2899,6 +3296,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane peers <list|mint|allow|deny|revoke> [options]",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -3370,7 +3768,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "panels submit": [
         "Usage:",
-        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json]",
+        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--idempotency-key <key>] --yes [--json]",
         "",
         "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
         "",
@@ -3548,6 +3946,42 @@ export const RUNPANE_CONTRACT = {
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
         "  --agent <codex|claude|cursor>  Agent terminal to use.",
         "  --json                       Print JSON output."
+      ],
+      "peers": [
+        "Usage:",
+        "  runpane peers <list|mint|allow|deny|revoke> [options]",
+        "",
+        "A peer is another Pane Session (usually a Runpane Cloud Session) holding a narrow pairing to this host. It may submit only to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session. It cannot read terminals, open /events, or report. Allowlists start empty."
+      ],
+      "peers list": [
+        "Usage:",
+        "  runpane peers list [--json]",
+        "",
+        "Lists peer records and the Session ids each may reach. Tokens are never shown."
+      ],
+      "peers mint": [
+        "Usage:",
+        "  runpane peers mint --name <sender-session-label> --yes [--json]",
+        "",
+        "Creates a peer record and prints its pane-remote:// code in data.connectionCode. Give the code only to the sending Session and treat it as a secret. The label frames every message the peer sends: [peer message from <label>]. Then run runpane peers allow."
+      ],
+      "peers allow": [
+        "Usage:",
+        "  runpane peers allow --peer <id|label> --session <id|name> --yes [--json]",
+        "",
+        "Adds a Session to the peer's allowlist."
+      ],
+      "peers deny": [
+        "Usage:",
+        "  runpane peers deny --peer <id|label> --session <id|name> --yes [--json]",
+        "",
+        "Removes a Session from the peer's allowlist."
+      ],
+      "peers revoke": [
+        "Usage:",
+        "  runpane peers revoke --peer <id|label> --yes [--json]",
+        "",
+        "Deletes the peer record."
       ],
       "panes git-status": [
         "Usage:",
@@ -3912,6 +4346,83 @@ export const RUNPANE_CONTRACT = {
         "  --force                      Flush even when something blocks (a stop the user asked for).",
         "  --dry-run                    Only check; do not flush.",
         "  --json                       Print JSON output."
+      ],
+      "cloud setup": [
+        "Usage:",
+        "  runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
+        "",
+        "`runpane cloud setup` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud setup"
+      ],
+      "cloud new": [
+        "Usage:",
+        "  runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
+        "",
+        "`runpane cloud new` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud new"
+      ],
+      "cloud list": [
+        "Usage:",
+        "  runpane cloud list [--json]",
+        "",
+        "`runpane cloud list` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud list"
+      ],
+      "cloud status": [
+        "Usage:",
+        "  runpane cloud status <host> [--json]",
+        "",
+        "`runpane cloud status` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud status"
+      ],
+      "cloud stop": [
+        "Usage:",
+        "  runpane cloud stop <host> [--force] [--no-wait] --yes [--json]",
+        "",
+        "`runpane cloud stop` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud stop"
+      ],
+      "cloud wake": [
+        "Usage:",
+        "  runpane cloud wake <host> [--size <small|default|large>] [--timeout-ms <milliseconds>] [--json]",
+        "",
+        "`runpane cloud wake` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud wake"
+      ],
+      "cloud destroy": [
+        "Usage:",
+        "  runpane cloud destroy <host> [--desktop-dir <path>|--no-import] --yes [--json]",
+        "",
+        "`runpane cloud destroy` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud destroy"
+      ],
+      "cloud pair": [
+        "Usage:",
+        "  runpane cloud pair <host> [--json]",
+        "",
+        "`runpane cloud pair` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud pair"
+      ],
+      "cloud sync": [
+        "Usage:",
+        "  runpane cloud sync [--desktop-dir <path>] [--json]",
+        "",
+        "`runpane cloud sync` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud sync"
+      ],
+      "cloud coordinator": [
+        "Usage:",
+        "  runpane cloud coordinator <subcommand> [options]",
+        "",
+        "`runpane cloud coordinator` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator"
+      ],
+      "cloud": [
+        "Usage:",
+        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator> [options]",
+        "",
+        "`runpane cloud` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud"
       ]
     }
   },
@@ -4042,7 +4553,9 @@ export const RUNPANE_CONTRACT = {
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
       "`runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.",
       "`runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. HTML files render in a browser tab and other files open in an editor tab; an existing tab showing the same target is reused. It activates the tab inside the Pane but never raises or focuses the Pane window.",
-      "`runpane panels list` lists tool panels inside one Pane session.",
+      "`runpane panels list` lists tool panels inside one Pane session. Terminal panels carry `runState` (`running`, `resuming`, `interrupted`: an agent stopped by a daemon restart whose conversation resumes on the next start or submit, or `stopped`) and `resumable` (a restart brings back the agent's conversation, not only its program).",
+      "On a headless daemon, `panels submit`, `panels input`, `panels submit-composer` and `panels wait` start a terminal panel that is not running (resuming an agent's conversation, or a fresh shell) before delivering input. When a panel cannot run (its Pane is archived, or the desktop app has not opened it), they fail with code `ERR_PANEL_NOT_RUNNING` and details `{ panelId, paneId, runState, resumable }`.",
+      "When a command run with `--json` fails, stdout carries one object `{ \"ok\": false, \"code\": \"...\", \"message\": \"...\", \"details\": { ... } }` (details only when the daemon sent them), the message also goes to stderr, and the exit code is 1. `code` is the daemon's code (for example `ERR_PANEL_NOT_RUNNING`, `ERR_DAEMON_REQUEST_FAILED`, `ERR_RUNPANE_DAEMON_CONNECT_FAILED`) or `ERR_RUNPANE_COMMAND_FAILED` for a CLI-side failure. `watch` keeps its own error format, and `runpane mcp` tool errors carry only the message.",
       "`runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.",
       "`runpane panels input` sends exact input bytes to one terminal panel. Prefer `--input-file` for newlines, Ctrl-C, quotes, or shell-sensitive text.",
       "`runpane panes create --prompt` is an alias for `--initial-input`; request JSON and daemon payloads should use the canonical `initialInput` field.",
@@ -7758,6 +8271,12 @@ export const RUNPANE_CONTRACT = {
         },
         "asFilePointer": {
           "type": "boolean"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "agentOnly": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -7871,6 +8390,9 @@ export const RUNPANE_CONTRACT = {
             "observed",
             "unverifiable"
           ]
+        },
+        "deduplicated": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -11121,6 +11643,12 @@ export const RUNPANE_CONTRACT = {
             "description": "Write the prompt or text to a private file under the Pane directory and send the one line `Read and follow <path>` instead."
           },
           {
+            "name": "--idempotency-key",
+            "value": "<key>",
+            "required": false,
+            "description": "Repeat-safe key (1-256 of A-Z a-z 0-9 . _ : -). The same key within 10 minutes returns the first result with `deduplicated: true` and sends nothing. Retry with the same key only when the first attempt never reached Pane."
+          },
+          {
             "name": "--yes",
             "required": false,
             "description": "Skip confirmation for this mutating command."
@@ -13006,6 +13534,212 @@ export const RUNPANE_CONTRACT = {
           "The result includes `locks`: named locks scoped to the Session or held by its Panes (see `runpane lock`)."
         ]
       },
+      "peers list": {
+        "name": "peers list",
+        "summary": "List peer records and the Sessions that allowlist each.",
+        "details": "Use this to audit which other Sessions can message Sessions on this host. Tokens are never shown.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane peers list --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Peers are paired client records with scope peer. A peer may only submit to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session; /events, WebSocket upgrades and every other channel answer 403.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "peers mint": {
+        "name": "peers mint",
+        "summary": "Create a peer record for another Session and return its pane-remote:// code.",
+        "details": "Run on the receiving host. The label is the sending Session's name; it frames each message the peer sends as `[peer message from <label>]`. The new peer's allowlist is empty until `peers allow`. data.connectionCode carries a secret token: hand it only to the sending Session.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--name",
+            "value": "<sender-session-label>",
+            "required": true,
+            "description": "The sending Session's label."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane peers mint --name \"Session A\" --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Peers are paired client records with scope peer. A peer may only submit to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session; /events, WebSocket upgrades and every other channel answer 403.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "peers allow": {
+        "name": "peers allow",
+        "summary": "Let a peer reach a Session's orchestrator panel.",
+        "details": "Adds the Session to the peer's allowlist.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--peer",
+            "value": "<id|label>",
+            "required": true,
+            "description": "Peer record id or exact label from peers list."
+          },
+          {
+            "name": "--session",
+            "value": "<id|name>",
+            "required": true,
+            "description": "Session id or exact name on this host."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane peers allow --peer \"Session A\" --session \"Session B\" --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Peers are paired client records with scope peer. A peer may only submit to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session; /events, WebSocket upgrades and every other channel answer 403.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "peers deny": {
+        "name": "peers deny",
+        "summary": "Remove a Session from a peer's allowlist.",
+        "details": "The peer keeps its record but can no longer reach that Session.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--peer",
+            "value": "<id|label>",
+            "required": true,
+            "description": "Peer record id or exact label from peers list."
+          },
+          {
+            "name": "--session",
+            "value": "<id|name>",
+            "required": true,
+            "description": "Session id or exact name on this host."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane peers deny --peer \"Session A\" --session \"Session B\" --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Peers are paired client records with scope peer. A peer may only submit to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session; /events, WebSocket upgrades and every other channel answer 403.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "peers revoke": {
+        "name": "peers revoke",
+        "summary": "Delete a peer record.",
+        "details": "Its token stops working on the next request.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--peer",
+            "value": "<id|label>",
+            "required": true,
+            "description": "Peer record id or exact label from peers list."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane peers revoke --peer \"Session A\" --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Peers are paired client records with scope peer. A peer may only submit to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session; /events, WebSocket upgrades and every other channel answer 403.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
       "lock acquire": {
         "name": "lock acquire",
         "summary": "Acquire a named lock on a resource shared between agents, such as one test account, optionally waiting for it.",
@@ -13213,6 +13947,452 @@ export const RUNPANE_CONTRACT = {
           "lockListResult"
         ],
         "notes": []
+      },
+      "cloud setup": {
+        "name": "cloud setup",
+        "summary": "Save the cloud provider key, Tailscale OAuth client and optional Anthropic key locally (0600) for runpane cloud.",
+        "details": "Keys are read from files or stdin, never from arguments, and are stored in ~/.config/runpane-cloud (override with $RUNPANE_CLOUD_DIR). The desktop app never sees them.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--boat-key-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "File (or - for stdin) holding the boat.dev API key."
+          },
+          {
+            "name": "--tailscale-client-id",
+            "value": "<id>",
+            "required": false,
+            "description": "Tailscale OAuth client id (auth_keys scope for tag:rp-session)."
+          },
+          {
+            "name": "--tailscale-secret-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "File (or - for stdin) holding the Tailscale OAuth client secret."
+          },
+          {
+            "name": "--tailscale-tailnet",
+            "value": "<name>",
+            "required": false,
+            "description": "Tailnet name; default is the OAuth client's own tailnet."
+          },
+          {
+            "name": "--anthropic-key-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "File (or - for stdin) holding an Anthropic API key for cloud Sessions."
+          },
+          {
+            "name": "--golden",
+            "value": "<snapshot>",
+            "required": false,
+            "description": "Named snapshot new cloud Sessions start from."
+          },
+          {
+            "name": "--no-golden",
+            "required": false,
+            "description": "Start new cloud Sessions from the plain image."
+          },
+          {
+            "name": "--size",
+            "value": "<small|default|large>",
+            "required": false,
+            "description": "Default machine size."
+          },
+          {
+            "name": "--name-prefix",
+            "value": "<prefix>",
+            "required": false,
+            "description": "Prefix for sandbox and tailnet host names (default rp)."
+          },
+          {
+            "name": "--pane-deb-url",
+            "value": "<url>",
+            "required": false,
+            "description": "Install the Pane daemon from this .deb."
+          },
+          {
+            "name": "--pane-npm-spec",
+            "value": "<spec>",
+            "required": false,
+            "description": "Install the Pane daemon with this runpane npm spec (default runpane@latest)."
+          },
+          {
+            "name": "--pane-preinstalled",
+            "required": false,
+            "description": "Use the Pane already in the golden image."
+          },
+          {
+            "name": "--max-live",
+            "value": "<count>",
+            "required": false,
+            "description": "Runaway guard: most live cloud sandboxes (default 25)."
+          },
+          {
+            "name": "--coordinator",
+            "required": false,
+            "description": "Mint a coordinator client for each new cloud Session."
+          },
+          {
+            "name": "--no-verify",
+            "required": false,
+            "description": "Skip the live key checks."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud setup --boat-key-file ~/boat.key --tailscale-client-id kXXXX --tailscale-secret-file ~/ts.secret"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud new": {
+        "name": "cloud new",
+        "summary": "Create a cloud Session: a sandbox from the golden image, joined to your tailnet, running a Pane daemon, saved as a remote host.",
+        "details": "The pane-remote:// pairing is written to a 0600 file and never printed. When Pane desktop is installed here, the host is added to its saved remote hosts so the host switcher lists it. If setup fails, the sandbox and its tailnet device are removed unless --keep-on-failure.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--label",
+            "value": "<name>",
+            "required": false,
+            "description": "Name shown in Pane."
+          },
+          {
+            "name": "--repo",
+            "value": "<https-url>",
+            "required": false,
+            "description": "Public repository to clone into the sandbox."
+          },
+          {
+            "name": "--ref",
+            "value": "<ref>",
+            "required": false,
+            "description": "Branch or tag to check out."
+          },
+          {
+            "name": "--size",
+            "value": "<small|default|large>",
+            "required": false,
+            "description": "Machine size."
+          },
+          {
+            "name": "--from",
+            "value": "<snapshot>",
+            "required": false,
+            "description": "Named snapshot to start from (default: the saved golden)."
+          },
+          {
+            "name": "--no-golden",
+            "required": false,
+            "description": "Start from the plain image."
+          },
+          {
+            "name": "--name-prefix",
+            "value": "<prefix>",
+            "required": false,
+            "description": "Prefix for the sandbox and tailnet host name."
+          },
+          {
+            "name": "--pane-deb-url",
+            "value": "<url>",
+            "required": false,
+            "description": "Install the Pane daemon from this .deb."
+          },
+          {
+            "name": "--pane-npm-spec",
+            "value": "<spec>",
+            "required": false,
+            "description": "Install with this runpane npm spec."
+          },
+          {
+            "name": "--pane-preinstalled",
+            "required": false,
+            "description": "Use the Pane in the image."
+          },
+          {
+            "name": "--desktop-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Desktop Pane data directory whose saved remote hosts to update (default $RUNPANE_CLOUD_DESKTOP_DIR, else ~/.pane; $PANE_DIR is ignored)."
+          },
+          {
+            "name": "--no-import",
+            "required": false,
+            "description": "Do not add the host to Pane desktop."
+          },
+          {
+            "name": "--timeout-ms",
+            "value": "<milliseconds>",
+            "required": false,
+            "description": "How long to wait for the daemon /health."
+          },
+          {
+            "name": "--keep-on-failure",
+            "required": false,
+            "description": "Keep a sandbox whose setup failed, for debugging."
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm this change; required because it costs money or deletes data."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud new --label \"Checkout rewrite\" --repo https://github.com/acme/shop.git --size large --yes"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud list": {
+        "name": "cloud list",
+        "summary": "List cloud hosts with their sandbox state.",
+        "details": "Reads the local host records and the provider list; it never probes daemons, so it is fast and safe to run anytime.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud list --json"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud status": {
+        "name": "cloud status",
+        "summary": "Show one cloud host: sandbox state, tailnet device and daemon health (awake, asleep, waking, daemon-down or lost).",
+        "details": "Checks the provider, the tailnet device and, when the sandbox runs, GET /health over the tailnet. Exit code 1 means lost.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud status rp-abc12345 --json"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud stop": {
+        "name": "cloud stop",
+        "summary": "Put a cloud host to sleep: flush its disk, then stop the sandbox (billing stops; disk and tailnet identity are kept).",
+        "details": "boat stops are a hard power-off after a live snapshot (no SIGTERM), so the CLI runs sync in the sandbox first. The tailnet identity and disk survive.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--force",
+            "required": false,
+            "description": "Skip the disk flush."
+          },
+          {
+            "name": "--no-wait",
+            "required": false,
+            "description": "Return once the stop is accepted."
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm this change; required because it costs money or deletes data."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud stop rp-abc12345 --yes"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud wake": {
+        "name": "cloud wake",
+        "summary": "Wake a sleeping cloud host and wait until its daemon answers /health on the same tailnet name.",
+        "details": "Resumes a stopped sandbox (a fresh machine with the same disk), then waits for the daemon /health over the tailnet and checks the tailnet node id is unchanged.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--size",
+            "value": "<small|default|large>",
+            "required": false,
+            "description": "Resume onto a different machine size."
+          },
+          {
+            "name": "--timeout-ms",
+            "value": "<milliseconds>",
+            "required": false,
+            "description": "How long to wait for the daemon /health."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud wake rp-abc12345"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud destroy": {
+        "name": "cloud destroy",
+        "summary": "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host.",
+        "details": "Order matters: the tailnet device is deleted through the Tailscale API first, so no orphan node keeps the host name; then the sandbox; then the local record and the desktop profile.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--desktop-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Desktop Pane data directory whose saved remote hosts to update (default $RUNPANE_CLOUD_DESKTOP_DIR, else ~/.pane; $PANE_DIR is ignored)."
+          },
+          {
+            "name": "--no-import",
+            "required": false,
+            "description": "Leave Pane desktop's saved remote hosts untouched."
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm this change; required because it costs money or deletes data."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud destroy rp-abc12345 --yes"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud pair": {
+        "name": "cloud pair",
+        "summary": "Print a cloud host's pane-remote:// pairing code, for pairing a phone or another Pane app.",
+        "details": "Use this for a phone or a second computer. Pane desktop on this machine gets the host through runpane cloud new or runpane cloud sync without showing the code.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud pair rp-abc12345"
+        ],
+        "notes": [
+          "The code grants full control of the cloud Session; it is only printed when you run this command.",
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud sync": {
+        "name": "cloud sync",
+        "summary": "Add or refresh every cloud host in Pane desktop's saved remote hosts.",
+        "details": "Writes remoteDaemon.client.profiles in the desktop config.json; the running desktop reloads the file. Profiles keep the desktop's own ids.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--desktop-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Desktop Pane data directory whose saved remote hosts to update (default $RUNPANE_CLOUD_DESKTOP_DIR, else ~/.pane; $PANE_DIR is ignored)."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud sync"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator": {
+        "name": "cloud coordinator",
+        "summary": "Run or manage the always-on runpane cloud coordinator (idle-stop, reconcile, wake).",
+        "details": "Owned by the coordinator module; this build passes the arguments through.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<subcommand>",
+            "required": true,
+            "description": "Coordinator subcommand."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator --help"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
       }
     },
     "managedBlock": [

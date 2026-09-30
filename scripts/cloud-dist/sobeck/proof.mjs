@@ -87,7 +87,9 @@ delete childEnv.ELECTRON_RUN_AS_NODE;
 log(`launching ${paneExe} with PANE_DIR=${paneDir}; host "${hostLabel}"`);
 const app = await electron.launch({
   executablePath: paneExe,
-  args: [`--user-data-dir=${path.join(paneDir, 'chromium-profile')}`],
+  // --disable-webgl: xterm falls back to its DOM renderer, whose rows can be read. With WebGL the
+  // terminal text is only on a canvas (SOBECK run 1: `hostname` printed but read back as empty).
+  args: [`--user-data-dir=${path.join(paneDir, 'chromium-profile')}`, '--disable-webgl'],
   env: childEnv,
   timeout: 120_000,
 });
@@ -125,7 +127,35 @@ async function dismissFirstRun() {
   }
 }
 
-const terminalText = () => page.evaluate(() => [...document.querySelectorAll('.xterm-rows')].map((rows) => rows.textContent ?? '').join('\n'));
+// Terminal text two ways: the DOM renderer's rows, and the raw terminal output stream the app's
+// preload delivers (independent of the renderer), ANSI escapes stripped.
+async function collectTerminalStream() {
+  await page.evaluate(() => {
+    if (window.__proofStream !== undefined) return;
+    window.__proofStream = '';
+    window.electronAPI?.events?.onTerminalOutput?.((event) => {
+      window.__proofStream += event.output ?? event.data ?? '';
+      if (window.__proofStream.length > 400_000) window.__proofStream = window.__proofStream.slice(-200_000);
+    });
+  }).catch(() => undefined);
+}
+const ESC = String.fromCharCode(27);
+const BEL = String.fromCharCode(7);
+const ANSI = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]|${ESC}\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)|${ESC}[@-Z\\\\-_]`, 'g');
+const stripAnsi = (text) => text.replace(ANSI, '');
+const streamText = async () => stripAnsi(await page.evaluate(() => window.__proofStream ?? '').catch(() => ''));
+const domText = () => page.evaluate(() => [...document.querySelectorAll('.xterm-rows')].map((rows) => rows.textContent ?? '').join('\n'));
+const terminalText = async () => `${await domText()}\n${await streamText()}`;
+async function waitForText(predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const dom = await domText().catch(() => '');
+    const stream = await streamText();
+    if (predicate(dom, stream)) return true;
+    if (Date.now() > deadline) return false;
+    await page.waitForTimeout(1000);
+  }
+}
 async function typeInLastTerminal(text) {
   const terminal = page.locator('.xterm').last();
   await terminal.waitFor({ timeout: 60_000 });
@@ -139,6 +169,7 @@ try {
   await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(5000);
   await dismissFirstRun();
+  await collectTerminalStream();
   await shot('launched');
 
   // 1. Host switcher: pick the cloud host, expect it connected.
@@ -180,17 +211,15 @@ try {
     await dialog.getByRole('button', { name: /^Create/ }).click();
   }
   await page.getByRole('button', { name: /^Terminal Ctrl\+Alt\+1/ }).click({ timeout: 60_000 });
-  const before = (await terminalText()).length;
+  const domBefore = (await domText().catch(() => '')).length;
+  const streamBefore = (await streamText()).length;
   await typeInLastTerminal('hostname');
-  const printed = await page.waitForFunction(
-    ({ prefix, skip }) => {
-      const text = [...document.querySelectorAll('.xterm-rows')].map((rows) => rows.textContent ?? '').join('\n');
-      return text.slice(Math.max(0, skip - 200)).toLowerCase().split('hostname').slice(1).some((after) => after.includes(prefix));
-    },
-    { prefix: hostnamePrefix, skip: before },
-    { timeout: 30_000 },
-  ).then(() => true, () => false);
-  const text = await terminalText();
+  const hasPrefix = (text) => text.toLowerCase().split('hostname').slice(1).some((after) => after.includes(hostnamePrefix));
+  const printed = await waitForText(
+    (dom, stream) => hasPrefix(dom.slice(Math.max(0, domBefore - 200))) || hasPrefix(stream.slice(streamBefore)),
+    30_000,
+  );
+  const text = (await streamText()).slice(streamBefore) || (await domText().catch(() => ''));
   const after = text.slice(text.toLowerCase().lastIndexOf('hostname')).slice(0, 160).replace(/\s+/g, ' ');
   fs.writeFileSync(path.join(out, 'terminal-output.txt'), `${after}\n`);
   pass('terminal-hostname', printed, `${after} (expected "${hostnamePrefix}…"; this machine is ${os.hostname()})`);
@@ -198,22 +227,35 @@ try {
 
   // 4. The Claude Session answers.
   const sessionButton = page.getByRole('button', { name: `Open Session ${sessionName}` });
-  const sessionListed = await sessionButton.waitFor({ timeout: 30_000 }).then(() => true, () => false);
+  let sessionListed = await sessionButton.waitFor({ timeout: 10_000 }).then(() => true, () => false);
+  if (!sessionListed) {
+    // Desktop bug: the Sessions list is loaded once from the runtime at launch and not reloaded when
+    // the host switcher changes runtime (SOBECK run 1: only "Pane Chat"). Reloading the window
+    // remounts the app on the connected host, as reopening Pane would.
+    check('sessions-after-switch', 'WARN', `"${sessionName}" not listed after the host switch until the window reloads (Sessions list not refreshed on host switch)`);
+    await page.reload();
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(4000);
+    await dismissFirstRun();
+    await collectTerminalStream();
+    const stillConnected = await connectedChip.waitFor({ timeout: 30_000 }).then(() => true, () => false);
+    log(`window reloaded; switcher still names "${hostLabel}": ${stillConnected}`);
+    sessionListed = await sessionButton.waitFor({ timeout: 30_000 }).then(() => true, () => false);
+  }
   pass('session-listed', sessionListed, `Session "${sessionName}" in the sidebar`);
+  if (!sessionListed) await shot('sessions-missing');
   if (sessionListed) {
     await sessionButton.click();
     await page.waitForTimeout(3000);
     const a = 100 + Math.floor(Math.random() * 800);
     const b = 100 + Math.floor(Math.random() * 800);
     const expected = `SUM=${a + b}`;
+    const streamStart = (await streamText()).length;
     await typeInLastTerminal(`Compute ${a}+${b} and reply with only SUM= followed by the result, nothing else.`);
     log(`prompt submitted to "${sessionName}"; expecting ${expected}`);
     if (waitForReply) {
-      const answered = await page.waitForFunction(
-        (needle) => [...document.querySelectorAll('.xterm-rows')].some((rows) => (rows.textContent ?? '').includes(needle)),
-        expected,
-        { timeout: 180_000, polling: 1000 },
-      ).then(() => true, () => false);
+      // The prompt itself contains "SUM=" but never the sum.
+      const answered = await waitForText((dom, stream) => dom.includes(expected) || stream.slice(streamStart).includes(expected), 180_000);
       pass('claude-answers', answered, answered ? `reply contains ${expected}` : `no ${expected} within 180 s`);
     } else {
       check('claude-answers', 'SKIP', 'CLAUDE_REPLY=0 (no Claude on this machine); prompt was submitted');

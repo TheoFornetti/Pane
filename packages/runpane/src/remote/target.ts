@@ -121,7 +121,9 @@ export async function invokeRemote(
   if (!cloud || !target.coordinator) {
     throw new RemoteTargetError(
       `Could not reach ${target.host.label} at ${baseUrl}. ` +
-      (cloud ? 'No runpane cloud coordinator is configured, so it cannot be woken from here.' : 'Is the host up and on your tailnet?'),
+      (cloud
+        ? `It is probably asleep. Run \`runpane cloud wake ${cloud.hostname ?? target.host.label}\` (no runpane cloud coordinator is configured here to wake it on submit).`
+        : 'Is the host up and on your tailnet?'),
       'ERR_RUNPANE_HOST_UNREACHABLE',
     );
   }

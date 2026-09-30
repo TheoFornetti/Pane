@@ -214,6 +214,23 @@ describe('invokeRemote wake policy', () => {
       { name: 'RemoteTargetError', code: 'ERR_RUNPANE_HOST_UNREACHABLE' },
     );
   });
+
+  it('tells the user to wake an unreachable cloud host when no coordinator is configured', async () => {
+    const transport = async (): Promise<RemoteHttpResponse> => {
+      throw new RemoteConnectError('connect ETIMEDOUT', 'ETIMEDOUT');
+    };
+    const target: DaemonTarget = {
+      host: {
+        id: 'cloud-x', label: 'Checkout', baseUrl: 'https://rp-x1234567.example.ts.net', token: 't',
+        cloud: { provider: 'boat', sandboxId: 'bx_1', sessionId: 'x1234567ab', hostname: 'rp-x1234567' },
+      },
+      source: 'test',
+    };
+    await assert.rejects(
+      invokeRemote(target, 'runpane:panels:list', [{}], { ...fast, transport }),
+      { name: 'RemoteTargetError', code: 'ERR_RUNPANE_HOST_UNREACHABLE', message: /run `runpane cloud wake rp-x1234567`/iu },
+    );
+  });
 });
 
 describe('resolveDaemonTarget', () => {

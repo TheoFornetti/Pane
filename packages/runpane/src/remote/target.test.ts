@@ -191,6 +191,28 @@ describe('invokeRemote wake policy', () => {
     assert.match(submitted.idempotencyKey, /^runpane-cli:/);
   });
 
+  it('resolves --panel orchestrator for a full client through its Sessions', async () => {
+    const delivered: { channel: string; args: unknown[] }[] = [];
+    const transport = async (request: RemoteHttpRequest): Promise<RemoteHttpResponse> => {
+      const body = decodeBoundary(JSON.parse(request.body ?? '{}'), boundary.object({ channel: boundary.string, args: boundary.array(boundary.json) }));
+      delivered.push(body);
+      if (body.channel === 'runpane:panels:list') {
+        return { status: 400, body: JSON.stringify({ ok: false, error: { message: 'Panel list request must include paneId' } }) };
+      }
+      if (body.channel === 'runpane:sessions:list') {
+        return { status: 200, body: JSON.stringify({ ok: true, result: { ok: true, sessions: [
+          { name: 'old', archived: true, agent: 'claude', panelIds: { claude: 'orch-old' } },
+          { name: 'main', agent: 'claude', panelIds: { claude: 'orch-main', codex: 'other' } },
+        ] } }) };
+      }
+      return { status: 200, body: JSON.stringify({ ok: true, result: { ok: true } }) };
+    };
+    await invokeRemote(cloudTarget(), 'runpane:panels:submit', [{ panelId: 'orchestrator', input: 'hi' }], { ...fast, transport });
+    assert.deepEqual(delivered.map((call) => call.channel), ['runpane:panels:list', 'runpane:sessions:list', 'runpane:panels:submit']);
+    const submitted = decodeBoundary(delivered[2]!.args[0], boundary.object({ panelId: boundary.string }));
+    assert.equal(submitted.panelId, 'orch-main');
+  });
+
   it('names the coordinator\'s reason when it rejects the caller', async () => {
     const transport = async (request: RemoteHttpRequest): Promise<RemoteHttpResponse> => {
       if (request.url.startsWith(COORD_URL)) {

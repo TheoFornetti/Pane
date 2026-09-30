@@ -62,6 +62,7 @@ type CloudHostStatus = 'awake' | 'asleep' | 'waking' | 'stopping' | 'daemon-down
 const SANDBOX_READY_TIMEOUT_MS = 180_000;
 const STOP_TIMEOUT_MS = 120_000;
 const DEFAULT_WAKE_TIMEOUT_MS = 120_000;
+const WAKE_REPAIR_CHECK_MS = 30_000;
 const DEFAULT_NEW_HEALTH_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 1_500;
 const STATUS_HEALTH_TIMEOUT_MS = 5_000;
@@ -543,8 +544,10 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
   await waitForSandbox(provider, sandboxId, 'running', Math.max(timeoutMs - (deps.now() - started), 1_000), deps);
   timings.runningMs = deps.now() - started;
   if (!record.profile.baseUrl) throw new Error(`${hostname} has no daemon address yet; its setup never finished. Destroy it and create a new one.`);
+  const remaining = () => Math.max(timeoutMs - (deps.now() - started), 1_000);
+  // A healthy wake answers in 9-13 s (M0); after that, check the node before waiting out the rest.
   let health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, {
-    timeoutMs: Math.max(timeoutMs - (deps.now() - started), 1_000),
+    timeoutMs: Math.min(remaining(), WAKE_REPAIR_CHECK_MS),
     intervalMs: 500,
   });
   timings.healthMs = deps.now() - started;
@@ -561,6 +564,9 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
       await pushDirectory(deps);
       health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: 90_000, intervalMs: 500 });
       timings.repairedHealthMs = deps.now() - started;
+    } else {
+      health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: remaining(), intervalMs: 500 });
+      timings.healthMs = deps.now() - started;
     }
   }
   const devices = await tailnet.findDevicesByHostname(hostname);
@@ -588,7 +594,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     deps,
     summary,
     health.ok
-      ? `${hostname} is awake at ${record.profile.baseUrl} (${(timings.healthMs / 1000).toFixed(1)} s${sameNode ? ', same tailnet node' : ', TAILNET NODE CHANGED'}).`
+      ? `${hostname} is awake at ${record.profile.baseUrl} (${((deps.now() - started) / 1000).toFixed(1)} s${repaired ? ', re-enrolled tailnet node' : sameNode ? ', same tailnet node' : ', TAILNET NODE CHANGED'}).`
       : `${hostname} is running but its daemon did not answer /health within ${Math.round(timeoutMs / 1000)} s.`,
   );
   return health.ok ? 0 : 1;

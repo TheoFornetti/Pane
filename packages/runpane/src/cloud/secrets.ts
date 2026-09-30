@@ -28,7 +28,7 @@ const OK_MARKER = 'RP_SECRETS';
  * credentials, and secret-manager tokens. `*` matches any run of characters; matching ignores case.
  * Users add their own patterns in the cloud settings file (`secretsDenyList`).
  */
-export const BUILT_IN_DENY_LIST = [
+const BUILT_IN_DENY_LIST = [
   'PRODUCTION_*',
   'CLOUDFLARE_*',
   'SHOPIFY_ADMIN*',
@@ -60,7 +60,7 @@ interface SecretsArgs {
   json: boolean;
 }
 
-export const SECRETS_USAGE = `Usage:
+const SECRETS_USAGE = `Usage:
   runpane cloud secrets set <host> NAME [NAME...] [--from-env VAR | --from-file PATH|- | --from-doppler <project>/<config>] [--json]
       Resolve each value on this machine and store it for the Session's agents. With no --from-*,
       each NAME is read from this machine's environment variable of the same name.
@@ -147,7 +147,7 @@ export function checkDopplerConfig(config: string): void {
 // ---------------------------------------------------------------- sources (all resolved on this machine)
 
 /** Where a secret's value comes from. Implementations run on the laptop; values never leave this process except in the staged file. */
-export interface SecretSource {
+interface SecretSource {
   /** For messages: says where values come from, never what they are. */
   readonly label: string;
   /** The name read on this machine for `name` (checked against the deny-list too). */
@@ -224,7 +224,7 @@ const LOADER_END = '# <<< runpane cloud secrets <<<';
  * writes both files in place (boat restores can truncate renamed files, so no mv), installs the
  * loader once, shreds the staged file and prints the stored names.
  */
-export function secretsScript(change: { stagedPath?: string; remove?: readonly string[] }): string {
+function secretsScript(change: { stagedPath?: string; remove?: readonly string[] }): string {
   for (const name of change.remove ?? []) {
     if (!NAME_PATTERN.test(name)) throw new Error(`invalid name ${name}`);
   }

@@ -10,6 +10,7 @@ import type { GitHubBroker } from './github/broker';
 import { BrokerError } from './github/policy';
 import type { IdleCheckReport } from './idleStop';
 import type { ReconcileReport } from './reconciler';
+import type { SecretsService } from './secrets/service';
 import type { AlertSink, Clock, CoordinatorAlert, SessionDirectory } from './types';
 import type { WakeCaller, WakeResult } from './wake';
 
@@ -43,6 +44,8 @@ export interface CoordinatorServerOptions {
   log?: (line: string) => void;
   /** The GitHub broker behind /cloud/github/* (it answers "off" until a credential is configured). */
   github?: GitHubBroker;
+  /** The Doppler secrets service behind /cloud/secrets/* (it answers "off" until a token is configured). */
+  secrets?: SecretsService;
 }
 
 interface ErrorBody {
@@ -132,6 +135,19 @@ export function createCoordinatorServer(options: CoordinatorServerOptions): http
           if (cause instanceof HttpError) throw new BrokerError('too-large', `the request body is larger than ${limitBytes} bytes`);
           throw new BrokerError('bad-request', `the request body is not JSON: ${describeError(cause)}`);
         }),
+      });
+      writeJson(response, answer.status, answer.body);
+      return;
+    }
+
+    if (url.pathname.startsWith('/cloud/secrets/') && options.secrets) {
+      // Binds peers to their node, reads the manifest, applies the user's policy and audits (names only).
+      const answer = await options.secrets.handle({
+        method: request.method ?? 'GET',
+        path: url.pathname.slice('/cloud/secrets/'.length),
+        query: url.searchParams,
+        caller,
+        remoteAddress: request.socket.remoteAddress ?? '',
       });
       writeJson(response, answer.status, answer.body);
       return;

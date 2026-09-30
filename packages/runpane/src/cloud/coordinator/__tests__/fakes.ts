@@ -50,6 +50,7 @@ export function entry(sessionId: string, sandboxId: string, overrides: Partial<D
     coordinatorToken: `token-${sessionId}`,
     org: null,
     githubRepos: [],
+    secretsManifest: null,
     ...overrides,
   };
 }

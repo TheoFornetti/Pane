@@ -32,9 +32,26 @@ async function buildCoordinatorDirectory(records: readonly CloudHostRecord[], ge
       coordinatorToken: await readCoordinatorToken(record.meta.coordinatorPairingPath),
       org: record.meta.boatOrg?.id ?? null,
       github: { repos: record.meta.brokerRepos ?? [] },
+      secretsManifest: secretsManifestSource(record),
     });
   }
   return { version: 1, generatedAt: generatedAt.toISOString(), sessions };
+}
+
+/**
+ * Where the coordinator reads the Session's `.runpane/secrets.json`: the repository it was created on,
+ * when the broker may read it, at the ref it was created from (null: the default branch).
+ */
+function secretsManifestSource(record: CloudHostRecord): JsonObject | null {
+  const repoUrl = record.meta.repo?.url;
+  if (!repoUrl) return null;
+  // meta.repo.url is what `new --repo` was given: owner/name, an https URL or an ssh one.
+  const tail = repoUrl.trim().replace(/\.git$/u, '').replace(/\/+$/u, '').toLowerCase();
+  const repo = (record.meta.brokerRepos ?? []).find((candidate) => {
+    const wanted = candidate.toLowerCase();
+    return tail === wanted || tail.endsWith(`/${wanted}`) || tail.endsWith(`:${wanted}`);
+  });
+  return repo ? { repo, ref: record.meta.repo?.ref ?? null } : null;
 }
 
 /** The coordinator's own paired-client token, from the pairing code bootstrap minted for it. */

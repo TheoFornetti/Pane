@@ -46,6 +46,11 @@ export interface DirectoryEntry {
   org: string | null;
   /** owner/name repos this Session may use through the GitHub broker (`github.repos`); empty: none. */
   githubRepos: string[];
+  /**
+   * Where the coordinator reads this Session's secrets manifest (`.runpane/secrets.json`): its repository
+   * and the ref it was created from (null: the default branch). Null: no manifest source.
+   */
+  secretsManifest: { repo: string; ref: string | null } | null;
 }
 
 export type DirectoryReadResult =

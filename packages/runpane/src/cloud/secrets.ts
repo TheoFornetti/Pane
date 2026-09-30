@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { boundary, decodeBoundary } from '../boundaryDecoder';
 import type { CloudDeps } from './commands';
+import { BUILT_IN_DENY_LIST, DENIED_DOPPLER_CONFIGS, isDeniedConfig, matchingPattern, reservedBy, SECRET_NAME_PATTERN } from './secretPolicy';
 import type { SandboxHandle } from './provider';
 import { findHost, type CloudHostRecord } from './store';
 import { hostProvider } from './wallet';
@@ -24,29 +25,6 @@ const SCRIPT_TIMEOUT_SECONDS = 60;
 const DOPPLER_TIMEOUT_MS = 30_000;
 const OK_MARKER = 'RP_SECRETS';
 
-/**
- * Names that never enter a sandbox, whatever the source: production, infrastructure and admin
- * credentials, and secret-manager tokens. `*` matches any run of characters; matching ignores case.
- * Users add their own patterns in the cloud settings file (`secretsDenyList`).
- */
-const BUILT_IN_DENY_LIST = [
-  'PRODUCTION_*',
-  'CLOUDFLARE_*',
-  'SHOPIFY_ADMIN*',
-  'VERCEL_*',
-  'NEON_*',
-  'DOPPLER_TOKEN',
-  'DOPPLER_*',
-  '*_MANAGEMENT_*',
-] as const;
-
-/** Variables the shell or Pane itself owns; exporting them from a secrets file would break panels. */
-const RESERVED_NAMES = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'PWD', 'OLDPWD', 'IFS', 'TERM', 'LANG', 'ENV', 'BASH_ENV', 'PROMPT_COMMAND', 'PS1', 'PS2', 'PS4', 'LD_*', 'PANE_*', 'WORKTREE_PATH', 'RUNPANE_*'];
-
-/** Doppler configs that hold staging or production values: `--from-doppler` refuses them. */
-const DENIED_DOPPLER_CONFIGS = ['prd', 'prod', 'stg', 'stage', 'staging', 'production'];
-
-const NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 
 type SecretsSourceArg =
   | { kind: 'env'; variable?: string }
@@ -115,32 +93,22 @@ export function parseSecretsArgs(argv: readonly string[]): SecretsArgs {
 
 // ---------------------------------------------------------------- policy
 
-function globToRegExp(pattern: string): RegExp {
-  const body = pattern.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/gu, '\\$&')).join('.*');
-  return new RegExp(`^${body}$`, 'iu');
-}
-
 /** The pattern that denies `name`, or null. Built-in patterns first, then the user's. */
 export function deniedBy(name: string, userDenyList: readonly string[] = []): string | null {
-  for (const pattern of [...BUILT_IN_DENY_LIST, ...userDenyList]) {
-    if (globToRegExp(pattern.trim()).test(name)) return pattern;
-  }
-  return null;
+  return matchingPattern(name, [...BUILT_IN_DENY_LIST, ...userDenyList]);
 }
 
 /** Refuses a bad or denied NAME (and, for --from-env/--from-doppler, the name read on this machine). */
 export function checkSecretName(name: string, userDenyList: readonly string[] = []): void {
-  if (!NAME_PATTERN.test(name)) throw new Error(`${name} is not a valid environment variable name (letters, digits and _; not starting with a digit).`);
+  if (!SECRET_NAME_PATTERN.test(name)) throw new Error(`${name} is not a valid environment variable name (letters, digits and _; not starting with a digit).`);
   const denied = deniedBy(name, userDenyList);
   if (denied) throw new Error(`Refusing ${name}: it matches the deny-list pattern ${denied}. Production, infrastructure and secret-manager credentials never enter a cloud Session.`);
-  const reserved = RESERVED_NAMES.find((pattern) => globToRegExp(pattern).test(name));
+  const reserved = reservedBy(name);
   if (reserved) throw new Error(`Refusing ${name}: the shell or Pane sets it (${reserved}); a secret must not override it.`);
 }
 
 export function checkDopplerConfig(config: string): void {
-  const lower = config.toLowerCase();
-  const root = lower.split(/[_-]/u)[0];
-  if (DENIED_DOPPLER_CONFIGS.includes(lower) || DENIED_DOPPLER_CONFIGS.includes(root)) {
+  if (isDeniedConfig(config, DENIED_DOPPLER_CONFIGS)) {
     throw new Error(`Refusing Doppler config ${config}: staging and production configs never feed a cloud Session. Use a dev config.`);
   }
 }
@@ -227,7 +195,7 @@ const LOADER_END = '# <<< runpane cloud secrets <<<';
  */
 function secretsScript(change: { stagedPath?: string; remove?: readonly string[] }): string {
   for (const name of change.remove ?? []) {
-    if (!NAME_PATTERN.test(name)) throw new Error(`invalid name ${name}`);
+    if (!SECRET_NAME_PATTERN.test(name)) throw new Error(`invalid name ${name}`);
   }
   const staged = change.stagedPath ? JSON.stringify(change.stagedPath.replace(/^\/home\/user\//u, '')) : 'None';
   const loader = [
@@ -335,7 +303,7 @@ export async function runSecretsCommand(argv: readonly string[], deps: CloudDeps
     }
   } else if (args.sub === 'rm') {
     for (const name of args.names) {
-      if (!NAME_PATTERN.test(name)) throw new Error(`${name} is not a valid environment variable name.`);
+      if (!SECRET_NAME_PATTERN.test(name)) throw new Error(`${name} is not a valid environment variable name.`);
     }
   }
 

@@ -167,6 +167,35 @@ export class FakeGitHub {
     this.tokens.set(token, { kind: 'pat', repos: repos.map((repo) => repo.toLowerCase()), permissions, expiresAt: Number.MAX_SAFE_INTEGER });
   }
 
+  /** Commits `files` (path -> text; null deletes) onto `branch` (created from the default branch if new). */
+  commitFiles(fullName: string, branch: string, files: ReadonlyMap<string, string | null>, message = 'update'): string {
+    const repo = this.repos.get(fullName.toLowerCase());
+    if (!repo) throw new Error(`no fake repo ${fullName}`);
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-gh-commit-'));
+    const git = (args: string[]) => execFileSync('git', args, { cwd: work, env: gitEnv(), stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
+    try {
+      git(['init', '-q', '.']);
+      git(['fetch', '-q', repo.dir, `+refs/heads/*:refs/remotes/origin/*`]);
+      const exists = git(['branch', '-r', '--list', `origin/${branch}`]) !== '';
+      git(['checkout', '-q', '-B', branch, `origin/${exists ? branch : repo.defaultBranch}`]);
+      for (const [file, text] of files) {
+        const target = path.join(work, file);
+        if (text === null) fs.rmSync(target, { force: true });
+        else {
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          fs.writeFileSync(target, text);
+        }
+      }
+      git(['add', '-A']);
+      git(['commit', '-q', '--allow-empty', '-m', message]);
+      // The seed's workflow is already there; the hook only refuses new workflow changes.
+      git(['push', '-q', repo.dir, `HEAD:refs/heads/${branch}`]);
+      return git(['rev-parse', 'HEAD']);
+    } finally {
+      fs.rmSync(work, { recursive: true, force: true });
+    }
+  }
+
   /** Creates a bare repository with one commit on the default branch (a README and a CI workflow). */
   createRepo(fullName: string, options: { defaultBranch?: string; labels?: string[] } = {}): RepoRecord {
     const [owner, name] = fullName.split('/');
@@ -459,6 +488,23 @@ export class FakeGitHub {
       reply(403, { message: 'Resource not accessible by integration' });
       return false;
     };
+    // GET /repos/:o/:r/contents/<path>?ref=: a file from the bare repository (default branch without ref).
+    if (rest.startsWith('/contents/') && method === 'GET') {
+      if (!need('contents', 'read')) return;
+      const filePath = decodeURIComponent(rest.slice('/contents/'.length));
+      const ref = url.searchParams.get('ref') ?? repo.defaultBranch;
+      const show = (spec: string): Buffer | null => {
+        try {
+          return execFileSync('git', ['cat-file', '-p', spec], { cwd: repo.dir, env: gitEnv(), stdio: ['ignore', 'pipe', 'ignore'] });
+        } catch {
+          return null;
+        }
+      };
+      const content = show(`${ref}:${filePath}`);
+      if (!content) return reply(404, { message: 'Not Found' });
+      const sha = execFileSync('git', ['rev-parse', `${ref}:${filePath}`], { cwd: repo.dir, env: gitEnv(), stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+      return reply(200, { type: 'file', path: filePath, sha, encoding: 'base64', content: content.toString('base64') });
+    }
     // Like GitHub: creating or updating a PR reads its head and base refs, which needs contents:read.
     const refsReadable = (): boolean => {
       if (this.allows(auth.record, fullName, 'contents', 'read')) return true;

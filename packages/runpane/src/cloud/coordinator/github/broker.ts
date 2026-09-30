@@ -21,6 +21,7 @@ import {
   withFooter,
 } from './policy';
 import type { GitHubRest } from './rest';
+import { nodeMismatch } from './whois';
 import type { TailnetNode, WhoisResolver } from './whois';
 
 /**
@@ -69,6 +70,12 @@ interface BrokerCall {
   caller: Caller;
   remoteAddress: string;
   readBody(limitBytes: number): Promise<JsonValue>;
+}
+
+/** A repository file's text and its blob sha (which changes whenever the file does). */
+export interface RepoFile {
+  text: string;
+  sha: string;
 }
 
 interface BrokerAnswer {
@@ -144,6 +151,12 @@ const githubIssueSchema = boundary.object({
   labels: boundary.optional(boundary.array(boundary.union(boundary.string, boundary.object({ name: boundary.optional(boundary.string) })))),
 });
 const githubCommentSchema = boundary.object({ id: boundary.number, html_url: boundary.optional(boundary.string) });
+const githubContentSchema = boundary.object({
+  type: boundary.string,
+  sha: boundary.nonEmptyString,
+  encoding: boundary.optional(boundary.nullable(boundary.string)),
+  content: boundary.optional(boundary.nullable(boundary.string)),
+});
 const githubLabelsSchema = boundary.array(boundary.object({ name: boundary.string }));
 
 type Kind = 'push' | 'write' | 'read' | 'free';
@@ -253,6 +266,27 @@ export class GitHubBroker {
     }
   }
 
+  /**
+   * One file of `repo` at `ref` (the default branch when null), read with a contents:read token for the
+   * coordinator's own use (the secrets manifest). Null when GitHub has no such file or ref. It never
+   * goes through a Session's allowlist: callers decide which repo and ref a Session is tied to.
+   */
+  async readRepoFile(repo: string, filePath: string, ref: string | null): Promise<RepoFile | null> {
+    const { credential } = this.requireEnabled();
+    const token = (await credential.token(repo, { contents: 'read' })).token;
+    const route = `/repos/${repo}/contents/${filePath.split('/').map(encodeURIComponent).join('/')}${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`;
+    let answer;
+    try {
+      answer = await this.deps.rest.request('GET', route, token);
+    } catch (error) {
+      if (error instanceof BrokerError && error.github?.status === 404) return null;
+      throw error;
+    }
+    const file = decodeGitHubBody(answer.body, githubContentSchema, 'file');
+    if (file.type !== 'file' || file.encoding !== 'base64') throw new BrokerError('github-error', `${repo}:${filePath} is not a regular file`, { status: 200, message: 'not a file' });
+    return { text: Buffer.from(file.content ?? '', 'base64').toString('utf8'), sha: file.sha };
+  }
+
   // ------------------------------------------------------------ routing and caller binding
 
   private route(call: BrokerCall): Route {
@@ -279,22 +313,14 @@ export class GitHubBroker {
     return entry;
   }
 
-  /**
-   * The peer token alone is not enough: the request must come from that Session's own tailnet node.
-   * `tailscale whois` of the source address must name the directory entry's node (its StableID when
-   * the directory has one, and always its MagicDNS name) and carry tag:rp-session.
-   */
+  /** The peer token alone is not enough: the request must come from that Session's own tailnet node. */
   private async bindNode(entry: DirectoryEntry, remoteAddress: string): Promise<TailnetNode> {
     const node = await this.deps.whois.whois(remoteAddress);
-    const expectedName = hostnameOf(entry.baseUrl);
-    const refuse = (why: string): never => {
-      this.log(`[coordinator] github: refused ${entry.sessionId} from ${remoteAddress}: ${why}`);
-      throw new BrokerError('caller-node-mismatch', `this token belongs to ${entry.label}, but ${why}`);
-    };
-    if (!node) return refuse(`${remoteAddress} is not a tailnet node tailscale can identify`);
-    if (!node.tags.includes('tag:rp-session')) return refuse(`node ${node.name} is not tagged tag:rp-session`);
-    if (entry.nodeId && node.stableId !== entry.nodeId) return refuse(`the request came from node ${node.stableId} (${node.name}), not ${entry.nodeId}`);
-    if (node.name !== expectedName) return refuse(`the request came from ${node.name}, not ${expectedName}`);
+    const mismatch = nodeMismatch(entry, node, remoteAddress);
+    if (mismatch || !node) {
+      this.log(`[coordinator] github: refused ${entry.sessionId} from ${remoteAddress}: ${mismatch ?? 'no node'}`);
+      throw new BrokerError('caller-node-mismatch', `this token belongs to ${entry.label}, but ${mismatch ?? 'no node'}`);
+    }
     return node;
   }
 
@@ -610,14 +636,6 @@ function decodeGitHubBody<Value>(value: JsonValue | undefined, schema: BoundaryS
     return decodeBoundary(value, schema);
   } catch (cause) {
     throw new BrokerError('github-error', `GitHub returned an unexpected ${what}: ${cause instanceof Error ? cause.message : String(cause)}`, { status: 200, message: 'unexpected body' });
-  }
-}
-
-function hostnameOf(baseUrl: string): string {
-  try {
-    return new URL(baseUrl).hostname.toLowerCase();
-  } catch {
-    return '';
   }
 }
 

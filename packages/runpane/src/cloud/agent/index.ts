@@ -1,4 +1,5 @@
 import { AGENT_GITHUB_USAGE, runAgentGitHub } from './github';
+import { runDopplerStandIn } from './doppler';
 import { runGhShim } from './ghShim';
 import { runGitCredential } from './gitCredential';
 import { defaultAgentDeps, type AgentDeps } from './session';
@@ -9,6 +10,8 @@ import { defaultAgentDeps, type AgentDeps } from './session';
  *   github ...        runpane cloud agent github push|pr|issue|read|status
  *   gh ...            the gh compatibility shim (~/.local/bin/gh runs this)
  *   git-credential    the git credential helper (~/.local/bin/git-credential-runpane runs this)
+ *   doppler ...       the doppler stand-in (~/.local/bin/doppler runs this): manifest secrets from the coordinator
+ *   secrets refresh|status   the same as doppler refresh|status
  */
 export async function runCloudAgent(argv: readonly string[], deps: AgentDeps = defaultAgentDeps()): Promise<number> {
   const [command, ...rest] = argv;
@@ -16,6 +19,8 @@ export async function runCloudAgent(argv: readonly string[], deps: AgentDeps = d
     case 'github': return runAgentGitHub(rest, deps);
     case 'gh': return runGhShim(rest, deps);
     case 'git-credential': return runGitCredential(rest, deps);
+    case 'doppler': return runDopplerStandIn(rest, deps);
+    case 'secrets': return runDopplerStandIn(rest[0] === 'refresh' || rest[0] === 'status' ? rest : ['help'], deps);
     default:
       deps.stdout(AGENT_GITHUB_USAGE);
       return command === undefined || command === '--help' || command === '-h' ? 0 : 1;

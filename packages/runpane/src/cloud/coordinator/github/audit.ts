@@ -35,16 +35,17 @@ export interface GitHubAudit {
 
 const MAX_READ_BYTES = 4 * 1024 * 1024;
 
-export class JsonlGitHubAudit implements GitHubAudit {
+/** An append-only JSONL audit file (0600) with a bounded tail read; the entry type says what may go in it. */
+export class JsonlAuditLog<Entry extends object> {
   constructor(private readonly file: string, private readonly clock: Clock) {}
 
-  append(entry: GitHubAuditEntry): void {
+  append(entry: Entry): void {
     const line = `${JSON.stringify({ at: new Date(this.clock.now()).toISOString(), ...entry })}\n`;
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
       fs.appendFileSync(this.file, line, { mode: 0o600 });
     } catch (error) {
-      console.error(`[coordinator] github audit write failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[coordinator] audit write to ${path.basename(this.file)} failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -75,6 +76,8 @@ export class JsonlGitHubAudit implements GitHubAudit {
     return entries;
   }
 }
+
+export class JsonlGitHubAudit extends JsonlAuditLog<GitHubAuditEntry> implements GitHubAudit {}
 
 /** Sliding one-hour windows, per key (`push:<session>`, `write:*`, ...). In memory: a restart forgives. */
 export class HourlyLimiter {

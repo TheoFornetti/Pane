@@ -162,6 +162,16 @@ export class BrokerClient {
     return decodeBoundary(await this.call('GET', `/cloud/github/read/${repo}/${route}${query ? `?${query}` : ''}`), readSchema).data;
   }
 
+  /** POST /cloud/secrets/fetch: this Session's manifest secrets, values included (decoded by the caller). */
+  fetchSecrets(timeoutMs = DEFAULT_TIMEOUT_MS): Promise<JsonValue> {
+    return this.call('POST', '/cloud/secrets/fetch', {}, timeoutMs);
+  }
+
+  /** GET /cloud/secrets/status: the coordinator's secrets service as this Session sees it (names only). */
+  secretsStatus(): Promise<JsonValue> {
+    return this.call('GET', '/cloud/secrets/status');
+  }
+
   private async item(method: Method, path: string, payload: JsonObject): Promise<ItemResult> {
     const body = decodeBoundary(await this.call(method, path, payload), itemSchema);
     return { number: body.number, url: body.url ?? body.html_url ?? '', state: body.state ?? null };
@@ -195,7 +205,9 @@ export class BrokerClient {
     const failure = decodeFailure(parsed);
     if (!response.ok || failure) {
       let message = failure?.message ?? `The coordinator answered HTTP ${response.status}.`;
-      if (!failure && response.status === 404) message = 'The coordinator has no GitHub broker (it answered 404); it needs a runpane build with the broker (runpane cloud coordinator deploy).';
+      if (!failure && response.status === 404) {
+        message = `The coordinator has no ${path.startsWith('/cloud/secrets/') ? 'secrets service' : 'GitHub broker'} (it answered 404); it needs a newer runpane build (runpane cloud coordinator deploy).`;
+      }
       throw new BrokerError(message, failure?.code ?? `http-${response.status}`, response.status);
     }
     if (parsed === undefined) throw new BrokerError(`The coordinator answered ${response.status} with a body that is not JSON.`, 'bad-response', response.status);

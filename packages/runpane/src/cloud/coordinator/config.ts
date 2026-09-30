@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { boundary, decodeBoundary } from '../../boundaryDecoder';
 import type { JsonValue } from '../../boundaryDecoder';
+import { BUILT_IN_DENY_LIST, DENIED_DOPPLER_CONFIGS } from '../secretPolicy';
 
 export const COORDINATOR_UNIT_NAME = 'runpane-cloud-coordinator.service';
 export const DEFAULT_COORDINATOR_PORT = 47300;
@@ -54,6 +55,22 @@ export interface CoordinatorConfig {
   revokedCallers: string[];
   /** The GitHub broker (phase3-design.md); null: off. The credential files are 0600 on this machine. */
   github: GitHubConfig | null;
+  /** The Doppler secrets service; null: off. The service token files are 0600 on this machine. */
+  secrets: SecretsConfig | null;
+}
+
+interface SecretsConfig {
+  /** https://api.doppler.com, or a fake's URL for tests. */
+  apiBaseUrl: string;
+  /** One read-only Doppler service token per config (Doppler scopes each token to one config). */
+  tokens: Array<{ project: string; config: string; tokenFile: string }>;
+  /**
+   * The user's policy on top of every manifest. `default`: the built-in deny-list (production,
+   * infrastructure and secret-manager names; stg/prd configs). `allow-all`: nothing is withheld
+   * except shell/Pane variables. `custom`: the lists given.
+   */
+  policy: { mode: 'default' | 'allow-all' | 'custom'; deniedNames: string[]; deniedConfigs: string[] };
+  fetchesPerSessionPerHour: number;
 }
 
 interface GitHubConfig {
@@ -143,13 +160,29 @@ const rawConfigSchema = boundary.object({
       writesPerHour: optionalNumber,
     })),
   }))),
+  secrets: boundary.optional(boundary.nullable(boundary.object({
+    doppler: boundary.object({
+      apiBaseUrl: optionalString,
+      tokens: boundary.array(boundary.object({
+        project: boundary.nonEmptyString,
+        config: boundary.nonEmptyString,
+        tokenFile: boundary.nonEmptyString,
+      })),
+    }),
+    policy: boundary.optional(boundary.object({
+      mode: boundary.optional(boundary.enumeration('default', 'allow-all', 'custom')),
+      deniedNames: boundary.optional(boundary.array(boundary.string)),
+      deniedConfigs: boundary.optional(boundary.array(boundary.string)),
+    })),
+    limits: boundary.optional(boundary.object({ fetchesPerSessionPerHour: optionalNumber })),
+  }))),
 });
 
 type RawGitHubConfig = NonNullable<ReturnType<typeof rawConfigSchema.decode>['github']>;
 
 function httpUrl(value: string | undefined, fallback: string, name: string): string {
   const url = (value ?? fallback).replace(/\/+$/, '');
-  if (!/^https?:\/\/[^\s/]+/u.test(url)) throw new Error(`coordinator config: github.${name} must be an http(s) URL`);
+  if (!/^https?:\/\/[^\s/]+/u.test(url)) throw new Error(`coordinator config: ${name.includes('.') ? name : `github.${name}`} must be an http(s) URL`);
   return url;
 }
 
@@ -174,6 +207,29 @@ function parseGitHubConfig(raw: RawGitHubConfig | null | undefined): GitHubConfi
       readsPerSessionPerHour: positive(raw.limits?.readsPerSessionPerHour, 600, 'github.limits.readsPerSessionPerHour'),
       writesPerHour: positive(raw.limits?.writesPerHour, 300, 'github.limits.writesPerHour'),
     },
+  };
+}
+
+type RawSecretsConfig = NonNullable<ReturnType<typeof rawConfigSchema.decode>['secrets']>;
+
+function parseSecretsConfig(raw: RawSecretsConfig | null | undefined): SecretsConfig | null {
+  if (!raw) return null;
+  const mode = raw.policy?.mode ?? 'default';
+  const seen = new Set<string>();
+  for (const token of raw.doppler.tokens) {
+    const key = `${token.project}/${token.config}`;
+    if (seen.has(key)) throw new Error(`coordinator config: secrets.doppler.tokens lists ${key} twice`);
+    seen.add(key);
+  }
+  return {
+    apiBaseUrl: httpUrl(raw.doppler.apiBaseUrl, 'https://api.doppler.com', 'secrets.doppler.apiBaseUrl'),
+    tokens: raw.doppler.tokens.map((token) => ({ project: token.project, config: token.config, tokenFile: token.tokenFile })),
+    policy: mode === 'allow-all'
+      ? { mode, deniedNames: [], deniedConfigs: [] }
+      : mode === 'custom'
+        ? { mode, deniedNames: raw.policy?.deniedNames ?? [...BUILT_IN_DENY_LIST], deniedConfigs: raw.policy?.deniedConfigs ?? [...DENIED_DOPPLER_CONFIGS] }
+        : { mode, deniedNames: [...BUILT_IN_DENY_LIST], deniedConfigs: [...DENIED_DOPPLER_CONFIGS] },
+    fetchesPerSessionPerHour: positive(raw.limits?.fetchesPerSessionPerHour, 120, 'secrets.limits.fetchesPerSessionPerHour'),
   };
 }
 
@@ -243,6 +299,7 @@ export function parseCoordinatorConfig(value: JsonValue, home = defaultCoordinat
     alerts: { webhookUrl: raw.alerts?.webhookUrl ?? null },
     revokedCallers: raw.revokedCallers ?? [],
     github: parseGitHubConfig(raw.github),
+    secrets: parseSecretsConfig(raw.secrets),
   };
 }
 

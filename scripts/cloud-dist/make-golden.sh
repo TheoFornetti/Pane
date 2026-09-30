@@ -5,13 +5,14 @@
 #   gate-fork.sh (identity check, daemon /health from the .deb, Chromium) -> destroy the source + gate sandboxes.
 # Runs on the operator machine (agentbox).
 # Usage: scripts/cloud-dist/make-golden.sh --tag rc-<sha8> [--name <snapshot-name>] [--keep-source] [--keep-gate]
-# Env:   BOAT_HDR, RC_BIN, FORK_REPO, DIST_CURRENT (see publish-release.sh); EVIDENCE_DIR (default ~/rc-loop/evidence/m2-dist)
+# Env:   BOAT_HDR, RC_BIN, FORK_REPO, DIST_CURRENT, INTEGRATION_REF (see publish-release.sh); EVIDENCE_DIR;
+#        GOLDEN_ASSETS_REF (git rev holding packages/runpane/src/cloud/bootstrap/assets/golden-{scrub,check}.sh, default HEAD) (default ~/rc-loop/evidence/m2-dist)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 BOAT_HDR=${BOAT_HDR:-$HOME/rc-loop/secrets/boat.hdr}
 RC_BIN=${RC_BIN:-$HOME/rc-loop/bin}
 FORK_REPO=${FORK_REPO:-jamari-morrison/Pane}
-DIST_CURRENT=${DIST_CURRENT:-$HOME/rc-loop/results/dist-current.md}
+INTEGRATION_REF=${INTEGRATION_REF:-rc/integration}
 EVIDENCE_DIR=${EVIDENCE_DIR:-$HOME/rc-loop/evidence/m2-dist}
 BOAT=https://boat.dev/api/v1
 TAG='' NAME='' KEEP_SOURCE=0 KEEP_GATE=0
@@ -29,7 +30,15 @@ DL="https://github.com/$FORK_REPO/releases/download/$TAG"
 INFO=$(curl -fsSL "$DL/build-info.json")
 jf() { python3 -c 'import json,sys;print(json.loads(sys.argv[1])[sys.argv[2]])' "$INFO" "$1"; }
 VERSION=$(jf version); COMMIT=$(jf commit); SHA8=${COMMIT:0:8}
-NAME=${NAME:-rp-loop-golden-$SHA8}
+REF=$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("ref",""))' "$INFO")
+# Integration goldens are rp-loop-golden-<sha8> (release.sh prunes only those); branch goldens are rp-loop-golden-br-<sha8>
+# and write their own status file, so they never replace or prune the shared current golden.
+if [ "$REF" = "$INTEGRATION_REF" ]; then
+  NAME=${NAME:-rp-loop-golden-$SHA8}; DEFAULT_STATUS=$HOME/rc-loop/results/dist-current.md
+else
+  NAME=${NAME:-rp-loop-golden-br-$SHA8}; DEFAULT_STATUS=$HOME/rc-loop/results/dist-branch-${REF//\//-}.md
+fi
+DIST_CURRENT=${DIST_CURRENT:-$DEFAULT_STATUS}
 PW_VERSION=1.54.1
 mkdir -p "$EVIDENCE_DIR"
 EVID="$EVIDENCE_DIR/golden-$SHA8-$(date -u +%Y%m%dT%H%M%SZ).log"
@@ -61,19 +70,27 @@ run_retry() { for i in $(seq 1 20); do out=$(run "$@") && { printf '%s\n' "$out"
 SRC=$("$RC_BIN/sb-create.sh" "golden-$SHA8" large)
 log "source sandbox $SRC"
 wait_idle "$SRC"; log "source idle"
-for f in provision.sh scrub.sh check.sh gate-fork.sh; do put "$SRC" "$HERE/golden/$f" "rcl-golden/$f"; done
+# Single source for the identity scrub/check: runpane cloud bootstrap runs the same files on every new sandbox.
+# GOLDEN_ASSETS_REF picks the git revision to read them from (default HEAD; a peer branch until it is merged).
+ASSETS=$(mktemp -d); trap 'rm -rf "$ASSETS"' EXIT
+for f in golden-scrub.sh golden-check.sh; do
+  git -C "$HERE" show "${GOLDEN_ASSETS_REF:-HEAD}:packages/runpane/src/cloud/bootstrap/assets/$f" > "$ASSETS/$f"
+done
+log "scrub/check from ${GOLDEN_ASSETS_REF:-HEAD} ($(git -C "$HERE" rev-parse --short "${GOLDEN_ASSETS_REF:-HEAD}"))"
+for f in provision.sh payload-check.sh; do put "$SRC" "$HERE/golden/$f" "rcl-golden/$f"; done
+put "$SRC" "$ASSETS/golden-check.sh" "rcl-golden/golden-check.sh"
 META=$(python3 -c 'import json,sys;print(json.dumps({"name":sys.argv[1],"paneVersion":sys.argv[2],"commit":sys.argv[3],"release":sys.argv[4],"playwright":sys.argv[5],"playwrightBrowsersPath":"/opt/ms-playwright"}))' "$NAME" "$VERSION" "$COMMIT" "$DL" "$PW_VERSION")
 
 # 2. provision, record pre-scrub identity, scrub, golden check
-run_retry "$SRC" "sudo bash /home/user/rcl-golden/provision.sh '$DL/pane_${VERSION}_amd64.deb' /home/user/rcl-golden/check.sh '$META' $PW_VERSION"
+run_retry "$SRC" "sudo bash /home/user/rcl-golden/provision.sh '$DL/pane_${VERSION}_amd64.deb' /home/user/rcl-golden/golden-check.sh /home/user/rcl-golden/payload-check.sh '$META' $PW_VERSION"
 log "provisioned"
 GMID=$(run "$SRC" "cat /etc/machine-id" | tr -d '\n')
 GHK=$(run "$SRC" "cat /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null | sha256sum | cut -c1-16" | tr -d '\n')
 log "pre-scrub machine-id=$GMID hostkey_sha=$GHK"
 run "$SRC" "rm -rf /home/user/rcl-golden" >/dev/null
-put "$SRC" "$HERE/golden/scrub.sh" "rcl-scrub.sh"
+put "$SRC" "$ASSETS/golden-scrub.sh" "rcl-scrub.sh"
 run "$SRC" "sudo U=user bash /home/user/rcl-scrub.sh; rm -f /home/user/rcl-scrub.sh" | tail -3
-run "$SRC" "sudo U=user EXPECT_PANE_VERSION='$VERSION' /usr/local/sbin/rp-golden-check golden"
+run "$SRC" "sudo U=user /usr/local/sbin/rp-golden-check golden && sudo U=user /usr/local/sbin/rp-golden-payload-check '$VERSION'"
 log "golden check PASS"
 
 # 3. named snapshot
@@ -107,7 +124,7 @@ block = f"""<!-- golden:start -->
 ## Golden image (updated {datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%MZ')})
 - Named snapshot: `{name}` (boat; fork with `POST /sandboxes` `{{"from":"{name}"}}` or `sb-create.sh <n> large {name}`)
 - Contains: Pane `{version}` (.deb only, unpaired), Tailscale (not joined), Playwright Chromium in `/opt/ms-playwright`
-  (`PLAYWRIGHT_BROWSERS_PATH` in /etc/environment), `/usr/local/sbin/rp-golden-check`, `/usr/local/sbin/rp-firstboot-identity`, `/etc/rp-golden.json`
+  (`PLAYWRIGHT_BROWSERS_PATH` in /etc/environment), `/usr/local/sbin/rp-golden-check`, `/usr/local/sbin/rp-golden-payload-check <version>`, `/usr/local/sbin/rp-firstboot-identity`, `/etc/rp-golden.json`
 - Commit: `{commit}`
 - Per-sandbox bootstrap MUST run `sudo /usr/local/sbin/rp-firstboot-identity` before `tailscale up` / Pane setup (forks aren't rebooted)
 - LIVE gate PASS: {evid}

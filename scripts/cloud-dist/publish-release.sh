@@ -5,14 +5,15 @@
 # Env:   BOAT_HDR      curl header file with the boat Authorization header (default ~/rc-loop/secrets/boat.hdr)
 #        RC_BIN        rc-loop helpers dir providing devbox.sh (default ~/rc-loop/bin)
 #        FORK_REPO     GitHub repo for the release (default jamari-morrison/Pane). Never the upstream repo.
-#        DIST_CURRENT  status file updated with the artifact URLs (default ~/rc-loop/results/dist-current.md)
-# Prints the release URL. The .deb URL etc. are appended to DIST_CURRENT by this script only for the
-# artifacts; the golden image section is written by make-golden.sh.
+#        DIST_CURRENT  status file for the artifact URLs. Default: ~/rc-loop/results/dist-current.md for
+#                      INTEGRATION_REF (rc/integration) only; any other branch writes dist-branch-<ref>.md so a
+#                      feature-branch build never replaces the shared "current" artifacts.
+# Prints the release URL. make-golden.sh fills the golden section of the same file.
 set -euo pipefail
 BOAT_HDR=${BOAT_HDR:-$HOME/rc-loop/secrets/boat.hdr}
 RC_BIN=${RC_BIN:-$HOME/rc-loop/bin}
 FORK_REPO=${FORK_REPO:-jamari-morrison/Pane}
-DIST_CURRENT=${DIST_CURRENT:-$HOME/rc-loop/results/dist-current.md}
+INTEGRATION_REF=${INTEGRATION_REF:-rc/integration}
 BOAT=https://boat.dev/api/v1
 DEVBOX='' REF='' SKIP_BUILD=0
 while [ $# -gt 0 ]; do
@@ -24,6 +25,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$DEVBOX" ] && [ -n "$REF" ] || { echo "usage: $0 --devbox <id> --ref <branch> [--skip-build]" >&2; exit 2; }
+if [ "$REF" = "$INTEGRATION_REF" ]; then DEFAULT_STATUS=$HOME/rc-loop/results/dist-current.md
+else DEFAULT_STATUS=$HOME/rc-loop/results/dist-branch-${REF//\//-}.md; fi
+DIST_CURRENT=${DIST_CURRENT:-$DEFAULT_STATUS}
 case "$FORK_REPO" in greenfield-inc/*) echo "refusing to publish to upstream $FORK_REPO" >&2; exit 2;; esac
 REMOTE_OUT=/home/user/cloud-dist-out
 REMOTE_LOG=/home/user/cloud-dist-build.log

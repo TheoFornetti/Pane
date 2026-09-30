@@ -8,7 +8,8 @@ set -u
 EXPECT="$1"; GMID="$2"; GHK="$3"; fail=0
 F="--ozone-platform=headless --disable-gpu"
 sudo /usr/local/sbin/rp-firstboot-identity
-sudo U="$(id -un)" GOLDEN_MID="$GMID" GOLDEN_HOSTKEY_SHA="$GHK" EXPECT_PANE_VERSION="$EXPECT" /usr/local/sbin/rp-golden-check fork || fail=1
+sudo U="$(id -un)" GOLDEN_MID="$GMID" GOLDEN_HOSTKEY_SHA="$GHK" /usr/local/sbin/rp-golden-check fork || fail=1
+sudo U="$(id -un)" /usr/local/sbin/rp-golden-payload-check "$EXPECT" || fail=1
 echo "INFO golden metadata: $(tr -d '\n' < /etc/rp-golden.json)"
 
 D=$(mktemp -d "$HOME/.pane-gate.XXXXXX"); P=42199

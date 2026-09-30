@@ -56,9 +56,9 @@ node -e '
 const fs = require("fs");
 fs.writeFileSync(process.argv[1], JSON.stringify({
   version: process.argv[2], commit: process.argv[3], builtAt: new Date().toISOString(),
-  node: process.version, deb: process.argv[4], runpane: process.argv[5],
+  node: process.version, deb: process.argv[4], runpane: process.argv[5], ref: process.argv[6],
 }, null, 2) + "\n");' "$OUT/build-info.json" "$VERSION" "$(git rev-parse HEAD)" \
-  "pane_${VERSION}_amd64.deb" "runpane-${VERSION}.tgz"
+  "pane_${VERSION}_amd64.deb" "runpane-${VERSION}.tgz" "$(git rev-parse --abbrev-ref HEAD)"
 (cd "$OUT" && sha256sum *.deb *.tgz > SHA256SUMS.txt)
 
 # Sanity: the packaged app must report the fork version.

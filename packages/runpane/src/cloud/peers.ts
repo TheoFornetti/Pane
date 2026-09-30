@@ -19,6 +19,7 @@ import { findHost, type CloudHostRecord, type PeerGrant } from './store';
 const SANDBOX_PEERS_DIR = '/home/user/.config/runpane-cloud';
 const SANDBOX_PEERS_FILE = `${SANDBOX_PEERS_DIR}/peers.json`;
 const INVOKE_TIMEOUT_MS = 30_000;
+const PANE_CHAT_SESSION_ID = 'legacy-pane-chat';
 
 interface PeersArgs {
   sub: 'allow' | 'revoke' | 'list';
@@ -231,7 +232,10 @@ const sessionsSchema = boundary.object({
 
 async function resolveTargetSession(to: CloudHostRecord, selector: string | undefined, deps: CloudDeps): Promise<{ id: string; name: string }> {
   const { sessions } = decodeBoundary(await invokeHost(to, 'runpane:sessions:list', [], deps), sessionsSchema);
-  const live = sessions.filter((session) => session.archived !== true);
+  const all = sessions.filter((session) => session.archived !== true);
+  // Every daemon has the built-in Pane Chat Session; prefer the Sessions the user created.
+  const named = all.filter((session) => session.id !== PANE_CHAT_SESSION_ID);
+  const live = selector ? all : named.length > 0 ? named : all;
   const host = to.profile.cloud.hostname;
   if (selector) {
     const match = live.find((session) => session.id === selector || session.name === selector);

@@ -201,15 +201,17 @@ describe('invokeRemote wake policy', () => {
       }
       if (body.channel === 'runpane:sessions:list') {
         return { status: 200, body: JSON.stringify({ ok: true, result: { ok: true, sessions: [
-          { name: 'old', archived: true, agent: 'claude', panelIds: { claude: 'orch-old' } },
-          { name: 'main', agent: 'claude', panelIds: { claude: 'orch-main', codex: 'other' } },
+          { id: 'legacy-pane-chat', name: 'Pane Chat', agent: 'claude', panelIds: { claude: '__pane_chat_terminal__' } },
+          { id: 's-old', name: 'old', archived: true, agent: 'claude', panelIds: { claude: 'orch-old' } },
+          { id: 's-main', name: 'main', agent: 'claude', panelIds: { claude: 'orch-main', codex: 'other' } },
         ] } }) };
       }
       return { status: 200, body: JSON.stringify({ ok: true, result: { ok: true } }) };
     };
     await invokeRemote(cloudTarget(), 'runpane:panels:submit', [{ panelId: 'orchestrator', input: 'hi' }], { ...fast, transport });
-    assert.deepEqual(delivered.map((call) => call.channel), ['runpane:panels:list', 'runpane:sessions:list', 'runpane:panels:submit']);
-    const submitted = decodeBoundary(delivered[2]!.args[0], boundary.object({ panelId: boundary.string }));
+    // panels:list is a reviewed read, so the client retries the refusal before falling back.
+    assert.deepEqual([...new Set(delivered.map((call) => call.channel))], ['runpane:panels:list', 'runpane:sessions:list', 'runpane:panels:submit']);
+    const submitted = decodeBoundary(delivered[delivered.length - 1]!.args[0], boundary.object({ panelId: boundary.string }));
     assert.equal(submitted.panelId, 'orch-main');
   });
 

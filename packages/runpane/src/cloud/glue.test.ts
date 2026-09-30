@@ -194,7 +194,7 @@ test('peers allow mints a peer on the target, allowlisted to its one Session, an
   assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json']), 0);
   const a = await newHost(harness, 'Alpha');
   const b = await newHost(harness, 'Beta');
-  harness.world.daemons.set(b, { sessions: [{ id: 'sess-b', name: 'Main' }, { id: 'old', name: 'Old', archived: true }], peers: [] });
+  harness.world.daemons.set(b, { sessions: [{ id: 'legacy-pane-chat', name: 'Pane Chat' }, { id: 'sess-b', name: 'Main' }, { id: 'old', name: 'Old', archived: true }], peers: [] });
 
   // Empty by default.
   assert.deepEqual(peersFile(harness, a).hosts, []);

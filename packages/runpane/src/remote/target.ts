@@ -254,8 +254,12 @@ const panelListSchema = boundary.object({
   })),
 });
 
+/** Every daemon has this built-in Session; a named Session the user created is the likelier target. */
+const PANE_CHAT_SESSION_ID = 'legacy-pane-chat';
+
 const sessionListSchema = boundary.object({
   sessions: boundary.array(boundary.object({
+    id: boundary.string,
     name: boundary.string,
     archived: boundary.optional(boundary.boolean),
     agent: boundary.optional(boundary.string),
@@ -288,9 +292,11 @@ async function resolveOrchestratorPanel(
     } catch {
       throw error;
     }
-    const { sessions } = decodeBoundary(listed, sessionListSchema);
+    const all = decodeBoundary(listed, sessionListSchema).sessions.filter((session) => session.archived !== true);
+    const named = all.filter((session) => session.id !== PANE_CHAT_SESSION_ID);
+    const sessions = named.length > 0 ? named : all;
     panels = sessions.flatMap((session) => {
-      if (session.archived === true || !session.agent || !session.panelIds) return [];
+      if (!session.agent || !session.panelIds) return [];
       try {
         return [{ id: decodeBoundary(session.panelIds[session.agent], boundary.nonEmptyString), title: session.name }];
       } catch {

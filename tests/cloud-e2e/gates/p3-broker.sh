@@ -260,6 +260,8 @@ pprobe() {  # pprobe <check> <http> <code> <repo> <branch> <bundle-b64-file> [ex
     || rec "refuse.$c" FAIL "push branch='$5' repo=$4 -> $(head -c 240 <<<"$r")" "$E2E_RUN_DIR/refusals.txt"
 }
 # master / namespace escapes (the broker picks the target ref; these try to steer it)
+pprobe master-short         '403' 'ref-outside-namespace' "$REPO" "master" "$B64"
+pprobe main-short           '403' 'ref-outside-namespace' "$REPO" "main" "$B64"
 pprobe master-dotdot        '400|403' '.*' "$REPO" "../../master" "$B64"
 pprobe master-leading-slash '400|403' '.*' "$REPO" "/master" "$B64"
 pprobe master-refs-path     '400|403|200|201' '.*' "$REPO" "refs/heads/master" "$B64"   # lands (if at all) under the prefix; master checked below

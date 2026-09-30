@@ -23,6 +23,8 @@ fake_deploy() {
 set -e
 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
 command -v git >/dev/null || sudo apt-get install -y git >/dev/null 2>&1
+systemctl --user stop $FAKE_UNIT 2>/dev/null || true
+rm -rf $FAKE_DIR/state   # a fresh fake per run
 mkdir -p $FAKE_DIR && install -m 755 /home/user/rcl/fakegithub.py $FAKE_DIR/fakegithub.py
 python3 $FAKE_DIR/fakegithub.py init --state $FAKE_DIR/state --repo $repo --app-id $app --app-public-key /home/user/rcl/fake-app.pub --installation-id $inst
 $extra
@@ -124,7 +126,7 @@ app_jwt() {
 # broker_set_app <app-id> <pem> <installation-id> [api-base] [git-base]
 broker_set_app() {
   local extra=(); [ -n "${4:-}" ] && extra+=(--api-base-url "$4"); [ -n "${5:-}" ] && extra+=(--git-base-url "$5")
-  rpc cloud coordinator github set --app-id "$1" --private-key-file "$2" --installation-id "$3" "${extra[@]}" ${BROKER_SET_FLAGS:-} --json
+  rpc cloud coordinator github set --app-id "$1" --private-key-file "$2" --installation-id "$3" "${extra[@]}" ${BROKER_SET_FLAGS---no-verify} --json   # the laptop can't reach a fake on the coordinator's loopback
 }
 broker_set_pat() {
   local extra=(); [ -n "${2:-}" ] && extra+=(--api-base-url "$2"); [ -n "${3:-}" ] && extra+=(--git-base-url "$3")

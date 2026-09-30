@@ -100,10 +100,17 @@ def boat(method: str, path: str, body: Any = None, extra: Optional[dict[str, str
     headers = boat_headers()
     if extra:
         headers.update(extra)
-    status, payload, _ = http(method, BOAT_BASE + path, headers, body, timeout=timeout)
-    if method != "GET":
-        mutation(f"BOAT {method} {path} -> {status}")
-    return status, payload
+    # boat caps sandbox starts (create/fork/resume) per account: 12/min, 60/h, 200/day. Wait instead of failing.
+    deadline = time.monotonic() + float(os.environ.get("CLOUDLAB_RATE_WAIT_S", "1200"))
+    while True:
+        status, payload, _ = http(method, BOAT_BASE + path, headers, body, timeout=timeout)
+        if method != "GET":
+            mutation(f"BOAT {method} {path} -> {status}")
+        limited = status == 429 and isinstance(payload, dict) and payload.get("code") == "rate_limited"
+        if not limited or time.monotonic() > deadline:
+            return status, payload
+        print(f"cloudlab: boat rate limit on {method} {path}; retrying in 60 s", file=sys.stderr)
+        time.sleep(60)
 
 
 def sandbox_of(payload: Any) -> dict[str, Any]:

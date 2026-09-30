@@ -36,7 +36,7 @@ gh release list -R jamari-morrison/Pane --limit 5      # newest first
 gh release view rc-<sha> -R jamari-morrison/Pane       # check "branch rc/integration", copy the npm line
 npm i -g https://github.com/jamari-morrison/Pane/releases/download/rc-<sha>/runpane-<version>.tgz
 runpane version          # 2.4.141-rc.<date>.g<commit>
-runpane cloud --help     # lists setup, new, list, status, stop, wake, destroy, pair, sync, coordinator, peers, github, git
+runpane cloud --help     # lists setup, new, list, status, stop, wake, destroy, pair, sync, coordinator, peers, secrets, port, github, git
 ```
 
 Run `runpane cloud` from a normal terminal, not from a terminal inside Pane desktop. Pane puts its own
@@ -339,6 +339,100 @@ runpane cloud secrets rm rp-a1b2c3d4 LINEAR_API_KEY
   pick names one by one, never "everything in the config".
 - The Session must be awake (`runpane cloud wake <host>` first). Secrets live on its disk and survive
   sleep and wake; `destroy` deletes them with the disk.
+
+### Open a Session's services in your browser (ports)
+
+A dev server, a preview app or any other service an agent runs in a cloud Session gets a **tailnet-only HTTPS
+link on the Session's own name**. It opens on every device in your tailnet (laptop, phone, a colleague's Mac)
+with no forwarder, no `localhost` tricks and no admin-console change:
+
+```
+https://<host>.<your-tailnet>.ts.net:<port>/
+```
+
+This is the default way to reach a Session's services. It is Tailscale Serve, **never Funnel**: nothing is on
+the public internet.
+
+**From the laptop:**
+
+```bash
+runpane cloud port open "api work" 8787 --name taste        # https://rp-a1b2c3d4.<tailnet>.ts.net:8787/
+runpane cloud port open "api work" 3000 --https-port 8443 --path /health
+runpane cloud port list "api work"                            # URLs, checked from this machine, plus suggestions
+runpane cloud port close "api work" taste
+```
+
+**Inside the Session** (an agent publishes its own service, no laptop needed):
+
+```bash
+runpane port open 5173 --name web       # prints the URL
+runpane port list [--verify] [--json]
+runpane port close web
+```
+
+- **The URL.** The tailnet port defaults to the service's own port, so `8787` becomes `https://<host>:8787/`,
+  which is stable and guessable. `--https-port` picks another. `:443` stays Pane's own, and so does the
+  daemon's port (42137). Several ports per Session are fine (one certificate for the name covers every
+  port), and two Sessions can publish the same port number at once: each has its own name.
+- **Replacing an older entry.** If the tailnet port is already served by another Tailscale Serve entry
+  (for example a plain `tailscale serve --tcp` forward you set up by hand), `open` refuses and names it;
+  `--yes` replaces it.
+- **Survives restarts, sleep and wake.** The Session's Pane daemon keeps the list in
+  `~/.runpane-cloud/ports.json` (0600). At every boot (a wake is a boot), after a daemon restart and once a
+  minute it re-applies any entry Tailscale Serve lost and, at boot, requests each URL and logs the answer.
+- **No certificate?** Let's Encrypt issues at most 50 certificates a week per tailnet, one per Session name
+  (see [HTTPS certificates](#https-certificates-and---transport)). A port on a name that has no certificate
+  yet waits up to about 45 s for one; if none comes, the port is served as **plain HTTP inside the tailnet**
+  (`http://<host>:<port>/`; WireGuard still encrypts it), and `port list` says so. The daemon moves it to
+  HTTPS by itself once tailscaled holds a certificate for the name; `runpane port open <port> --scheme https`
+  asks for one right away (Let's Encrypt's refusal names the time it lifts: `429 ... retry after <UTC time>`).
+  Browsers treat an http page as insecure (no `Secure` cookies, no service workers).
+- **Firewall.** Published ports need no change to the Session's firewall: Tailscale Serve answers them inside
+  `tailscaled`, before the host firewall, and nothing else on the machine becomes reachable. Your tailnet
+  policy must let your devices reach them, though; see [Tailnet policy](#tailnet-policy).
+
+**Declare them in the repository (`.runpane/ports.json`).** Commit the services a repository runs, and every
+Session on it publishes them without anyone asking, at boot and wake and when the repository is added:
+
+```json
+{
+  "version": 1,
+  "ports": [
+    { "name": "taste", "port": 8787, "https_port": 8787, "path": "/s/ultra-feedback" },
+    { "name": "api", "port": 3000 }
+  ]
+}
+```
+
+- `name` (lowercase letters, digits, hyphens), `port` (the local port) are required; `https_port` (default:
+  `port`) and `path` (shown in the link; default `/`) are optional. Any other key, a duplicate name or port,
+  or `https_port: 443` makes the whole file invalid; `port list` shows the error, and ports it opened before
+  stay as they were.
+- The port is published even before the service listens (its URL answers 502 until then).
+- A manifest never replaces a Serve entry it did not make: it waits (`port list` shows `error` with the
+  reason) and opens once that entry is gone, or when you run `runpane port open <port> --yes`.
+- Removing an entry from the manifest closes its port at the next check (within a minute). `port close`
+  of a manifest port keeps it closed until you open it again.
+
+**Suggested ports.** When a process started from a Pane panel (an agent's dev server, a `npm run dev` in a
+terminal) listens on `127.0.0.1` or `0.0.0.0`, the Session **suggests** it: `port list` shows it under
+"Suggested", and Pane shows it as a dimmed chip with an **Open on tailnet** button. It is not published by
+itself, because an unknown dev server should not appear on your tailnet unasked. To publish every detected
+port automatically, per Session:
+
+```bash
+runpane port auto-open on     # or off (the default)
+```
+
+With auto-open on, anything an agent starts listening on is reachable from every device in your tailnet
+within seconds, including services with no login (debug servers, database consoles). Turn it on only for
+Sessions whose agents you trust to run nothing you would not share with your tailnet.
+
+**Fallback: a local forwarder.** If a service must be opened as `http://localhost:<port>` on your machine
+(for example an app whose `Secure` cookies or origins are pinned to localhost), publish the port as a plain
+TCP forward in the Session (`sudo tailscale serve --bg --tcp=<port> tcp://127.0.0.1:<port>`) and run a small
+TCP forwarder on your machine from `localhost:<port>` to `<host>.<tailnet>.ts.net:<port>`. Prefer the HTTPS
+link; this path needs a program running on every client machine.
 
 ## 5. Sleep and wake
 
@@ -713,20 +807,24 @@ run tests that churn Sessions in a separate tailnet.
 `runpane cloud` can't edit your tailnet policy (its OAuth client only mints keys). Each Session therefore
 guards itself: an nftables table `inet rp_tailnet` (`/etc/rp-tailnet-firewall.nft`, reloaded at boot by
 `rp-tailnet-firewall.service`, so it survives sleep and wake) accepts only replies and tcp/443 on
-`tailscale0`. The sandbox provider runs its own services on the machine (a desktop stream on 8090, an agent
+`tailscale0`. Published [Session ports](#open-a-sessions-services-in-your-browser-ports) (and the daemon's own Serve
+entries) are answered inside `tailscaled` before this firewall, so they work without a rule of their own. The sandbox provider runs its own services on the machine (a desktop stream on 8090, an agent
 service on 8911, sshd), and without the firewall a compromised peer Session could reach them.
 
 Tighten the policy too, so the tailnet enforces the same thing. With grants:
 
 ```json
 "grants": [
-  { "src": ["autogroup:member"], "dst": ["tag:rp-session"], "ip": ["tcp:443", "tcp:47300"] },
+  { "src": ["autogroup:member"], "dst": ["tag:rp-session"], "ip": ["tcp:443", "tcp:47300", "tcp:1024-65535"] },
   { "src": ["tag:rp-session"], "dst": ["tag:rp-session"], "ip": ["tcp:443", "tcp:47300"] }
 ]
 ```
 
-`tcp:47300` is only for the coordinator (section 6). Drop it if you don't run one. Keep your own rules
-for your other devices.
+`tcp:47300` is only for the coordinator (section 6). Drop it if you don't run one. `tcp:1024-65535` lets your
+own devices open [Session ports](#open-a-sessions-services-in-your-browser-ports); narrow it to the ports you
+publish if you prefer. Sessions don't get it, so one Session can't reach another's services. Only ports a
+Session publishes answer (the Session firewall drops everything else), so the wide range exposes nothing
+more. Keep your own rules for your other devices.
 
 ## Repair a Session in place
 
@@ -776,6 +874,11 @@ Session (wake it first). Run it once on Sessions created with an older `runpane`
 | `doppler run -c prd` says "not delivered: the coordinator's secrets policy (default) refuses config prd" | The default policy. Change it with `runpane cloud coordinator doppler policy` (your call), then `doppler refresh` |
 | `doppler secrets get NAME` says "Could not find requested secret" | NAME is not in the manifest's names, not in Doppler, or withheld by policy (`doppler status` lists withheld names and why) |
 | `coordinator doppler set` says "doppler could not create a read-only service token" | Log in (`doppler login`) as someone who can manage that project's service tokens, or pass `--token-file` with a token you made |
+| `port open` says `ERR_PORTS_CONFLICT` | Another Tailscale Serve entry already holds that tailnet port (the message names it). `--yes` replaces it, or pick another with `--https-port` |
+| A port's URL doesn't open from a device, but `runpane port list --verify` in the Session says it answers | Your tailnet policy doesn't let that device reach the port; see [Tailnet policy](#tailnet-policy) |
+| A port's URL answers 502 | Nothing listens on that local port in the Session (yet). Start the service; the link stays |
+| `port list` shows a port as `http` | The Session's name had no TLS certificate when it was opened (Let's Encrypt's weekly limit). It moves to https by itself once the name has one; `runpane port open <port> --scheme https` retries now |
+| `port list` shows `Manifest ...: INVALID` | `.runpane/ports.json` breaks the strict schema; the message names the key or value. Ports it opened before stay as they were |
 
 To check a daemon by hand: `curl https://rp-<id>.<your-tailnet>.ts.net/health` returns its version and
 readiness (`readiness.state`: `starting`, `ready` or `degraded`).
@@ -789,6 +892,8 @@ readiness (`readiness.state`: `starting`, `ready` or `degraded`).
 | `~/.runpane-cloud/secrets.env`, `secrets.json` (in the sandbox) | agent secrets from `runpane cloud secrets` (0600); loaded by a block at the top of `~/.bashrc` and `~/.zshenv` |
 | `~/.runpane-cloud/doppler/secrets.json` (in the sandbox) | the Doppler set the coordinator delivered for the repository's `.runpane/secrets.json` (0600, 0700 dir); read by the `doppler` stand-in (`~/.local/bin/doppler`) and refreshed by the user unit `runpane-cloud-secrets.service` at every boot and wake |
 | `.runpane/secrets.json` (in your repository) | which Doppler configs and names Sessions on the repository get; names only, safe to commit |
+| `~/.runpane-cloud/ports.json` (in the sandbox) | the Session's published ports (0600); the Pane daemon owns it and re-applies it to Tailscale Serve at every boot and wake |
+| `.runpane/ports.json` (in your repository) | the services Sessions on the repository publish automatically; see [ports](#open-a-sessions-services-in-your-browser-ports) |
 | `~/.config/runpane-cloud/hosts/<host>.json`, `.pairing` | one saved cloud Session and its pairing code (0600) |
 | `~/.config/runpane-cloud/coordinator.json` | the coordinator's address and your caller token (0600) |
 | `~/.config/runpane-cloud/hosts/<host>.json` (`meta.github`) | the Session's GitHub connections: repository, deploy key id and fingerprint (no secrets) |

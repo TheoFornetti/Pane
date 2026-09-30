@@ -31,6 +31,7 @@ import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
 import { createFanoutEventSink, noopPaneEventSink, type PaneEventSink } from '../core/eventSink';
 import {
+  getPaneEventSink,
   setPaneRuntime,
   type PaneWebviewContext,
   type PtyHostRuntime,
@@ -55,6 +56,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { cloudDaemonHealth } from './cloud/readiness';
 import { userClientActivity } from './cloud/clientActivity';
 import { readBuildCommit, registerCloudDaemonHandlers } from './cloud/cloudDaemon';
+import { registerSessionPortsHandlers } from './cloud/ports/registerPorts';
 import { remoteHostRuntimeStateStore } from './remoteHostRuntimeState';
 
 interface PaneDaemonHostOptions {
@@ -397,6 +399,16 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     remoteConfig: () => configManager.getConfig().remoteDaemon,
     checkpointWal: () => databaseService.checkpointWal(),
     paneDirectory: getAppDirectory(),
+  });
+  registerSessionPortsHandlers({
+    commandRegistry,
+    panelIds: () => terminalPanelManager.getAllPanelIds(),
+    panelPid: panelId => terminalPanelManager.getPanelPid(panelId),
+    paneIdOf: panelId => panelManager.getPanel(panelId)?.sessionId,
+    projectPaths: () => databaseService.getAllProjects().map(project => project.path),
+    daemonPort: () => configManager.getConfig().remoteDaemon?.host.config.listenPort,
+    emit: (channel, result) => getPaneEventSink().send(channel, result),
+    log: message => logger.info(`[Pane daemon] ${message}`),
   });
 
   let paneDaemonServer: PaneDaemonServer | null = null;

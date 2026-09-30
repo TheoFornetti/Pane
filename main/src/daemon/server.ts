@@ -13,6 +13,7 @@ import type {
 } from '../../../shared/types/daemon';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { serializeJsonTransport } from './jsonTransport';
+import { SESSION_PORTS_CHANGED_EVENT } from '../../../shared/types/sessionPorts';
 
 const DAEMON_EVENT_PREFIXES = [
   'archive:',
@@ -35,6 +36,8 @@ const DAEMON_EVENT_EXACT_CHANNELS = new Set<string>([
   'process:ended',
   'project-script-changed',
   'project-script-closing',
+  // Session ports (runpane:ports:list result), for the Ports chip row.
+  SESSION_PORTS_CHANGED_EVENT,
   'session-log',
   'session-logs-cleared',
   'script-closing',

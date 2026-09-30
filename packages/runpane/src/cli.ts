@@ -14,6 +14,7 @@ import { PaneDaemonClientError } from './daemonClient';
 import { downloadArtifact } from './download';
 import { runDoctor } from './doctor';
 import { runCloudSafeToStop } from './cloudSafeToStop';
+import { runPort } from './sessionPorts';
 import {
   installPaneArtifact,
   launchPaneClient,
@@ -168,6 +169,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
   if (parsed.cloudArgv) {
     const { runCloud } = await import('./cloud');
     return runCloud(parsed.cloudArgv);
+  }
+
+  if (parsed.portArgv) {
+    return runPort(parsed);
   }
 
   if (parsed.command === 'mcp') {

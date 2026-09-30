@@ -1655,6 +1655,81 @@
       ]
     },
     {
+      "name": "port open",
+      "summary": "Inside a Runpane Cloud Session: publish a local service (127.0.0.1:<port>) as a tailnet-only HTTPS URL on the Session's own name (Tailscale Serve, never Funnel). Kept across daemon restarts, sleep and wake.",
+      "usage": [
+        "runpane port open <port> [--name <name>] [--https-port <port>] [--path </path>] [--scheme <auto|https|http>] [--yes] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "port list",
+      "summary": "Inside a Runpane Cloud Session: list published ports with their URLs, ports agents are listening on that could be published (suggested), and the repositories' .runpane/ports.json manifests.",
+      "usage": [
+        "runpane port list [--verify] [--json] [--pane-dir <path>]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "port close",
+      "summary": "Inside a Runpane Cloud Session: stop publishing a port (by local port or name). A manifest port stays closed until opened again.",
+      "usage": [
+        "runpane port close <port|name> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "port auto-open",
+      "summary": "Inside a Runpane Cloud Session: publish ports agents start listening on without asking (on), or only suggest them (off, the default).",
+      "usage": [
+        "runpane port auto-open <on|off> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud port open",
+      "summary": "Publish a service running in a cloud Session as a tailnet-only HTTPS URL on the Session's name (https://<host>.<tailnet>.ts.net:<port>/).",
+      "usage": [
+        "runpane cloud port open <host> <port> [--name <name>] [--https-port <port>] [--path </path>] [--scheme <auto|https|http>] [--yes] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud port list",
+      "summary": "List a cloud Session's published ports with their URLs, checks each URL from this machine, and shows suggested ports.",
+      "usage": [
+        "runpane cloud port list <host> [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud port close",
+      "summary": "Stop publishing a cloud Session's port.",
+      "usage": [
+        "runpane cloud port close <host> <port|name> [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
       "name": "cloud github connect",
       "summary": "Let a cloud Session reach one GitHub repository: generates an ed25519 key inside the sandbox and registers its public half as a read-only deploy key with your GitHub credential, which never enters the sandbox.",
       "usage": [
@@ -2340,7 +2415,7 @@
         "  runpane panes move --pane <pane-id> --folder <folder-id> --yes [--json] [--pane-dir <path>]",
         "  runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]",
         "  runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]",
-        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|github|git|agent> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|agent> [options]",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -3855,9 +3930,91 @@
         "  <host>   Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
         "  --json   Print machine-readable output."
       ],
+      "port open": [
+        "Usage:",
+        "  runpane port open <port> [--name <name>] [--https-port <port>] [--path </path>] [--scheme <auto|https|http>] [--yes] [--json] [--pane-dir <path>]",
+        "",
+        "Inside a Runpane Cloud Session: publish a local service (127.0.0.1:<port>) as a tailnet-only HTTPS URL on the Session's own name (Tailscale Serve, never Funnel). Kept across daemon restarts, sleep and wake.",
+        "",
+        "Options:",
+        "  <port>                       The local port the service listens on (127.0.0.1 or 0.0.0.0).",
+        "  --name <name>                A short name (default port-<port>).",
+        "  --https-port <port>          The tailnet port of the URL (default: the same port; 443 stays Pane's).",
+        "  --path </path>               Path shown in the URL (the service is mounted at /).",
+        "  --scheme <auto|https|http>   auto (default): HTTPS, or plain HTTP inside the tailnet when the name has no TLS certificate.",
+        "  --yes                        Replace another Tailscale Serve entry on that tailnet port (e.g. a plain tcp forward).",
+        "  --json                       Print JSON output."
+      ],
+      "port list": [
+        "Usage:",
+        "  runpane port list [--verify] [--json] [--pane-dir <path>]",
+        "",
+        "Inside a Runpane Cloud Session: list published ports with their URLs, ports agents are listening on that could be published (suggested), and the repositories' .runpane/ports.json manifests.",
+        "",
+        "Options:",
+        "  --verify                     Request each URL from the Session and report whether it answers.",
+        "  --json                       Print JSON output."
+      ],
+      "port close": [
+        "Usage:",
+        "  runpane port close <port|name> [--json] [--pane-dir <path>]",
+        "",
+        "Inside a Runpane Cloud Session: stop publishing a port (by local port or name). A manifest port stays closed until opened again.",
+        "",
+        "Options:",
+        "  <port|name>                  The local port or the name of a published port.",
+        "  --json                       Print JSON output."
+      ],
+      "port auto-open": [
+        "Usage:",
+        "  runpane port auto-open <on|off> [--json] [--pane-dir <path>]",
+        "",
+        "Inside a Runpane Cloud Session: publish ports agents start listening on without asking (on), or only suggest them (off, the default).",
+        "",
+        "Options:",
+        "  <on|off>                     on: every detected port is published at once on the tailnet; off: suggested only.",
+        "  --json                       Print JSON output."
+      ],
+      "cloud port open": [
+        "Usage:",
+        "  runpane cloud port open <host> <port> [--name <name>] [--https-port <port>] [--path </path>] [--scheme <auto|https|http>] [--yes] [--json]",
+        "",
+        "Publish a service running in a cloud Session as a tailnet-only HTTPS URL on the Session's name (https://<host>.<tailnet>.ts.net:<port>/).",
+        "",
+        "Options:",
+        "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  <port>                         The local port in the Session.",
+        "  --name <name>                  A short name (default port-<port>).",
+        "  --https-port <port>            The tailnet port of the URL (default: the same port).",
+        "  --path </path>                 Path shown in the URL.",
+        "  --scheme <auto|https|http>     auto (default) falls back to plain HTTP inside the tailnet when the name has no certificate.",
+        "  --yes                          Replace another Tailscale Serve entry on that tailnet port.",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud port list": [
+        "Usage:",
+        "  runpane cloud port list <host> [--json]",
+        "",
+        "List a cloud Session's published ports with their URLs, checks each URL from this machine, and shows suggested ports.",
+        "",
+        "Options:",
+        "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud port close": [
+        "Usage:",
+        "  runpane cloud port close <host> <port|name> [--json]",
+        "",
+        "Stop publishing a cloud Session's port.",
+        "",
+        "Options:",
+        "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  <port|name>                    The local port or the name of a published port.",
+        "  --json                         Print machine-readable output."
+      ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|github|git|agent> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|agent> [options]",
         "",
         "Run each Pane Session on its own cloud sandbox with a normal Pane daemon, paired to your Pane apps as a remote host.",
         "Keys stay on this machine (~/.config/runpane-cloud, 0600). Pane desktop only lists the saved remote hosts.",
@@ -5324,9 +5481,58 @@
         "`runpane cloud secrets disable` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud secrets disable"
       ],
+      "port open": [
+        "Usage:",
+        "  runpane port open <port> [--name <name>] [--https-port <port>] [--path </path>] [--scheme <auto|https|http>] [--yes] [--json] [--pane-dir <path>]",
+        "",
+        "`runpane port open` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest port open"
+      ],
+      "port list": [
+        "Usage:",
+        "  runpane port list [--verify] [--json] [--pane-dir <path>]",
+        "",
+        "`runpane port list` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest port list"
+      ],
+      "port close": [
+        "Usage:",
+        "  runpane port close <port|name> [--json] [--pane-dir <path>]",
+        "",
+        "`runpane port close` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest port close"
+      ],
+      "port auto-open": [
+        "Usage:",
+        "  runpane port auto-open <on|off> [--json] [--pane-dir <path>]",
+        "",
+        "`runpane port auto-open` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest port auto-open"
+      ],
+      "cloud port open": [
+        "Usage:",
+        "  runpane cloud port open <host> <port> [--name <name>] [--https-port <port>] [--path </path>] [--scheme <auto|https|http>] [--yes] [--json]",
+        "",
+        "`runpane cloud port open` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud port open"
+      ],
+      "cloud port list": [
+        "Usage:",
+        "  runpane cloud port list <host> [--json]",
+        "",
+        "`runpane cloud port list` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud port list"
+      ],
+      "cloud port close": [
+        "Usage:",
+        "  runpane cloud port close <host> <port|name> [--json]",
+        "",
+        "`runpane cloud port close` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud port close"
+      ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|github|git|agent> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|agent> [options]",
         "",
         "`runpane cloud` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud"
@@ -16112,6 +16318,265 @@
         "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
         ]
+      },
+      "port open": {
+        "name": "port open",
+        "summary": "Inside a Runpane Cloud Session: publish a local service as a tailnet-only HTTPS URL on the Session's own name.",
+        "details": "Runs tailscale serve --https=<https-port> http://127.0.0.1:<port> through the Session's Pane daemon (runpane:ports:open) and records it in ~/.runpane-cloud/ports.json (0600), which the daemon re-applies after a restart, sleep or wake. One certificate per Session name covers every port. Without a certificate the port is served as plain HTTP inside the tailnet and the result says why.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<port>",
+            "required": true,
+            "description": "The local port the service listens on (127.0.0.1 or 0.0.0.0)."
+          },
+          {
+            "name": "--name",
+            "value": "<name>",
+            "required": false,
+            "description": "A short name (default port-<port>)."
+          },
+          {
+            "name": "--https-port",
+            "value": "<port>",
+            "required": false,
+            "description": "The tailnet port of the URL (default: the same port; 443 stays Pane's)."
+          },
+          {
+            "name": "--path",
+            "value": "</path>",
+            "required": false,
+            "description": "Path shown in the URL; the service is mounted at /."
+          },
+          {
+            "name": "--scheme",
+            "value": "<auto|https|http>",
+            "required": false,
+            "description": "auto (default): HTTPS, or plain HTTP inside the tailnet when the Session's name has no TLS certificate."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Replace another Tailscale Serve entry on that tailnet port, such as a plain tcp forward."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane port open 8787 --name taste",
+          "runpane port open 3000 --https-port 8443 --path /health --json"
+        ],
+        "notes": [
+          "Tailnet only: Tailscale Serve, never Funnel. The URL works from any device on your tailnet with no forwarder."
+        ]
+      },
+      "port list": {
+        "name": "port list",
+        "summary": "Inside a Runpane Cloud Session: list published ports, suggested ports and repository manifests.",
+        "details": "Suggested ports are TCP listeners on 127.0.0.1 or 0.0.0.0 started under a Pane panel (an agent's dev server) that are not published: they are only published with port open, or automatically after port auto-open on. Manifests are the repositories' .runpane/ports.json files, which the daemon opens at boot, wake and repository add.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--verify",
+            "required": false,
+            "description": "Request each URL from the Session and report whether it answers."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane port list",
+          "runpane port list --verify --json"
+        ],
+        "notes": []
+      },
+      "port close": {
+        "name": "port close",
+        "summary": "Inside a Runpane Cloud Session: stop publishing a port.",
+        "details": "Removes the Tailscale Serve entry and the record. A port a repository manifest declares stays closed until it is opened again.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<port|name>",
+            "required": true,
+            "description": "The local port or the name of a published port."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane port close taste"
+        ],
+        "notes": []
+      },
+      "port auto-open": {
+        "name": "port auto-open",
+        "summary": "Inside a Runpane Cloud Session: publish detected ports automatically (on) or only suggest them (off, the default).",
+        "details": "With on, every port an agent's process starts listening on becomes reachable from the whole tailnet without asking. Keep it off unless every service agents start in this Session is fine to expose to your tailnet devices.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<on|off>",
+            "required": true,
+            "description": "on or off."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane port auto-open off"
+        ],
+        "notes": []
+      },
+      "cloud port open": {
+        "name": "cloud port open",
+        "summary": "Publish a service in a cloud Session as a tailnet-only HTTPS URL on the Session's name.",
+        "details": "Calls the Session daemon's runpane:ports:open over the tailnet with the saved client token. The Session must be awake.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "<port>",
+            "required": true,
+            "description": "The local port in the Session."
+          },
+          {
+            "name": "--name",
+            "value": "<name>",
+            "required": false,
+            "description": "A short name (default port-<port>)."
+          },
+          {
+            "name": "--https-port",
+            "value": "<port>",
+            "required": false,
+            "description": "The tailnet port of the URL (default: the same port; 443 stays Pane's)."
+          },
+          {
+            "name": "--path",
+            "value": "</path>",
+            "required": false,
+            "description": "Path shown in the URL; the service is mounted at /."
+          },
+          {
+            "name": "--scheme",
+            "value": "<auto|https|http>",
+            "required": false,
+            "description": "auto (default): HTTPS, or plain HTTP inside the tailnet when the Session's name has no TLS certificate."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Replace another Tailscale Serve entry on that tailnet port, such as a plain tcp forward."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud port open rp-red-zd56pin5 8787 --name taste --yes"
+        ],
+        "notes": [
+          "Tailnet only: Tailscale Serve, never Funnel. The URL works from any device on your tailnet with no forwarder."
+        ]
+      },
+      "cloud port list": {
+        "name": "cloud port list",
+        "summary": "List a cloud Session's published ports and check each URL from this machine.",
+        "details": "REACHABLE is checked from this machine over the tailnet: any HTTP answer except 502 counts. Suggested ports are listening in the Session but not published.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud port list rp-red-zd56pin5"
+        ],
+        "notes": []
+      },
+      "cloud port close": {
+        "name": "cloud port close",
+        "summary": "Stop publishing a cloud Session's port.",
+        "details": "Calls the Session daemon's runpane:ports:close. The Session must be awake.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "<port|name>",
+            "required": true,
+            "description": "The local port or the name of a published port."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud port close rp-red-zd56pin5 taste"
+        ],
+        "notes": []
       },
       "cloud github connect": {
         "name": "cloud github connect",

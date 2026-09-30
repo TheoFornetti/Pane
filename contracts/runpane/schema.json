@@ -557,6 +557,13 @@
         "cloud secrets rm",
         "cloud secrets enable",
         "cloud secrets disable",
+        "port open",
+        "port list",
+        "port close",
+        "port auto-open",
+        "cloud port open",
+        "cloud port list",
+        "cloud port close",
         "cloud github connect",
         "cloud github disconnect",
         "cloud github list",
@@ -907,6 +914,27 @@
           "$ref": "#/$defs/helpLines"
         },
         "cloud secrets disable": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "port open": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "port list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "port close": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "port auto-open": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud port open": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud port list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud port close": {
           "$ref": "#/$defs/helpLines"
         },
         "cloud github connect": {

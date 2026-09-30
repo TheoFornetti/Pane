@@ -10,7 +10,7 @@ import {
   type RemotePaneAnalyticsSink,
 } from '../services/remoteAnalytics';
 import { terminalPanelManager } from '../services/terminalPanelManager';
-import type { PaneCommandRegistry } from './commandRegistry';
+import type { PaneCommandOrigin, PaneCommandRegistry } from './commandRegistry';
 import { authenticateRemoteDaemonBearerToken } from './auth';
 import { isPaneDaemonEventChannel } from './server';
 import {
@@ -27,6 +27,8 @@ import { getRemotePwaAssetResponse } from './pwaStaticAssets';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { BoundarySchema, JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { serializeJsonTransport } from './jsonTransport';
+import { cloudDaemonHealth, type CloudHealthFields } from './cloud/readiness';
+import { commandOriginForClient, userClientActivity } from './cloud/clientActivity';
 
 interface RemoteHttpAddress {
   host: string;
@@ -75,7 +77,8 @@ interface RemoteReadyEventPayload {
   timestamp: string;
 }
 
-interface RemoteHealthPayload {
+/** `status` says the HTTP server answers; `readiness` says whether agents are usable (cloud wake). */
+interface RemoteHealthPayload extends CloudHealthFields {
   ok: true;
   status: 'ready';
   transport: 'http+sse';
@@ -531,6 +534,7 @@ export class PaneRemoteHttpApiServer {
       const result = await this.commandRegistry.invoke(
         invokeRequest.channel,
         this.getInvokeArgsForRequest(invokeRequest, auth, request),
+        { origin: this.recordClientInvoke(invokeRequest, auth, request) },
       );
       this.writeJson(response, 200, {
         ok: true,
@@ -570,7 +574,27 @@ export class PaneRemoteHttpApiServer {
       ok: true,
       status: 'ready',
       transport: 'http+sse',
+      ...cloudDaemonHealth.fields(),
     } satisfies RemoteHealthPayload);
+  }
+
+  /** Notes a user client's call for cloud safe-to-stop and returns the call's origin; peers are not users. */
+  private recordClientInvoke(
+    invokeRequest: RemoteInvokeRequest,
+    auth: Extract<RemoteRequestAuthResult, { ok: true }>,
+    request: IncomingMessage,
+  ): PaneCommandOrigin {
+    const record = auth.client
+      ? this.getRemoteConfig().host.clients.find(client => client.id === auth.client?.id)
+      : undefined;
+    userClientActivity.recordInvoke({
+      record,
+      clientId: auth.client?.id ?? null,
+      label: auth.client?.label ?? getClientLabelFromRequest(request, invokeRequest.clientLabel),
+      channel: invokeRequest.channel,
+      at: Date.now(),
+    });
+    return commandOriginForClient(record);
   }
 
   private handleEventStreamRequest(request: IncomingMessage, response: ServerResponse, url: URL): void {

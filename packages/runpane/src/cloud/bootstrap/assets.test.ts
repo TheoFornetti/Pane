@@ -6,6 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { cloudBootstrapAssets, type CloudBootstrapAssetName } from './generated/assets';
 
+// SAFETY: Object.keys of the generated const record returns exactly its asset names.
 const names = Object.keys(cloudBootstrapAssets) as CloudBootstrapAssetName[];
 
 test('every embedded asset is valid bash', () => {

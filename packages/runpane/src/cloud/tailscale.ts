@@ -3,6 +3,8 @@
 // and lists or deletes their devices. Secrets (client secret, access token, auth keys) never
 // appear in errors or logs.
 
+import { boundary, decodeBoundary, type BoundarySchema } from '../boundaryDecoder';
+
 const DEFAULT_API_BASE = 'https://api.tailscale.com/api/v2';
 
 export const CLOUD_SESSION_TAG = 'tag:rp-session';
@@ -91,20 +93,15 @@ export function createTailscaleApi(
     if (!response.ok) {
       throw new TailscaleApiError(`Tailscale OAuth token request failed (HTTP ${response.status})`, response.status);
     }
-    const payload = asRecord(await response.json());
-    const token = typeof payload.access_token === 'string' ? payload.access_token : '';
-    if (!token) {
-      throw new TailscaleApiError('Tailscale OAuth token response had no access_token');
-    }
-    const expiresIn = typeof payload.expires_in === 'number' ? payload.expires_in : 3600;
-    cached = { header: `Bearer ${token}`, expiresAt: Date.now() + expiresIn * 1000 };
+    const payload = await decodeResponse(response, tokenSchema, 'Tailscale OAuth token response');
+    cached = { header: `Bearer ${payload.access_token}`, expiresAt: Date.now() + (payload.expires_in ?? 3600) * 1000 };
     return cached.header;
   }
 
-  async function request(method: string, path: string, body?: unknown): Promise<Response> {
-    const headers: Record<string, string> = { Authorization: await authorization() };
+  async function request(method: string, path: string, body?: MintKeyRequestBody): Promise<Response> {
+    const headers = new Headers({ Authorization: await authorization() });
     if (body !== undefined) {
-      headers['Content-Type'] = 'application/json';
+      headers.set('Content-Type', 'application/json');
     }
     return fetchImpl(`${apiBase}${path}`, {
       method,
@@ -116,8 +113,8 @@ export function createTailscaleApi(
   async function failure(response: Response, what: string): Promise<TailscaleApiError> {
     let detail = '';
     try {
-      const payload = asRecord(await response.json());
-      detail = typeof payload.message === 'string' ? `: ${payload.message}` : '';
+      const payload = decodeBoundary(await response.json(), errorSchema);
+      detail = payload.message ? `: ${payload.message}` : '';
     } catch {
       // Error bodies are informational only.
     }
@@ -129,9 +126,16 @@ export function createTailscaleApi(
     if (!response.ok) {
       throw await failure(response, 'Tailscale device list');
     }
-    const payload = asRecord(await response.json());
-    const devices = Array.isArray(payload.devices) ? payload.devices : [];
-    return devices.map((device) => parseDevice(asRecord(device)));
+    const payload = await decodeResponse(response, deviceListSchema, 'Tailscale device list');
+    return (payload.devices ?? []).map((device) => ({
+      nodeId: device.nodeId ?? '',
+      id: device.id ?? '',
+      hostname: device.hostname ?? '',
+      name: (device.name ?? '').replace(/\.$/, ''),
+      addresses: device.addresses ?? [],
+      tags: device.tags ?? [],
+      lastSeen: device.lastSeen,
+    }));
   }
 
   return {
@@ -157,15 +161,7 @@ export function createTailscaleApi(
       if (!response.ok) {
         throw await failure(response, 'Tailscale auth key mint');
       }
-      const payload = asRecord(await response.json());
-      if (typeof payload.key !== 'string' || typeof payload.id !== 'string') {
-        throw new TailscaleApiError('Tailscale auth key response had no key');
-      }
-      return {
-        id: payload.id,
-        key: payload.key,
-        expires: typeof payload.expires === 'string' ? payload.expires : undefined,
-      };
+      return decodeResponse(response, authKeySchema, 'Tailscale auth key response');
     },
 
     listDevices,
@@ -189,26 +185,46 @@ export function createTailscaleApi(
   };
 }
 
-function parseDevice(record: Record<string, unknown>): TailscaleDevice {
-  return {
-    nodeId: stringField(record.nodeId),
-    id: stringField(record.id),
-    hostname: stringField(record.hostname),
-    name: stringField(record.name).replace(/\.$/, ''),
-    addresses: stringArray(record.addresses),
-    tags: stringArray(record.tags),
-    lastSeen: typeof record.lastSeen === 'string' ? record.lastSeen : undefined,
-  };
+interface MintKeyRequestBody {
+  capabilities: { devices: { create: { reusable: boolean; ephemeral: boolean; preauthorized: boolean; tags: string[] } } };
+  expirySeconds: number;
+  description: string;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
+const tokenSchema = boundary.object({
+  access_token: boundary.nonEmptyString,
+  expires_in: boundary.optional(boundary.number),
+});
 
-function stringField(value: unknown): string {
-  return typeof value === 'string' ? value : '';
-}
+const errorSchema = boundary.object({ message: boundary.optional(boundary.string) });
 
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+const authKeySchema = boundary.object({
+  id: boundary.nonEmptyString,
+  key: boundary.nonEmptyString,
+  expires: boundary.optional(boundary.string),
+});
+
+const optionalString = boundary.optional(boundary.string);
+const deviceListSchema = boundary.object({
+  devices: boundary.optional(boundary.array(boundary.object({
+    nodeId: optionalString,
+    id: optionalString,
+    hostname: optionalString,
+    name: optionalString,
+    addresses: boundary.optional(boundary.array(boundary.string)),
+    tags: boundary.optional(boundary.array(boundary.string)),
+    lastSeen: optionalString,
+  }))),
+});
+
+async function decodeResponse<Value>(
+  response: Response,
+  schema: BoundarySchema<Value>,
+  what: string,
+): Promise<Value> {
+  try {
+    return decodeBoundary(await response.json(), schema);
+  } catch (error) {
+    throw new TailscaleApiError(`${what} was malformed: ${error instanceof Error ? error.message : 'unknown'}`);
+  }
 }

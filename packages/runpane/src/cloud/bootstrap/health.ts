@@ -1,3 +1,4 @@
+import { boundary, decodeBoundary } from '../../boundaryDecoder';
 import type { DaemonHealthResult } from './types';
 
 export interface WaitForDaemonHealthOptions {
@@ -46,27 +47,37 @@ async function probe(
     if (response.status !== 200) {
       return { ok: false, status: response.status };
     }
-    const body: unknown = await response.json();
-    return { status: response.status, ...interpretHealthBody(body) };
+    return { status: response.status, ...interpretHealthBody(decodeBoundary(await response.json(), healthPayloadSchema)) };
   } catch {
     return { ok: false };
   }
 }
 
-export function interpretHealthBody(body: unknown): { ok: boolean; version?: string; readiness?: string } {
-  if (typeof body !== 'object' || body === null) {
-    return { ok: false };
-  }
-  const record = body as Record<string, unknown>;
-  const version = typeof record.version === 'string' ? record.version : undefined;
-  const readinessRecord = typeof record.readiness === 'object' && record.readiness !== null
-    ? record.readiness as Record<string, unknown>
-    : undefined;
-  const readiness = typeof readinessRecord?.state === 'string'
-    ? readinessRecord.state
-    : typeof record.status === 'string' ? record.status : undefined;
-  const ready = readinessRecord
+const healthPayloadSchema = boundary.object({
+  ok: boundary.optional(boundary.boolean),
+  status: boundary.optional(boundary.string),
+  version: boundary.optional(boundary.string),
+  readiness: boundary.optional(boundary.object({ state: boundary.optional(boundary.string) })),
+});
+
+/** The `/health` fields bootstrap reads; `readiness` arrives with M2 daemons. */
+export interface HealthPayload {
+  ok?: boolean;
+  status?: string;
+  version?: string;
+  readiness?: { state?: string };
+}
+
+export interface HealthInterpretation {
+  ok: boolean;
+  version?: string;
+  readiness?: string;
+}
+
+export function interpretHealthBody(body: HealthPayload): HealthInterpretation {
+  const readiness = body.readiness ? body.readiness.state : body.status;
+  const ready = body.readiness
     ? readiness === 'ready' || readiness === 'degraded'
     : readiness === 'ready';
-  return { ok: record.ok === true && ready, version, readiness };
+  return { ok: body.ok === true && ready, version: body.version, readiness };
 }

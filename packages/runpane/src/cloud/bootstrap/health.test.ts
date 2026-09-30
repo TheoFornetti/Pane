@@ -3,13 +3,18 @@ import { test } from 'node:test';
 import { interpretHealthBody, waitForDaemonHealth } from './health';
 
 test('interpretHealthBody accepts the legacy payload and the M2 readiness payload', () => {
-  assert.deepEqual(interpretHealthBody({ ok: true, status: 'ready', transport: 'http+sse' }),
+  assert.deepEqual(interpretHealthBody({ ok: true, status: 'ready' }),
     { ok: true, version: undefined, readiness: 'ready' });
   assert.equal(interpretHealthBody({ ok: true, status: 'ready', version: '2.4.141', readiness: { state: 'starting' } }).ok, false);
   assert.deepEqual(interpretHealthBody({ ok: true, status: 'ready', version: '2.4.141', readiness: { state: 'degraded' } }),
     { ok: true, version: '2.4.141', readiness: 'degraded' });
   assert.equal(interpretHealthBody({ ok: false, status: 'ready' }).ok, false);
-  assert.equal(interpretHealthBody('nope').ok, false);
+});
+
+test('waitForDaemonHealth treats a malformed body as not ready', async () => {
+  const fetchImpl: typeof fetch = async () => new Response('"nope"', { status: 200 });
+  const result = await waitForDaemonHealth('https://rp-x.ts.net', { fetchImpl, intervalMs: 5, timeoutMs: 10 });
+  assert.equal(result.ok, false);
 });
 
 test('waitForDaemonHealth polls until ready', async () => {

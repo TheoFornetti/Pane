@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import type { MintAuthKeyOptions, TailscaleApi, TailscaleDevice } from '../tailscale';
-import { BootstrapError, cloudHostname, parseStepResult, provisionSandbox, reenrolSandbox, redact } from './provision';
+import { cloudHostname, parseStepResult, provisionSandbox, reenrolSandbox, redact } from './provision';
 import type { SandboxCommandResult, SandboxHandle } from './types';
 
 const PAIRING = 'pane-remote://FAKE-user-pairing';
@@ -38,11 +38,11 @@ class FakeSandbox implements SandboxHandle {
     const args = [...script.matchAll(/'((?:[^']|'\\'')*)'/g)].map((match) => match[1].replace(/'\\''/g, "'"));
     const [, step, ...rest] = args;
     this.steps.push([step, ...rest]);
-    return { exitCode: 0, stdout: `some log\nRP_RESULT ${JSON.stringify(this.respond(step, rest))}\n`, stderr: '' };
+    return { exitCode: 0, stdout: `some log\nRP_RESULT ${this.respond(step, rest)}\n`, stderr: '' };
   }
 
-  private identity(): Record<string, unknown> {
-    return this.state.joined
+  private identity(): string {
+    return JSON.stringify(this.state.joined
       ? {
           ok: true,
           backendState: 'Running',
@@ -53,21 +53,25 @@ class FakeSandbox implements SandboxHandle {
           tags: ['tag:rp-session'],
           runSsh: this.state.runSsh,
         }
-      : { ok: true, backendState: 'NeedsLogin' };
+      : { ok: true, backendState: 'NeedsLogin' });
   }
 
-  private respond(step: string, args: string[]): Record<string, unknown> {
+  private respond(step: string, args: string[]): string {
+    return JSON.stringify(this.reply(step, args));
+  }
+
+  private reply(step: string, args: string[]): object {
     switch (step) {
       case 'identity': return { ok: true, reset: true, machineId: 'abc' };
       case 'tailscale-install': return { ok: true, installed: false, backendState: 'NeedsLogin' };
-      case 'tailnet-identity': return this.identity();
+      case 'tailnet-identity': return JSON.parse(this.identity());
       case 'check': return this.state.checkOk ? { ok: true, failed: [], passed: 29 } : { ok: false, failed: ['npmrc (/home/user) present'], passed: 28 };
       case 'tailscale-up': {
         assert.equal(this.files.get(args[0]), AUTH_KEY, 'the key file holds the minted key');
         this.files.delete(args[0]);
         this.state.joined = true;
         this.state.hostname = args[1];
-        return this.identity();
+        return JSON.parse(this.identity());
       }
       case 'tailscale-reset': this.state.joined = false; return { ok: true, backendState: 'NeedsLogin' };
       case 'serve-restore': return { ok: true, listenPort: 42137 };
@@ -204,7 +208,7 @@ test('provisionSandbox refuses a failed strip-list check, Tailscale SSH, and a s
   dirty.state.checkOk = false;
   await assert.rejects(
     provisionSandbox(dirty, { ...base, tailscale: new FakeTailscale(), pairingOutputPath: path.join(tempDir(), 'p') }),
-    (error: unknown) => error instanceof BootstrapError && error.step === 'check' && /npmrc/.test(error.message),
+    { name: 'BootstrapError', step: 'check', message: /npmrc/ },
   );
 
   const ssh = new FakeSandbox();

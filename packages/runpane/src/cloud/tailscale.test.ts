@@ -6,27 +6,29 @@ const SECRET = 'fake-oauth-client-secret-value';
 
 interface Call { url: string; method: string; body: string; auth: string }
 
-function fakeFetch(responses: Record<string, () => Response>): { fetchImpl: typeof fetch; calls: Call[] } {
+interface FakeFetch { fetchImpl: typeof fetch; calls: Call[] }
+
+function fakeFetch(responses: Map<string, () => Response>): FakeFetch {
   const calls: Call[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
-    const headers = (init?.headers ?? {}) as Record<string, string>;
-    calls.push({ url, method, body: typeof init?.body === 'string' ? init.body : '', auth: headers.Authorization ?? '' });
+    const auth = new Headers(init?.headers).get('Authorization') ?? '';
+    calls.push({ url, method, body: String(init?.body ?? ''), auth });
     if (url.endsWith('/oauth/token')) {
       return new Response(JSON.stringify({ access_token: 'at-123', expires_in: 3600 }), { status: 200 });
     }
     const key = `${method} ${url.replace('https://api.tailscale.com/api/v2', '')}`;
-    const respond = responses[key];
+    const respond = responses.get(key);
     return respond ? respond() : new Response(JSON.stringify({ message: 'not found' }), { status: 404 });
   };
   return { fetchImpl, calls };
 }
 
 test('mintAuthKey asks for a single-use, pre-authorized, tagged, non-ephemeral key', async () => {
-  const { fetchImpl, calls } = fakeFetch({
-    'POST /tailnet/-/keys': () => new Response(JSON.stringify({ id: 'k1', key: 'tskey-fake-x', expires: 'soon' }), { status: 200 }),
-  });
+  const { fetchImpl, calls } = fakeFetch(new Map([
+    ['POST /tailnet/-/keys', () => new Response(JSON.stringify({ id: 'k1', key: 'tskey-fake-x', expires: 'soon' }), { status: 200 })],
+  ]));
   const api = createTailscaleApi({ clientId: 'cid', clientSecret: `${SECRET}\n` }, fetchImpl);
   const key = await api.mintAuthKey({ description: 'runpane cloud rp-k3j9x0q2 with a description longer than fifty chars' });
 
@@ -44,9 +46,9 @@ test('mintAuthKey asks for a single-use, pre-authorized, tagged, non-ephemeral k
 });
 
 test('the OAuth token is cached across calls', async () => {
-  const { fetchImpl, calls } = fakeFetch({
-    'GET /tailnet/-/devices': () => new Response(JSON.stringify({ devices: [] }), { status: 200 }),
-  });
+  const { fetchImpl, calls } = fakeFetch(new Map([
+    ['GET /tailnet/-/devices', () => new Response(JSON.stringify({ devices: [] }), { status: 200 })],
+  ]));
   const api = createTailscaleApi({ clientId: 'cid', clientSecret: SECRET }, fetchImpl);
   await api.listDevices();
   await api.listDevices();
@@ -54,14 +56,14 @@ test('the OAuth token is cached across calls', async () => {
 });
 
 test('findDevicesByHostname matches the hostname or the MagicDNS short name', async () => {
-  const { fetchImpl } = fakeFetch({
-    'GET /tailnet/-/devices': () => new Response(JSON.stringify({ devices: [
+  const { fetchImpl } = fakeFetch(new Map([
+    ['GET /tailnet/-/devices', () => new Response(JSON.stringify({ devices: [
       { id: '1', nodeId: 'nA', hostname: 'rp-abc', name: 'rp-abc.tail.ts.net.', addresses: ['100.1.1.1'], tags: ['tag:rp-session'] },
       { id: '2', nodeId: 'nB', hostname: 'rp-abc', name: 'rp-abc-1.tail.ts.net', addresses: [] },
       { id: '3', nodeId: 'nC', hostname: 'box', name: 'rp-abc.other.ts.net', addresses: [] },
       { id: '4', nodeId: 'nD', hostname: 'rp-abcd', name: 'rp-abcd.tail.ts.net', addresses: [] },
-    ] }), { status: 200 }),
-  });
+    ] }), { status: 200 })],
+  ]));
   const api = createTailscaleApi({ clientId: 'cid', clientSecret: SECRET }, fetchImpl);
   const found = await api.findDevicesByHostname('rp-abc');
   assert.deepEqual(found.map((device) => device.nodeId), ['nA', 'nB', 'nC']);
@@ -69,20 +71,24 @@ test('findDevicesByHostname matches the hostname or the MagicDNS short name', as
 });
 
 test('deleteDevice reports an already-deleted device as false and errors carry no secrets', async () => {
-  const { fetchImpl } = fakeFetch({
-    'DELETE /device/nA': () => new Response('', { status: 200 }),
-    'DELETE /device/nBAD': () => new Response(JSON.stringify({ message: 'forbidden' }), { status: 403 }),
-  });
+  const { fetchImpl } = fakeFetch(new Map([
+    ['DELETE /device/nA', () => new Response('', { status: 200 })],
+    ['DELETE /device/nBAD', () => new Response(JSON.stringify({ message: 'forbidden' }), { status: 403 })],
+  ]));
   const api = createTailscaleApi({ clientId: 'cid', clientSecret: SECRET }, fetchImpl);
   assert.equal(await api.deleteDevice('nA'), true);
   assert.equal(await api.deleteDevice('nGONE'), false);
-  await assert.rejects(api.deleteDevice('nBAD'), (error: unknown) =>
-    error instanceof TailscaleApiError && error.status === 403 && !error.message.includes(SECRET) && !error.message.includes('at-123'));
+  const error = await api.deleteDevice('nBAD').then(() => undefined, (reason: Error) => reason);
+  assert.ok(error instanceof TailscaleApiError);
+  assert.equal(error.status, 403);
+  assert.ok(!error.message.includes(SECRET) && !error.message.includes('at-123'));
 });
 
 test('a rejected OAuth client fails without echoing the secret', async () => {
   const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({ message: 'API token invalid' }), { status: 401 });
   const api = createTailscaleApi({ clientId: 'cid', clientSecret: SECRET }, fetchImpl);
-  await assert.rejects(api.listDevices(), (error: unknown) =>
-    error instanceof TailscaleApiError && error.status === 401 && !error.message.includes(SECRET));
+  const error = await api.listDevices().then(() => undefined, (reason: Error) => reason);
+  assert.ok(error instanceof TailscaleApiError);
+  assert.equal(error.status, 401);
+  assert.ok(!error.message.includes(SECRET));
 });

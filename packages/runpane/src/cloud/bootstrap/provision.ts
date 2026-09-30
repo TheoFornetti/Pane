@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { boundary, decodeBoundary, type BoundarySchema, type JsonObject } from '../../boundaryDecoder';
 import { CLOUD_SESSION_TAG, type TailscaleApi } from '../tailscale';
 import { cloudBootstrapAssets, type CloudBootstrapAssetName } from './generated/assets';
 import { waitForDaemonHealth } from './health';
@@ -112,16 +113,16 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
   const runner = new StepRunner(sandbox, home);
 
   await step('upload-scripts', () => uploadScripts(sandbox, home));
-  const identity = await step('identity', () => runner.run('identity', [options.sessionId]),
+  const identity = await step('identity', () => runner.run('identity', [options.sessionId], identityStepSchema),
     (value) => (value.reset === true ? 'reset' : 'already this session'));
-  await step('tailscale-install', () => runner.run('tailscale-install', []));
-  const current = await runner.run('tailnet-identity', []);
+  await step('tailscale-install', () => runner.run('tailscale-install', [], envelopeSchema));
+  const current = await runner.run('tailnet-identity', [], tailnetStepSchema);
   const alreadyJoined = current.backendState === 'Running';
   if (!alreadyJoined) {
     await step('check', async () => {
-      const check = await runner.run('check', [], { allowFailure: true });
-      if (check.ok !== true) {
-        const failed = Array.isArray(check.failed) ? check.failed.join('; ') : 'unknown';
+      const check = await runner.run('check', [], checkStepSchema, { allowFailure: true });
+      if (!check.ok) {
+        const failed = check.failed?.join('; ') ?? 'unknown';
         throw new BootstrapError('check', `identity strip-list check failed: ${failed}`);
       }
       return check;
@@ -152,11 +153,11 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     options.paneSource.kind === 'deb-url' ? options.paneSource.sha256 ?? '' : '',
     runpaneSpec,
     options.label,
-  ], { timeoutSeconds: 600 }), (value) => (typeof value.version === 'string' ? value.version : 'installed'));
+  ], installStepSchema, { timeoutSeconds: 600 }), (value) => value.version ?? 'installed');
 
   await step('pairing', async () => {
-    const pairing = await runner.run('pairing-read', []);
-    writeSecretFile(options.pairingOutputPath, requirePairingCode(pairing));
+    const pairing = await runner.run('pairing-read', [], pairingStepSchema);
+    writeSecretFile(options.pairingOutputPath, requirePairingCode(pairing.code));
   });
 
   const extraClientPaths: string[] = [];
@@ -164,8 +165,9 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     await step('extra-clients', async () => {
       for (const client of options.extraClients ?? []) {
         const slug = clientSlug(client.label);
-        await runner.run('add-client', [slug, client.label], { timeoutSeconds: 180 });
-        writeSecretFile(client.outputPath, requirePairingCode(await runner.run('pairing-read', [slug])));
+        await runner.run('add-client', [slug, client.label], envelopeSchema, { timeoutSeconds: 180 });
+        const pairing = await runner.run('pairing-read', [slug], pairingStepSchema);
+        writeSecretFile(client.outputPath, requirePairingCode(pairing.code));
         extraClientPaths.push(client.outputPath);
       }
     });
@@ -175,7 +177,7 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
   if (options.repo) {
     const repo = options.repo;
     const dir = repo.dir ?? path.posix.join(home, repoNameFromUrl(repo.url));
-    await step('clone', () => runner.run('clone', [repo.url, repo.ref ?? '', dir], { timeoutSeconds: 600 }),
+    await step('clone', () => runner.run('clone', [repo.url, repo.ref ?? '', dir], cloneStepSchema, { timeoutSeconds: 600 }),
       (value) => String(value.head ?? ''));
     repoDir = dir;
   }
@@ -187,9 +189,9 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
       fetchImpl: options.fetchImpl,
     });
     if (!result.ok) {
-      const local = await runner.run('health-local', [], { allowFailure: true });
+      const local = await runner.run('health-local', [], envelopeSchema, { allowFailure: true });
       throw new BootstrapError('health', `${baseUrl}/health not ready after ${result.elapsedMs} ms `
-        + `(last HTTP ${result.status ?? 'none'}; in-sandbox loopback check ${local.ok === true ? 'ok' : 'failed'})`);
+        + `(last HTTP ${result.status ?? 'none'}; in-sandbox loopback check ${local.ok ? 'ok' : 'failed'})`);
     }
     return result;
   }, (value) => `${value.elapsedMs} ms`);
@@ -199,7 +201,7 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     baseUrl,
     pairingPath: options.pairingOutputPath,
     extraClientPaths,
-    daemonVersion: health.version ?? (typeof install.version === 'string' ? install.version : undefined),
+    daemonVersion: health.version ?? install.version ?? undefined,
     health,
     identityReset: identity.reset === true,
     deletedStaleNodeIds,
@@ -236,11 +238,11 @@ export async function reenrolSandbox(sandbox: SandboxHandle, options: ReenrolOpt
     }
   }
 
-  await runner.run('tailscale-reset', []);
+  await runner.run('tailscale-reset', [], envelopeSchema);
   const identity = await joinTailnet(sandbox, runner, options.tailscale, home, hostname, tags);
   assertTailnetIdentity(identity, hostname, tags);
   if (options.restoreServe ?? true) {
-    await runner.run('serve-restore', []);
+    await runner.run('serve-restore', [], envelopeSchema);
   }
   return { ...identity, deletedNodeIds, elapsedMs: Date.now() - started };
 }
@@ -257,7 +259,7 @@ async function joinTailnet(
   const keyPath = path.posix.join(stateDir(home), `tskey-${crypto.randomBytes(6).toString('hex')}`);
   // The state dir is 0700, so the key is private from the moment it lands; the step chmods and shreds it.
   await sandbox.writeFile(keyPath, key.key);
-  return parseIdentity(await runner.run('tailscale-up', [keyPath, hostname], { timeoutSeconds: 120 }));
+  return parseIdentity(await runner.run('tailscale-up', [keyPath, hostname], tailnetStepSchema, { timeoutSeconds: 120 }));
 }
 
 function assertTailnetIdentity(identity: TailnetIdentity, hostname: string, tags: string[]): void {
@@ -286,14 +288,41 @@ async function uploadScripts(sandbox: SandboxHandle, home: string): Promise<void
   }
 }
 
+const envelopeSchema = boundary.object({
+  ok: boundary.boolean,
+  error: boundary.optional(boundary.string),
+});
+const identityStepSchema = boundary.object({ ok: boundary.boolean, reset: boundary.optional(boundary.boolean) });
+const optionalStringList = boundary.optional(boundary.array(boundary.string));
+const tailnetStepSchema = boundary.object({
+  backendState: boundary.optional(boundary.string),
+  nodeId: boundary.optional(boundary.string),
+  hostname: boundary.optional(boundary.string),
+  magicDnsName: boundary.optional(boundary.string),
+  tailscaleIps: optionalStringList,
+  tags: optionalStringList,
+  runSsh: boundary.optional(boundary.boolean),
+});
+const checkStepSchema = boundary.object({
+  ok: boundary.boolean,
+  failed: optionalStringList,
+  passed: boundary.optional(boundary.number),
+});
+const installStepSchema = boundary.object({ version: boundary.optional(boundary.nullable(boundary.string)) });
+const pairingStepSchema = boundary.object({ code: boundary.nonEmptyString });
+const cloneStepSchema = boundary.object({ head: boundary.optional(boundary.string) });
+
+type TailnetStepResult = ReturnType<typeof tailnetStepSchema.decode>;
+
 class StepRunner {
   constructor(private readonly sandbox: SandboxHandle, private readonly home: string) {}
 
-  async run(
+  async run<Value>(
     stepName: string,
     args: string[],
+    schema: BoundarySchema<Value>,
     options: { timeoutSeconds?: number; allowFailure?: boolean } = {},
-  ): Promise<Record<string, unknown>> {
+  ): Promise<Value> {
     const script = [`${stateDir(this.home)}/bin/rp-bootstrap.sh`, stepName, ...args].map(shellQuote).join(' ');
     const result = await this.sandbox.runScript(`bash ${script}`, { timeoutSeconds: options.timeoutSeconds ?? 300 });
     const payload = parseStepResult(result.stdout);
@@ -301,52 +330,53 @@ class StepRunner {
       throw new BootstrapError(stepName, `no result (exit ${String(result.exitCode)}${result.timedOut ? ', timed out' : ''}): `
         + redact(`${result.stderr}\n${result.stdout}`).trim().split('\n').slice(-5).join(' | '));
     }
-    if (payload.ok !== true && !options.allowFailure) {
-      throw new BootstrapError(stepName, typeof payload.error === 'string' ? redact(payload.error) : 'unknown error');
+    try {
+      const envelope = decodeBoundary(payload, envelopeSchema);
+      if (!envelope.ok && !options.allowFailure) {
+        throw new BootstrapError(stepName, redact(envelope.error ?? 'unknown error'));
+      }
+      return decodeBoundary(payload, schema);
+    } catch (error) {
+      if (error instanceof BootstrapError) {
+        throw error;
+      }
+      throw new BootstrapError(stepName, `malformed result: ${error instanceof Error ? error.message : 'unknown'}`);
     }
-    return payload;
   }
 }
 
-export function parseStepResult(stdout: string): Record<string, unknown> | undefined {
+export function parseStepResult(stdout: string): JsonObject | undefined {
   const line = stdout.split('\n').reverse().find((candidate) => candidate.startsWith('RP_RESULT '));
   if (!line) {
     return undefined;
   }
   try {
-    const parsed: unknown = JSON.parse(line.slice('RP_RESULT '.length));
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : undefined;
+    return decodeBoundary(JSON.parse(line.slice('RP_RESULT '.length)), boundary.jsonObject);
   } catch {
     return undefined;
   }
 }
 
-function parseIdentity(payload: Record<string, unknown>): TailnetIdentity {
-  const stringList = (value: unknown): string[] =>
-    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-  const nodeId = typeof payload.nodeId === 'string' ? payload.nodeId : '';
-  const magicDnsName = typeof payload.magicDnsName === 'string' ? payload.magicDnsName : '';
-  if (!nodeId || !magicDnsName) {
+function parseIdentity(payload: TailnetStepResult): TailnetIdentity {
+  if (!payload.nodeId || !payload.magicDnsName) {
     throw new BootstrapError('tailscale-join', 'tailscale reported no node id or MagicDNS name');
   }
   return {
-    nodeId,
-    hostname: typeof payload.hostname === 'string' ? payload.hostname : '',
-    magicDnsName,
-    tailscaleIps: stringList(payload.tailscaleIps),
-    tags: stringList(payload.tags),
+    nodeId: payload.nodeId,
+    hostname: payload.hostname ?? '',
+    magicDnsName: payload.magicDnsName,
+    tailscaleIps: payload.tailscaleIps ?? [],
+    tags: payload.tags ?? [],
     runSsh: payload.runSsh === true,
   };
 }
 
-function requirePairingCode(payload: Record<string, unknown>): string {
-  const code = typeof payload.code === 'string' ? payload.code.trim() : '';
-  if (!code.startsWith('pane-remote://')) {
+function requirePairingCode(code: string): string {
+  const trimmed = code.trim();
+  if (!trimmed.startsWith('pane-remote://')) {
     throw new BootstrapError('pairing', 'the sandbox returned no pane-remote:// code');
   }
-  return code;
+  return trimmed;
 }
 
 /** Writes a secret to a local file with mode 0600 (parent created 0700). */

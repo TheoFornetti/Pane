@@ -24,6 +24,8 @@ const CERT_PROBE_TIMEOUT_MS = 45_000;
 const VERIFY_TIMEOUT_MS = 3_000;
 const BOOT_VERIFY_TIMEOUT_MS = 10_000;
 const NO_CERT_DETAIL = 'no TLS certificate for';
+/** After a failed certificate check, new ports go straight to http for this long (no 45 s wait each). */
+const CERT_FAILURE_MEMORY_MS = 10 * 60_000;
 
 export type ProbeResult = { ok: true; status: number } | { ok: false; error: string };
 
@@ -83,6 +85,7 @@ export class SessionPortsService {
   private manifests: SessionPortsManifestState[] = [];
   private projectsKey: string | undefined;
   private timers: NodeJS.Timeout[] = [];
+  private certFailure: { at: number; error: string } | undefined;
 
   constructor(private readonly deps: SessionPortsDependencies) {}
 
@@ -307,8 +310,8 @@ export class SessionPortsService {
     const apply = async (scheme: SessionPortScheme) => {
       if (current && isOurs(current, { port, scheme })) return;
       if (current) await this.deps.serve.remove(httpsPort, current);
-      current = undefined;
       await this.deps.serve.applyWeb(scheme, httpsPort, port);
+      current = { kind: 'web', scheme, proxy: localTarget(port) };
     };
     if (requested === 'http') {
       await apply('http');
@@ -318,12 +321,19 @@ export class SessionPortsService {
       await apply('https');
       return { scheme: 'https' };
     }
-    await apply('https');
-    const probe = await this.deps.probe(portUrl('https', dnsName, httpsPort, '/'), CERT_PROBE_TIMEOUT_MS);
-    if (probe.ok) return { scheme: 'https' };
+    const recent = this.certFailure && this.deps.now() - this.certFailure.at < CERT_FAILURE_MEMORY_MS ? this.certFailure : undefined;
+    let probe: ProbeResult = { ok: false, error: recent?.error ?? '' };
+    if (!recent) {
+      await apply('https');
+      probe = await this.deps.probe(portUrl('https', dnsName, httpsPort, '/'), CERT_PROBE_TIMEOUT_MS);
+      if (probe.ok) {
+        this.certFailure = undefined;
+        return { scheme: 'https' };
+      }
+      this.certFailure = { at: this.deps.now(), error: probe.error };
+    }
     this.deps.log(`ports: no TLS certificate for ${dnsName} (${probe.error}); falling back to http on :${httpsPort}`);
-    await this.deps.serve.remove(httpsPort, { kind: 'web', scheme: 'https', proxy: localTarget(port) });
-    await this.deps.serve.applyWeb('http', httpsPort, port);
+    await apply('http');
     return {
       scheme: 'http',
       detail: `${NO_CERT_DETAIL} ${dnsName} yet (${probe.error}; Let's Encrypt's weekly limit per tailnet is the usual cause); plain HTTP inside the tailnet (WireGuard-encrypted) until tailscaled has one, then https by itself. Retry now with: runpane port open ${port} --scheme https`,

@@ -169,6 +169,10 @@ describe('SessionPortsService.open', () => {
     expect(result.port.detail).toMatch(/no TLS certificate/u);
     expect(h.serve.calls).toEqual(['apply https :8787 -> 8787', 'off :8787', 'apply http :8787 -> 8787']);
     expect((await h.service.list()).scheme).toBe('http');
+    // The failure is remembered: the next port does not wait for another check.
+    await h.service.open({ port: 3000 });
+    expect(h.probes).toHaveLength(1);
+    expect(h.serve.calls.at(-1)).toBe('apply http :3000 -> 3000');
   });
 
   it('moves fallback ports to https once a certificate is cached, and --scheme https retries at once', async () => {

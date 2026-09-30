@@ -383,9 +383,10 @@ runpane port close web
 - **No certificate?** Let's Encrypt issues at most 50 certificates a week per tailnet, one per Session name
   (see [HTTPS certificates](#https-certificates-and---transport)). A port on a name that has no certificate
   yet waits up to about 45 s for one; if none comes, the port is served as **plain HTTP inside the tailnet**
-  (`http://<host>:<port>/`; WireGuard still encrypts it), and `port list` says so. Retry later with
-  `runpane port open <port> --scheme https`. Browsers treat such a page as insecure (no `Secure` cookies, no
-  service workers).
+  (`http://<host>:<port>/`; WireGuard still encrypts it), and `port list` says so. The daemon moves it to
+  HTTPS by itself once tailscaled holds a certificate for the name; `runpane port open <port> --scheme https`
+  asks for one right away (Let's Encrypt's refusal names the time it lifts: `429 ... retry after <UTC time>`).
+  Browsers treat an http page as insecure (no `Secure` cookies, no service workers).
 - **Firewall.** Published ports need no change to the Session's firewall: Tailscale Serve answers them inside
   `tailscaled`, before the host firewall, and nothing else on the machine becomes reachable. Your tailnet
   policy must let your devices reach them, though; see [Tailnet policy](#tailnet-policy).
@@ -876,7 +877,7 @@ Session (wake it first). Run it once on Sessions created with an older `runpane`
 | `port open` says `ERR_PORTS_CONFLICT` | Another Tailscale Serve entry already holds that tailnet port (the message names it). `--yes` replaces it, or pick another with `--https-port` |
 | A port's URL doesn't open from a device, but `runpane port list --verify` in the Session says it answers | Your tailnet policy doesn't let that device reach the port; see [Tailnet policy](#tailnet-policy) |
 | A port's URL answers 502 | Nothing listens on that local port in the Session (yet). Start the service; the link stays |
-| `port list` shows a port as `http` | The Session's name had no TLS certificate when it was opened (Let's Encrypt's weekly limit). Retry with `runpane port open <port> --scheme https` later |
+| `port list` shows a port as `http` | The Session's name had no TLS certificate when it was opened (Let's Encrypt's weekly limit). It moves to https by itself once the name has one; `runpane port open <port> --scheme https` retries now |
 | `port list` shows `Manifest ...: INVALID` | `.runpane/ports.json` breaks the strict schema; the message names the key or value. Ports it opened before stay as they were |
 
 To check a daemon by hand: `curl https://rp-<id>.<your-tailnet>.ts.net/health` returns its version and

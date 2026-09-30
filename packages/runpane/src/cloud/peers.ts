@@ -150,7 +150,7 @@ type PeersFileResult = { host: string; written: true; peers: number } | { host: 
  * Renders a Session's peers list: every grant it holds, plus the coordinator with this Session's own
  * caller token (so a submit to a sleeping peer can wake it). Tokens only ever travel in files.
  */
-export async function renderPeersFile(record: CloudHostRecord, records: readonly CloudHostRecord[], deps: Pick<CloudDeps, 'store'>): Promise<JsonObject> {
+async function renderPeersFile(record: CloudHostRecord, records: readonly CloudHostRecord[], deps: Pick<CloudDeps, 'store'>): Promise<JsonObject> {
   const hosts: JsonObject[] = [];
   for (const grant of record.meta.peers ?? []) {
     const target = records.find((candidate) => candidate.profile.cloud.hostname === grant.host);

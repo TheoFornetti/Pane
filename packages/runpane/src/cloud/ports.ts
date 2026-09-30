@@ -61,7 +61,7 @@ export interface BootstrapPort {
   joinTailnet(sandbox: SandboxHandle, request: JoinTailnetRequest, tailnet: TailnetCredentials): Promise<JoinedNode>;
 }
 
-export interface JoinTailnetRequest {
+interface JoinTailnetRequest {
   sessionId: string;
   hostname: string;
   onStep?: (step: string) => void;

@@ -16,7 +16,7 @@ export type CoordinatorPushResult =
   | { pushed: true; sessions: number }
   | { pushed: false; reason: string };
 
-export async function buildCoordinatorDirectory(records: readonly CloudHostRecord[], generatedAt: Date): Promise<JsonObject> {
+async function buildCoordinatorDirectory(records: readonly CloudHostRecord[], generatedAt: Date): Promise<JsonObject> {
   const sessions: JsonObject[] = [];
   for (const record of records) {
     // A host whose setup has not finished has no address yet; `new` pushes again once it does.

@@ -148,7 +148,7 @@ export interface CloudStore {
 }
 
 /** Secret files kept next to credentials.json, one value each (0600). */
-export type SecretTextName = 'coordinator.json' | 'coordinator-secret';
+type SecretTextName = 'coordinator.json' | 'coordinator-secret';
 
 function defaultCloudDir(env: NodeJS.ProcessEnv = process.env): string {
   if (env.RUNPANE_CLOUD_DIR) return path.resolve(env.RUNPANE_CLOUD_DIR);

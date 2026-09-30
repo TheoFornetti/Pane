@@ -13,7 +13,7 @@ const DROP_IN_NAME = 'runpane-cloud-agent.conf';
 
 export type AgentCredentialKind = 'anthropic-api-key' | 'claude-oauth-token';
 
-export function agentCredentialKinds(credentials: CloudCredentials): AgentCredentialKind[] {
+function agentCredentialKinds(credentials: CloudCredentials): AgentCredentialKind[] {
   const kinds: AgentCredentialKind[] = [];
   if (credentials.anthropic) kinds.push('anthropic-api-key');
   if (credentials.claude) kinds.push('claude-oauth-token');

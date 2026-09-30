@@ -58,7 +58,7 @@ export interface ScopedKeyRequest {
   actions: string[];
 }
 
-export interface ScopedKey {
+interface ScopedKey {
   id: string;
   /** Returned once by the provider; callers write it to a 0600 file and never print it. */
   secret: string;

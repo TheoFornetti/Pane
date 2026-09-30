@@ -519,9 +519,10 @@ runpane cloud coordinator deploy --yes --boat-org personal
 - The coordinator's config carries its own wallet (`provider.org`), and its directory names each
   Session's wallet, so its idle-stops and wakes target the right one. A coordinator deployed by an older
   CLI keeps working. Redeploy it (`coordinator deploy --yes`) to record its wallet.
-- Start limits are per wallet: an organization's `new`, `wake` and `resume` count against the
-  organization's starts, and a personal sandbox's against yours. `GET /limits` reads the wallet a create
-  would bill, which is the active one unless you name another.
+- Start limits are per wallet. Creating and resuming an organization sandbox counted against that
+  organization's starts and left the personal counter alone (checked live). boat's docs say personal
+  sandboxes use personal limits. `GET /limits` (and anything built on it) reads the **active** wallet
+  unless you name one with `X-Boat-Org` or `?org=`, so check the wallet you mean.
 
 **boat start limits.** boat counts every sandbox start account-wide: `new` is one start, and every `wake`
 (including a coordinator wake) is one start. `stop`, `destroy`, `list` and `status` are free. The limits

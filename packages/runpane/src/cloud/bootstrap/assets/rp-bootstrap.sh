@@ -271,15 +271,13 @@ PY
 }
 
 # cert-status <fqdn>: did Let's Encrypt refuse this tailnet's Serve certificate (50 per registered domain per
-# week; every new node name needs one)? Reads tailscaled's log first; asks `tailscale cert` only if it says
-# nothing (a refused issuance doesn't count against the limit).
+# week; every new node name needs one)? Informational: `auto` switches whenever HTTPS stays down while the
+# daemon answers on loopback, and this names the reason. tailscaled logs the ACME error when a TLS client
+# (the health probe) asks for the certificate; this boot only (a node is young when this runs).
 step_cert_status() {
   local fqdn="$1" hit=""
-  # set -o pipefail: a grep with no match, or tailscale cert failing (it does when refused), must not end the step.
-  hit="$(sudo journalctl -u tailscaled --since '-20 min' --no-pager -o cat 2>/dev/null | grep -iE 'rateLimited|too many certificates' | tail -1 || true)"
-  if [ -z "$hit" ]; then
-    hit="$(cd /tmp && sudo timeout 60 tailscale cert --cert-file /dev/null --key-file /dev/null "$fqdn" 2>&1 | grep -iE 'rateLimited|too many certificates|429' | tail -1 || true)"
-  fi
+  # set -o pipefail: a grep with no match must not end the step.
+  hit="$(sudo journalctl -b -u tailscaled --no-pager -o cat 2>/dev/null | grep -iE 'rateLimited|too many certificates|acme.*429' | tail -1 || true)"
   result "$(python3 -c 'import json,sys;print(json.dumps({"ok":True,"rateLimited":bool(sys.argv[1]),"detail":sys.argv[1][:300] or None}))' "$hit")"
 }
 

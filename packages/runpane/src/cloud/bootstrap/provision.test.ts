@@ -42,6 +42,7 @@ class FakeSandbox implements SandboxHandle {
   readonly scripts: string[] = [];
   state: FakeState = { joined: false, hostname: '', runSsh: false, checkOk: true, dnsSuffix: '' };
   certRateLimited = false;
+  localHealthy = true;
 
   async writeFile(filePath: string, content: string): Promise<void> {
     this.files.set(filePath, content);
@@ -100,7 +101,7 @@ class FakeSandbox implements SandboxHandle {
       case 'pairing-read': return { ok: true, code: args[0] ? COORD_PAIRING : PAIRING };
       case 'add-client': return { ok: true };
       case 'clone': return { ok: true, dir: args[2], head: 'deadbeef' };
-      case 'health-local': return { ok: true };
+      case 'health-local': return this.localHealthy ? { ok: true } : { ok: false, error: 'daemon /health on 127.0.0.1:42137 failed' };
       default: return { ok: false, error: `unknown step ${step}` };
     }
   }
@@ -304,13 +305,25 @@ test('auto transport: when Let\'s Encrypt refuses the Serve certificate, it swit
   assert.equal(invoke.requests[0].url, `${httpBase}/invoke`);
 });
 
-test('auto transport keeps waiting on HTTPS when the certificate is not rate limited, and https never switches', async () => {
+test('auto transport switches when HTTPS stays down but the daemon answers on loopback, even without a logged 429', async () => {
+  const httpsNeverAnswers: typeof fetch = async (input) =>
+    String(input).startsWith('https://') ? new Response('', { status: 502 }) : healthyFetch(input);
+  const sandbox = new FakeSandbox();
+  const result = await provisionSandbox(sandbox, {
+    sessionId: 'k3j9x0q2m1', label: 'x', tailscale: new FakeTailscale(), paneSource: { kind: 'preinstalled' },
+    pairingOutputPath: path.join(tempDir(), 'p'), fetchImpl: httpsNeverAnswers, healthTimeoutMs: 50, autoHttpsWaitMs: 5,
+  });
+  assert.equal(result.transport, 'http');
+});
+
+test('auto transport does not switch when the daemon itself is down, and https never switches', async () => {
   const notReady: typeof fetch = async () => new Response('bad gateway', { status: 502 });
   const sandbox = new FakeSandbox();
+  sandbox.localHealthy = false;
   await assert.rejects(provisionSandbox(sandbox, {
     sessionId: 'k3j9x0q2m1', label: 'x', tailscale: new FakeTailscale(), paneSource: { kind: 'preinstalled' },
     pairingOutputPath: path.join(tempDir(), 'p'), fetchImpl: notReady, healthTimeoutMs: 10, autoHttpsWaitMs: 5,
-  }), /https:\/\/rp-k3j9x0q2\.tailnet-example\.ts\.net\/health not ready/);
+  }), /https:\/\/rp-k3j9x0q2\.tailnet-example\.ts\.net\/health not ready.*loopback check failed/);
   assert.ok(!sandbox.steps.some((step) => step[0] === 'serve-http'));
 
   const strict = new FakeSandbox();

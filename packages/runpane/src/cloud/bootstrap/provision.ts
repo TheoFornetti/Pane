@@ -191,11 +191,20 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     if (first.ok || transportMode === 'https') {
       health = await step('health', () => requireHealthy(first), (value) => `${value.elapsedMs} ms`);
     } else {
-      const cert = await step('cert-check', () => runner.run('cert-status', [tailnet.magicDnsName], certStatusStepSchema, { timeoutSeconds: 120 }),
-        (value) => (value.rateLimited ? `Let's Encrypt rate limit: ${value.detail ?? 'refused'}` : 'no certificate rate limit'));
-      if (!cert.rateLimited) {
-        const rest = await waitHealth(Math.max(healthTimeoutMs - first.elapsedMs, 1_000));
-        health = await step('health', () => requireHealthy(rest), (value) => `${value.elapsedMs + first.elapsedMs} ms`);
+      const cert = await step('cert-check', () => runner.run('cert-status', [tailnet.magicDnsName], certStatusStepSchema, { timeoutSeconds: 60 }),
+        (value) => (value.rateLimited ? `Let's Encrypt rate limit: ${value.detail ?? 'refused'}` : 'no rate limit in tailscaled\'s log'));
+      // Without a logged refusal, HTTPS gets one more window (a first certificate can take ~30 s).
+      const second = cert.rateLimited ? undefined : await waitHealth(Math.max(Math.min(healthTimeoutMs - first.elapsedMs, firstWaitMs), 1_000));
+      if (second?.ok) {
+        health = await step('health', () => requireHealthy(second), (value) => `${value.elapsedMs + first.elapsedMs} ms`);
+      } else {
+        // HTTPS is down. If the daemon answers on loopback, the problem is Serve's certificate: switch.
+        // If it doesn't, the daemon itself is broken and plain HTTP wouldn't help.
+        const local = await runner.run('health-local', [], envelopeSchema, { allowFailure: true });
+        if (!local.ok) {
+          throw new BootstrapError('health', `${baseUrl}/health not ready after ${first.elapsedMs + (second?.elapsedMs ?? 0)} ms `
+            + `(last HTTP ${(second ?? first).status ?? 'none'}; in-sandbox loopback check failed)`);
+        }
       }
     }
   }

@@ -253,6 +253,18 @@ def read_pairing(path: str) -> dict[str, Any]:
     return json.loads(base64.urlsafe_b64decode(enc.encode()))
 
 
+def read_token_file(path: str) -> str:
+    """A token file that is missing or empty must never fall back to the pairing token (it would turn a
+    peer-scope check into a user-scope call)."""
+    try:
+        tok = pathlib.Path(path).read_text().strip()
+    except OSError:
+        die(f"token file {path} is missing")
+    if not tok:
+        die(f"token file {path} is empty")
+    return tok
+
+
 def resolve_base(target: str) -> tuple[str, Optional[str]]:
     """target is a pairing file, or a base URL. Returns (baseUrl, token-or-None)."""
     if os.path.isfile(target):
@@ -497,14 +509,14 @@ def main() -> None:
             print(json.dumps({"http": status, "seconds": round(secs, 2), "body": last}))
             sys.exit(0 if status == 200 and secs < a.timeout else 1)
         elif a.op == "invoke":
-            override = pathlib.Path(a.token_file).read_text().strip() if a.token_file else None
+            override = read_token_file(a.token_file) if a.token_file else None
             status, payload, secs = remote_invoke(a.target, a.channel, json.loads(a.args), not a.no_token,
                                                   override, a.timeout)
             print(json.dumps({"http": status, "seconds": round(secs, 3), "body": payload}))
             sys.exit(0 if status == 200 and isinstance(payload, dict) and payload.get("ok") else 1)
         elif a.op == "get":
             base, token = resolve_base(a.target)
-            tok = pathlib.Path(a.token_file).read_text().strip() if a.token_file else (None if a.no_token else token)
+            tok = read_token_file(a.token_file) if a.token_file else (None if a.no_token else token)
             headers = {"Authorization": f"Bearer {tok}"} if tok else {}
             status, payload, secs = http("GET", base + a.path, headers, timeout=a.timeout, raw=True)
             text = payload.decode(errors="replace")[:600] if isinstance(payload, bytes) else json.dumps(payload)
@@ -542,7 +554,7 @@ def ws_probe(a: argparse.Namespace) -> dict[str, Any]:
     """Minimal WebSocket upgrade probe: returns the HTTP status of the upgrade response."""
     import http.client
     base, token = resolve_base(a.target)
-    tok = pathlib.Path(a.token_file).read_text().strip() if a.token_file else (None if a.no_token else token)
+    tok = read_token_file(a.token_file) if a.token_file else (None if a.no_token else token)
     url = urllib.parse.urlparse(base + a.path)
     conn_cls = http.client.HTTPSConnection if url.scheme == "https" else http.client.HTTPConnection
     conn = conn_cls(url.hostname, url.port, timeout=10)
@@ -564,7 +576,7 @@ def ws_probe(a: argparse.Namespace) -> dict[str, Any]:
 def hold_stream(a: argparse.Namespace) -> dict[str, Any]:
     """Open a streaming GET (e.g. /events) and keep reading for N seconds. Returns status + bytes read."""
     base, token = resolve_base(a.target)
-    tok = pathlib.Path(a.token_file).read_text().strip() if a.token_file else (None if a.no_token else token)
+    tok = read_token_file(a.token_file) if a.token_file else (None if a.no_token else token)
     headers = {"Accept": "text/event-stream"}
     if tok:
         headers["Authorization"] = f"Bearer {tok}"

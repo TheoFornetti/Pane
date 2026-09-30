@@ -35,15 +35,31 @@ SH
 B_SESSION=$(jget 'd["session"].get("id")' <<<"$sess" 2>/dev/null); ORCH=$(jget 'd.get("panelId")' <<<"$sess" 2>/dev/null)
 [ -n "$ORCH" ] && [ "$ORCH" != null ] || { rec fixture FAIL "orchestration Session not created on B" "$E2E_RUN_DIR/b-session.json"; exit 1; }
 
-mint() {  # mint <label> [session] -> writes the code into B:/home/user/rcl/peer-<label>.code, prints the JSON
-  local extra=""; [ -n "${2:-}" ] && extra="--session $2"
-  sbx "$B_ID" 60 <<SH
-umask 077; /home/user/rcl/rp peers mint --label $1 $extra --code-file /home/user/rcl/peer-$1.code --yes --json
+MINT_SB=$B_ID
+mint() {  # mint <label> [session] : peers mint --name (code captured into a 0600 file, never printed), then allow
+  local sb="$MINT_SB" allow=""
+  [ -n "${2:-}" ] && allow="/home/user/rcl/rp peers allow --peer '$1' --session '$2' --yes --json"
+  sbx "$sb" 90 <<SH
+umask 077
+/home/user/rcl/rp peers mint --name '$1' --yes --json > /home/user/rcl/peer-$1.json 2>/home/user/rcl/peer-$1.err; rc=\$?
+python3 - /home/user/rcl/peer-$1.json /home/user/rcl/peer-$1.code <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception as e:
+    print(json.dumps({"ok": False, "error": "unparsable mint output"})); sys.exit()
+code = (d.get("data") or {}).get("connectionCode") or d.get("connectionCode") or ""
+open(sys.argv[2], "w").write(code)
+peer = (d.get("data") or {}).get("peer") or d.get("peer") or {}
+print(json.dumps({"ok": d.get("ok"), "hasCode": code.startswith("pane-remote://"), "peer": {k: peer.get(k) for k in ("id", "label", "scope")}}))
+PY
+shred -u /home/user/rcl/peer-$1.json; echo "mint rc=\$rc \$(head -c 300 /home/user/rcl/peer-$1.err)"
+$allow
 SH
 }
 ma=$(mint "$A_HOST" "$B_SESSION"); printf '%s\n' "$ma" | ev mint-a.json >/dev/null
 mc=$(mint rp-loop-e2e-c); printf '%s\n' "$mc" | ev mint-c.json >/dev/null
-if grep -q 'pane-remote://' "$E2E_RUN_DIR/mint-a.json"; then rec mint-no-leak FAIL "peers mint printed the code despite --code-file"; else rec mint-no-leak PASS "peers mint --code-file kept the code off stdout"; fi
+if grep -q 'pane-remote://' "$E2E_RUN_DIR/mint-a.json"; then rec mint-no-leak FAIL "code reached evidence"; else rec mint-no-leak PASS "code captured into a 0600 file in the sandbox; not in evidence"; fi
 PA="$E2E_SECRETS/peer-a.code"; PC="$E2E_SECRETS/peer-c.code"
 cl boat fetch "$B_ID" "/home/user/rcl/peer-$A_HOST.code" "$PA" && cl boat fetch "$B_ID" /home/user/rcl/peer-rp-loop-e2e-c.code "$PC" \
   || { rec mint FAIL "peers mint did not write code files (is 'runpane peers' in this build?)" "$E2E_RUN_DIR/mint-a.json"; exit 1; }

@@ -121,14 +121,35 @@ B_SESSION=$(jget 'd["session"].get("id")' <<<"$sess" 2>/dev/null); ORCH=$(jget '
 X_HOST=$HOST; X_PAIR=$PAIR
 provision_manual m3a small || { g M3-peers provision FAIL "peer sandbox A not provisioned"; }
 A_ID=$SB_ID; A_HOST=$SB_HOST
-mint() { local extra=""; [ -n "${2:-}" ] && extra="--session $2"
-  sbx "$X_ID" 60 <<<"umask 077; /home/user/rcl/rp peers mint --label $1 $extra --code-file /home/user/rcl/peer-$1.code --yes --json"; }
+MINT_SB=$X_ID
+mint() {  # mint <label> [session] : peers mint --name (code captured into a 0600 file, never printed), then allow
+  local sb="$MINT_SB" allow=""
+  [ -n "${2:-}" ] && allow="/home/user/rcl/rp peers allow --peer '$1' --session '$2' --yes --json"
+  sbx "$sb" 90 <<SH
+umask 077
+/home/user/rcl/rp peers mint --name '$1' --yes --json > /home/user/rcl/peer-$1.json 2>/home/user/rcl/peer-$1.err; rc=\$?
+python3 - /home/user/rcl/peer-$1.json /home/user/rcl/peer-$1.code <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception as e:
+    print(json.dumps({"ok": False, "error": "unparsable mint output"})); sys.exit()
+code = (d.get("data") or {}).get("connectionCode") or d.get("connectionCode") or ""
+open(sys.argv[2], "w").write(code)
+peer = (d.get("data") or {}).get("peer") or d.get("peer") or {}
+print(json.dumps({"ok": d.get("ok"), "hasCode": code.startswith("pane-remote://"), "peer": {k: peer.get(k) for k in ("id", "label", "scope")}}))
+PY
+shred -u /home/user/rcl/peer-$1.json; echo "mint rc=\$rc \$(head -c 300 /home/user/rcl/peer-$1.err)"
+$allow
+SH
+}
 mint "$A_HOST" "$B_SESSION" | ev mint-a.json >/dev/null; mint rp-loop-e2e-c | ev mint-c.json >/dev/null
 PA="$E2E_SECRETS/peer-a.code"; PC="$E2E_SECRETS/peer-c.code"
 if cl boat fetch "$X_ID" "/home/user/rcl/peer-$A_HOST.code" "$PA" && cl boat fetch "$X_ID" /home/user/rcl/peer-rp-loop-e2e-c.code "$PC"; then
-  g M3-peers mint PASS "B minted peers A (allowlisted to $B_SESSION) and C (none)" "$E2E_RUN_DIR/mint-a.json"
-  grep -q 'pane-remote://' "$E2E_RUN_DIR/mint-a.json" && g M3-peers mint-no-leak FAIL "code printed" || g M3-peers mint-no-leak PASS "code kept off stdout"
-else g M3-peers mint FAIL "no peer code files" "$E2E_RUN_DIR/mint-a.json"; fi
+  M3_OK=1; g M3-peers mint PASS "B minted peers A (allowlisted to $B_SESSION) and C (none)" "$E2E_RUN_DIR/mint-a.json"
+  grep -q 'pane-remote://' "$E2E_RUN_DIR/mint-a.json" && g M3-peers mint-no-leak FAIL "code reached evidence" || g M3-peers mint-no-leak PASS "code captured into a 0600 file in the sandbox; not in evidence"
+else M3_OK=0; g M3-peers mint FAIL "no peer code files" "$E2E_RUN_DIR/mint-a.json"; fi
+if [ "$M3_OK" = 1 ]; then
 tokfile() { (umask 077; python3 -c 'import sys;sys.path.insert(0,sys.argv[2]);import cloudlab;print(cloudlab.read_pairing(sys.argv[1])["token"])' "$1" "$E2E_LIB" > "$1.tok"); echo "$1.tok"; }
 PAT=$(tokfile "$PA"); PCT=$(tokfile "$PC")
 cl boat put "$A_ID" "$PA" rcl/peer-b.code >/dev/null
@@ -171,6 +192,7 @@ r=$(cl remote get "$X_PAIR" /events --token-file "$PAT" --timeout 5 | jget 'd["h
 r=$(cl remote ws "$X_PAIR" /events --token-file "$PAT" | jget 'd["http"]'); [ "$r" = 403 ] && g M3-peers peer-ws-403 PASS "peer WS upgrade -> 403" || g M3-peers peer-ws-403 FAIL "-> $r"
 r=$(pinv runpane:panels:submit "[{\"panelId\":\"$ORCH\",\"input\":\"from C\"}]" "$PCT" | st); [[ "$r" == 403* ]] && g M3-peers non-allowlisted-403 PASS "non-allowlisted peer -> $r" || g M3-peers non-allowlisted-403 FAIL "-> $r"
 r=$(pinv runpane:workspace:wait '[{"timeoutMs":1000}]' "$PAT" | st); [[ "$r" == 200* ]] && g M3-peers peer-workspace-wait PASS "peer workspace:wait allowed" || g M3-peers peer-workspace-wait FAIL "-> $r"
+else g M3-peers peer-checks BLOCKED "no peer token (mint failed); peer checks not run"; fi
 
 # ================================================================ stop/wake cycles on X (M1), power-off (M2), survive (M3)
 for c in $(seq 1 "$CYCLES"); do
@@ -190,17 +212,18 @@ for c in $(seq 1 "$CYCLES"); do
   if [ "$c" = 1 ]; then
     [ "$(jget 'd["body"].get("version")' <<<"$hh")" = "$VERSION" ] && g M2-resume poweroff.version-stable PASS "version $VERSION after power-off" || g M2-resume poweroff.version-stable FAIL "version changed"
     after_kill poweroff "in lowercase letters with a dash between each letter (like a-b-c)" "$(sed 's/./&-/g; s/-$//' <<<"$LOW")"
+    [ "$M3_OK" = 1 ] && {
     M2m="e2e-peer2-$RANDOM"
     sbx "$A_ID" 120 <<<"/home/user/rcl/rp --host $X_HOST panels submit --panel $ORCH --text 'again $M2m' --yes --json" | ev a-submit-after-resume.json >/dev/null
     sleep 3; n=$(orch_count "$M2m")
     [ "$n" = 1 ] && g M3-peers peer-survives-resume PASS "after B's power-off/resume A's peer token still delivers" "$E2E_RUN_DIR/a-submit-after-resume.json" \
-      || g M3-peers peer-survives-resume FAIL "delivered $n times after resume" "$E2E_RUN_DIR/a-submit-after-resume.json"
+      || g M3-peers peer-survives-resume FAIL "delivered $n times after resume" "$E2E_RUN_DIR/a-submit-after-resume.json"; }
   fi
 done
 
 # ================================================================ M3 revoke, M1 destroy
-sbx "$X_ID" 60 <<<"/home/user/rcl/rp peers revoke --peer $A_HOST --yes --json" | ev revoke.json >/dev/null
-r=$(pinv runpane:panels:list '[{}]' "$PAT" | st); [[ "$r" == 401* || "$r" == 403* ]] && g M3-peers revoke PASS "revoked peer -> $r" || g M3-peers revoke FAIL "-> $r"
+[ "$M3_OK" = 1 ] && { sbx "$X_ID" 60 <<<"/home/user/rcl/rp peers revoke --peer $A_HOST --yes --json" | ev revoke.json >/dev/null
+r=$(pinv runpane:panels:list '[{}]' "$PAT" | st); [[ "$r" == 401* || "$r" == 403* ]] && g M3-peers revoke PASS "revoked peer -> $r" || g M3-peers revoke FAIL "-> $r"; }
 if [ "${KEEP:-0}" != 1 ]; then
   t0=$(ms_now); rpc cloud destroy "$X_HOST" --yes --json > "$E2E_RUN_DIR/destroy.json" 2>&1; drc=$?; sleep 3
   sbs=$(cl boat get "$X_ID" --field state); nd=$(cl ts find "$X_HOST" | jget 'len(d)')

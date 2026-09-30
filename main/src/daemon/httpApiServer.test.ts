@@ -496,8 +496,9 @@ describe('PaneRemoteHttpApiServer', () => {
     userClientActivity.reset();
     const invokeSpy = vi.spyOn(registry, 'invoke');
 
+    // The peer gate answers this one (no allowlisted Session); either way it is never a user's call.
     await requestJson(server, 'POST', '/invoke', { channel: 'runpane:panels:list', args: [], token: 'peer-token' });
-    expect(invokeSpy).toHaveBeenLastCalledWith('runpane:panels:list', [], { origin: 'remote-peer' });
+    expect(invokeSpy).not.toHaveBeenCalledWith('runpane:panels:list', [], { origin: 'remote-user' });
     expect(userClientActivity.invokedSince(0)).toEqual([]);
 
     await requestJson(server, 'POST', '/invoke', { channel: 'runpane:panels:list', args: [], token: 'user-token' });

@@ -210,7 +210,7 @@ for c in $(seq 1 "$CYCLES"); do
     && g M1-cli "cycle$c-wake" PASS "cloud wake ${ws}s, /health 200 right after (readiness=$rs), same node, old token works" "$E2E_RUN_DIR/cycle$c-wake.json" "seconds=$ws" \
     || g M1-cli "cycle$c-wake" FAIL "rc=$wrc ${ws}s health=$(jget 'd["http"]' <<<"$hh") readiness=$rs node=$nn invoke=$inv" "$E2E_RUN_DIR/cycle$c-wake.json"
   if [ "$c" = 1 ]; then
-    [ "$(jget 'd["body"].get("version")' <<<"$hh")" = "$VERSION" ] && g M2-resume poweroff.version-stable PASS "version $VERSION after power-off" || g M2-resume poweroff.version-stable FAIL "version changed"
+    [ -n "$VERSION" ] && [ "$VERSION" != null ] && [ "$(jget 'd["body"].get("version")' <<<"$hh")" = "$VERSION" ] && g M2-resume poweroff.version-stable PASS "version $VERSION after power-off" || g M2-resume poweroff.version-stable FAIL "version changed"
     after_kill poweroff "in lowercase letters with a dash between each letter (like a-b-c)" "$(sed 's/./&-/g; s/-$//' <<<"$LOW")"
     [ "$M3_OK" = 1 ] && {
     M2m="e2e-peer2-$RANDOM"

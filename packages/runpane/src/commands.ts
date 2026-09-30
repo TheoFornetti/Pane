@@ -29,6 +29,8 @@ export interface ParsedArgs {
   paneId?: string;
   sessionId?: string;
   panelId?: string;
+  peer?: string;
+  idempotencyKey?: string;
   repoPath?: string;
   folder?: string;
   resume?: string;
@@ -129,7 +131,7 @@ const targetSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.installTarge
 const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactFormats);
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'peers']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -509,6 +511,14 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--session') {
     parsed.sessionId = value;
+    return;
+  }
+  if (flag === '--peer') {
+    parsed.peer = value;
+    return;
+  }
+  if (flag === '--idempotency-key') {
+    parsed.idempotencyKey = value;
     return;
   }
   if (flag === '--exclude-pane') {

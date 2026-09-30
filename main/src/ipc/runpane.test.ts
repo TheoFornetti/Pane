@@ -2166,6 +2166,22 @@ describe('runpane IPC handlers', () => {
     );
   });
 
+  it('writes once for a repeated idempotency key and marks the repeat deduplicated', async () => {
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+    const services = createServices();
+    const registry = createRegistry(services);
+    const request = { panelId: terminalPanel.id, input: 'echo once', idempotencyKey: 'peer-a:msg-1' };
+
+    const first = await registry.invoke('runpane:panels:submit', [request]);
+    const repeat = await registry.invoke('runpane:panels:submit', [request]);
+
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveProperty('deduplicated');
+    expect(repeat).toMatchObject({ ok: true, panelId: terminalPanel.id, deduplicated: true });
+    await expect(registry.invoke('runpane:panels:submit', [{ ...request, idempotencyKey: 'bad key' }]))
+      .rejects.toThrow(/idempotencyKey/);
+  });
+
   it('stages text before submitting an idle Codex composer', async () => {
     vi.useFakeTimers();
     vi.mocked(terminalPanelManager.getTerminalSnapshot)

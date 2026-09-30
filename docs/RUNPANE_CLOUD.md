@@ -2,7 +2,7 @@
 
 Runpane Cloud runs a Pane Session on its own cloud sandbox (boat.dev), with a normal Pane daemon inside,
 joined to your tailnet and saved as a remote host in your Pane apps. The Session keeps running when your
-laptop is closed, and you can put it to sleep (no compute billing) and wake it in about 12 seconds.
+laptop is closed, and you can put it to sleep (no compute billing) and wake it in about 15 to 25 seconds.
 
 Everything here is the `runpane cloud` command on your own machine. The desktop app stays a remote
 client: it lists cloud Sessions next to your other remote hosts and never creates or manages machines.
@@ -36,7 +36,7 @@ gh release list -R jamari-morrison/Pane --limit 5      # newest first
 gh release view rc-<sha> -R jamari-morrison/Pane       # check "branch rc/integration", copy the npm line
 npm i -g https://github.com/jamari-morrison/Pane/releases/download/rc-<sha>/runpane-<version>.tgz
 runpane version          # 2.4.141-rc.<date>.g<commit>
-runpane cloud --help     # lists setup, new, list, status, stop, wake, destroy, pair, sync, coordinator
+runpane cloud --help     # lists setup, new, list, status, stop, wake, destroy, pair, sync, coordinator, peers
 ```
 
 Run `runpane cloud` from a normal terminal, not from a terminal inside Pane desktop. Pane puts its own
@@ -62,14 +62,15 @@ runpane cloud setup \
   --boat-key-file <($D BOAT_DEV_API_KEY) \
   --tailscale-client-id krreHuCr3M11CNTRL \
   --tailscale-secret-file <($D TAILSCALE_OAUTH_SECRET) \
-  --claude-token-file <($D <Claude token secret name>) \
-  --golden <golden snapshot name> \
+  --claude-token-file <($D <Claude token name>) \
+  --golden rp-loop-golden-<sha8> \
   --name-prefix rp-red \
   --size large
 ```
 
 - Agent sign-in for cloud Sessions (see [Agents in a cloud Session](#agents-in-a-cloud-session)):
-  `--claude-token-file` takes a Claude subscription token (from `claude setup-token`);
+  `--claude-token-file` takes a Claude subscription token (from `claude setup-token`; in Doppler it is one of
+  the `CLAUDE_CODE_DEV_*` names: `doppler secrets --project montlake --config dev_personal --only-names`);
   `--anthropic-key-file <($D ANTHROPIC_API_KEY)` takes an Anthropic API key instead. Both are optional.
 - `--name-prefix` names your sandboxes and tailnet hosts `<prefix>-<id>` (default `rp`). The coordinator
   manages every sandbox whose name starts with `<prefix>-`, so pick a prefix no other sandboxes in the
@@ -78,12 +79,14 @@ runpane cloud setup \
   and Playwright's Chromium preinstalled. It makes `new` about a minute faster. Without it (`--no-golden`)
   each `new` installs everything onto the plain image. Fork builds make goldens named
   `rp-loop-golden-<sha8>` in the boat account (`scripts/cloud-dist/make-golden.sh`; list them in boat's
-  console under snapshots). Releases keep only the newest two, so point `setup --golden` at a recent one.
+  console under snapshots). Releases keep only the newest two, so point `setup --golden` at a recent one:
+  the one named after the `rc/integration` release you installed, or the newest if that release has none.
+  `setup` saves the name without checking it exists; a missing snapshot only shows up as a create error in `new`.
 - `--size` sets the default machine size; see [Costs](#costs). The built-in default is `default`
   (4 vCPU / 8 GB); `large` (8 vCPU / 16 GB) is the one to use for more than one agent with browser tests.
 - Rerun `setup` with any subset of flags to change one setting. The others are kept.
 
-Setup prints what is configured. `runpane cloud list` works after setup and shows `0` hosts.
+Setup prints what is configured. `runpane cloud list` works after setup and says `No cloud hosts.`
 
 ## 3. Create a cloud Session
 
@@ -91,20 +94,23 @@ Setup prints what is configured. `runpane cloud list` works after setup and show
 runpane cloud new --label "api work" --repo https://github.com/<you>/<repo>.git --yes
 ```
 
-This takes about a minute (boat create ~1 s, running in ~4 s, then tailnet join, daemon install and the
-first TLS certificate). It:
+This takes about two and a half minutes (boat create ~1 s, running in ~4 s, then tailnet join, daemon
+install and the first TLS certificate, or the switch to plain HTTP when no certificate comes; see
+[HTTPS certificates and `--transport`](#https-certificates-and---transport)). It:
 
 1. creates a sandbox named `rp-<8 chars>` (the same name is its tailnet host name; `setup --name-prefix`
    changes `rp`);
 2. turns on a host firewall that lets only tcp/443 (Tailscale Serve) in over the tailnet, then joins your
    tailnet as `tag:rp-session`, with a single-use key and Tailscale SSH off;
-3. starts the Pane daemon, reachable at `https://rp-<id>.<your-tailnet>.ts.net`;
+3. starts the Pane daemon, reachable at `https://rp-<id>.<your-tailnet>.ts.net` (or
+   `http://rp-<id>.<your-tailnet>.ts.net:42137` when it fell back to plain HTTP; `new` prints which);
 4. clones `--repo` (public HTTPS repositories only; add `--ref <branch>` for a branch) into
    `/home/user/<repo>` and registers it with the Session's Pane, so `runpane --host <Session> panes create
-   --repo <repo>` works right away;
+   --repo <repo> ...` works right away (full command under [From the CLI](#from-the-cli));
 5. saves the host in `~/.config/runpane-cloud/hosts/` and the pairing code in
    `~/.config/runpane-cloud/hosts/<host>.pairing` (0600, never printed);
-6. adds the host to Pane desktop's saved remote hosts, if `~/.pane/config.json` exists.
+6. adds the host to Pane desktop's saved remote hosts, if `~/.pane/config.json` exists (with `--desktop-dir`
+   or `RUNPANE_CLOUD_DESKTOP_DIR` set it always writes there, creating `config.json` if needed).
 
 `--yes` is required because the sandbox costs money. `--size large` overrides the default size for one
 Session. If setup fails part-way, `new` deletes the tailnet device and the sandbox again; add
@@ -176,9 +182,15 @@ Every daemon command takes `--host <cloud Session>`:
 
 ```bash
 runpane --host "api work" repos list --json
+runpane --host "api work" panes create --repo <repo> --name first --agent claude \
+  --prompt "Say hello" --yes --json     # prints the new panelId
 runpane --host "api work" panels list
+runpane --host "api work" panels output --panel <panel id> --limit 200 --json
 runpane --host "api work" panels submit --panel <panel id> --text "npm test" --yes
 ```
+
+Commands that change the Session's Pane (`panes create`, `panels submit`) need `--yes` when run from a
+script or another non-interactive shell.
 
 ### Agents in a cloud Session
 
@@ -197,7 +209,8 @@ runpane cloud wake "api work"         # resumes and returns once the daemon answ
 ```
 
 - A stopped Session keeps its disk (repositories, worktrees, Pane's database, agent transcripts), its
-  tailnet name and its pairing. Wake takes about 10 to 13 seconds to `/health`.
+  tailnet name and its pairing. Wake takes about 15 to 25 seconds to `/health` (measured on `large`: 13 to
+  23 s after boat reports it running).
 - After a wake, panels come back: submitting to a panel restarts it if needed, and a Claude panel resumes
   the same conversation.
 - boat's stop is a hard power-off after a live snapshot, with no shutdown signal. So `stop` first asks
@@ -296,7 +309,7 @@ runpane cloud peers revoke <A> <B>     # B deletes the record: the token stops w
 
 `allow` mints a peer record on B, allowlisted to one Pane Session on B: the only one you created, or
 `--session <name>` when B has several (B needs one; create it in Pane desktop or with
-`runpane --host <B> sessions create`). The token goes only into A's peers list in A's sandbox (0600); it is
+`runpane --host <B> sessions create --from-json <file>`; the payload is in [SESSIONS.md](SESSIONS.md)). The token goes only into A's peers list in A's sandbox (0600); it is
 never printed. The grant is one-way; run `allow B A` too for replies. If A is asleep, the grant is saved
 and A's list is written when you next `runpane cloud wake A`.
 

@@ -92,7 +92,7 @@ const ALLOWED = {
   status: ['--host'],
   stop: ['--host', '--yes', '-y', '--force', '--no-wait'],
   wake: ['--host', '--size', '--timeout-ms'],
-  destroy: ['--host', '--yes', '-y', '--desktop-dir'],
+  destroy: ['--host', '--yes', '-y', '--desktop-dir', '--no-import'],
   pair: ['--host'],
   sync: ['--desktop-dir'],
   coordinator: [],

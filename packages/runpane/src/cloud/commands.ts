@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import type { CloudArgs } from './args';
+import type { JsonObject } from '../boundaryDecoder';
+import { buildCoordinatorDirectory, NO_COORDINATOR, type CoordinatorPushResult } from './coordinatorSync';
 import { syncDesktopProfiles, type DesktopImportResult } from './desktop';
 import { decodePairingCode } from './pairing';
 import type { BootstrapPort, TailnetDevice, TailnetPort } from './ports';
@@ -34,6 +36,11 @@ export interface CloudDeps {
   defaultDesktopDir: string;
   /** Runs `runpane cloud coordinator ...` (owned by m4-coordinator). */
   runCoordinator?(argv: string[]): Promise<number>;
+  /**
+   * Replaces the coordinator's directory (PUT /cloud/directory). Resolves `pushed: false` when no
+   * coordinator is configured; `runpane cloud` is the directory's single writer.
+   */
+  pushCoordinatorDirectory(directory: JsonObject): Promise<CoordinatorPushResult>;
 }
 
 /**
@@ -284,6 +291,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   }
 
   const desktop = await importIntoDesktop(args, deps, [record.profile]);
+  const coordinator = await pushDirectory(deps);
   timings.totalMs = deps.now() - started;
 
   if (args.json) {
@@ -292,6 +300,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       host: hostSummary(record),
       pairingPath: record.meta.pairingPath,
       desktop: desktopSummary(desktop),
+      coordinator,
       timings,
     }, null, 2));
   } else {
@@ -299,6 +308,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     deps.stdout(`  sandbox: ${sandbox.id}   tailnet node: ${record.profile.cloud.nodeId}`);
     deps.stdout(`  pairing code saved to ${record.meta.pairingPath} (0600; not printed).`);
     printDesktopOutcome(deps, desktop, hostname);
+    printCoordinatorOutcome(deps, coordinator);
     deps.stdout(`  phone: run \`runpane cloud pair ${hostname}\` and paste the code into https://runpane.com/app/.`);
   }
   return 0;
@@ -529,10 +539,12 @@ async function runDestroy(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const result = await destroyHost(record, provider, tailnet, deps);
   const desktop = await importIntoDesktop(args, deps, [], [record.profile.cloud.sessionId]);
   await deps.store.removeHost(record.profile.cloud.hostname);
+  const coordinator = await pushDirectory(deps);
+  if (!args.json) printCoordinatorOutcome(deps, coordinator);
   report(
     args,
     deps,
-    { ok: true, host: record.profile.cloud.hostname, ...result, desktop: desktopSummary(desktop) },
+    { ok: true, host: record.profile.cloud.hostname, ...result, desktop: desktopSummary(desktop), coordinator },
     `${record.profile.cloud.hostname} destroyed: tailnet device${result.deletedNodeIds.length === 1 ? '' : 's'} ${result.deletedNodeIds.join(', ') || '(none)'} deleted, sandbox ${record.profile.cloud.sandboxId} ${result.sandbox}.`,
   );
   return 0;
@@ -579,16 +591,36 @@ async function runSync(args: CloudArgs, deps: CloudDeps): Promise<number> {
     desktopDir: args.desktopDir ?? deps.env.RUNPANE_CLOUD_DESKTOP_DIR ?? deps.defaultDesktopDir,
     upsert: records.map((record) => record.profile),
   });
+  const coordinator = await pushDirectory(deps);
+  if (!args.json) printCoordinatorOutcome(deps, coordinator);
   report(
     args,
     deps,
-    { ok: true, desktop: desktopSummary(desktop) },
+    { ok: true, desktop: desktopSummary(desktop), coordinator },
     `Synced ${records.length} cloud host${records.length === 1 ? '' : 's'} into ${desktop.configPath} (added ${desktop.added.length}, updated ${desktop.updated.length}).`,
   );
   return 0;
 }
 
 // ---------------------------------------------------------------- shared helpers
+
+/** Pushes the whole directory after a change. Never throws: the change itself already happened. */
+async function pushDirectory(deps: CloudDeps): Promise<CoordinatorPushResult> {
+  try {
+    const directory = await buildCoordinatorDirectory(await deps.store.listHosts(), new Date(deps.now()));
+    return await deps.pushCoordinatorDirectory(directory);
+  } catch (error) {
+    return { pushed: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function printCoordinatorOutcome(deps: CloudDeps, result: CoordinatorPushResult): void {
+  if (result.pushed) {
+    deps.stdout(`  coordinator: directory updated (${result.sessions} cloud Session${result.sessions === 1 ? '' : 's'}).`);
+  } else if (result.reason !== NO_COORDINATOR) {
+    deps.stderr(`runpane cloud: the coordinator's directory was not updated (${result.reason}). Retry with: runpane cloud sync`);
+  }
+}
 
 async function importIntoDesktop(
   args: CloudArgs,

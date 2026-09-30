@@ -28,7 +28,8 @@ fi
 KEYF="$E2E_SECRETS/boat.key"
 (umask 077; sed -E 's/^[^:]*:[[:space:]]*(Bearer[[:space:]]+)?//' "${CLOUDLAB_BOAT_AUTH_HEADER_FILE:-$HOME/rc-loop/secrets/boat.hdr}" | tr -d '\r\n' > "$KEYF")
 PFX="$E2E_PREFIX-m4"
-coord init --listen-host 127.0.0.1 --listen-port 47399 --directory-file "$CH/directory.json" --api-key-file "$KEYF" --managed-prefix "$PFX" >/dev/null \
+PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
+coord init --listen-host 127.0.0.1 --listen-port "$PORT" --directory-file "$CH/directory.json" --api-key-file "$KEYF" --managed-prefix "$PFX" >/dev/null \
   || { rec coordinator FAIL "coordinator init failed"; exit 1; }
 python3 - "$CFG" <<'PY'
 import json,sys
@@ -114,18 +115,19 @@ h=$(cl remote health "$S_PAIR" --timeout 5)
   || rec wake.cli FAIL "wake said $(jget 'd.get("status")' <<<"$w") after ${ws}s; health=$(jget 'd["http"]' <<<"$h")" "$E2E_RUN_DIR/wake-cli.json"
 
 coord serve > "$E2E_RUN_DIR/coordinator-serve.log" 2>&1 &
-SERVE=$!; sleep 3
+SERVE=$!; register_resource pid "$SERVE" coordinator-serve; sleep 3
+grep -q EADDRINUSE "$E2E_RUN_DIR/coordinator-serve.log" && { rec http.auth BLOCKED "coordinator serve could not bind 127.0.0.1:$PORT"; }
 coord mint-token user:e2e --out "$E2E_SECRETS/caller.tok" >/dev/null
 CURL() { curl -sS -o "$E2E_RUN_DIR/http-$1.json" -w '%{http_code}' "${@:2}"; }
-a=$(CURL noauth "http://127.0.0.1:47399/cloud/status?host=$S_HOST")
-b=$(CURL badauth -H "Authorization: Bearer rpc1.user:e2e.AAAA" "http://127.0.0.1:47399/cloud/status?host=$S_HOST")
-c=$(CURL status -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$E2E_SECRETS/caller.tok")") "http://127.0.0.1:47399/cloud/status?host=$S_HOST")
+a=$(CURL noauth "http://127.0.0.1:$PORT/cloud/status?host=$S_HOST")
+b=$(CURL badauth -H "Authorization: Bearer rpc1.user:e2e.AAAA" "http://127.0.0.1:$PORT/cloud/status?host=$S_HOST")
+c=$(CURL status -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$E2E_SECRETS/caller.tok")") "http://127.0.0.1:$PORT/cloud/status?host=$S_HOST")
 [ "$a" = 401 ] && [ "$b" = 403 ] && [ "$c" = 200 ] && rec http.auth PASS "/cloud/status: no token 401, bad token 403, minted caller token 200 ($(jget 'd.get("status")' < "$E2E_RUN_DIR/http-status.json"))" \
   || rec http.auth FAIL "no token $a, bad $b, good $c"
 cl boat stop "$S_ID" >/dev/null; cl boat wait "$S_ID" archived --timeout 120 >/dev/null
 t0=$(ms_now)
 c=$(CURL wake -X POST -H 'Content-Type: application/json' -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$E2E_SECRETS/caller.tok")") \
-  --data "{\"host\":\"$S_HOST\",\"wait\":true,\"timeoutMs\":120000}" "http://127.0.0.1:47399/cloud/wake"); ws=$(secs_since "$t0")
+  --data "{\"host\":\"$S_HOST\",\"wait\":true,\"timeoutMs\":120000}" "http://127.0.0.1:$PORT/cloud/wake"); ws=$(secs_since "$t0")
 [ "$c" = 200 ] && [ "$(jget 'd.get("status")' < "$E2E_RUN_DIR/http-wake.json")" = awake ] && [ "$(cl remote health "$S_PAIR" --timeout 5 | jget 'd["http"]')" = 200 ] \
   && rec wake.http PASS "POST /cloud/wake -> awake in ${ws}s, /health 200" "$E2E_RUN_DIR/http-wake.json" "seconds=$ws" \
   || rec wake.http FAIL "HTTP $c status=$(jget 'd.get("status")' < "$E2E_RUN_DIR/http-wake.json" 2>/dev/null)" "$E2E_RUN_DIR/http-wake.json"

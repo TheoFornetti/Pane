@@ -97,6 +97,8 @@ e2e_cleanup() {
     log "KEEP=1: leaving resources in place:"; cat "$E2E_RUN_DIR/resources.txt" >&2; return 0
   fi
   local kind id name
+  # local helper processes (e.g. a coordinator serve) first
+  while read -r kind id name; do [ "$kind" = pid ] && kill -TERM "$id" 2>/dev/null; done < "$E2E_RUN_DIR/resources.txt"
   # tailnet devices first (M0: tailscale logout does not remove tagged devices)
   while read -r kind id name; do
     [ "$kind" = tsnode ] && { log "delete tailnet device $id ($name)"; cl ts delete "$id" >/dev/null || log "WARN ts delete $id failed"; }

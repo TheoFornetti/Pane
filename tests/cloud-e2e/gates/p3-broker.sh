@@ -175,8 +175,8 @@ Do exactly this, then stop:
 1. Create a branch named p3-agent-proof. Add the file notes/p3-proof.md containing one line: "written by a cloud agent".
    Commit it with the message "p3: agent proof".
 2. Push it: \`runpane cloud agent github push --path /home/user/app --branch p3-agent-proof\`. Note the ref and compare URL it prints.
-3. Open a GitHub issue: \`gh issue create --title "[runpane-cloud test] agent proof issue" --body "Opened by the P3 gate agent."\`.
-4. Open a DRAFT pull request from that branch: \`gh pr create --draft --title "[runpane-cloud test] agent proof PR" --body "Refs the proof issue." --head p3-agent-proof\`.
+3. Open a GitHub issue: \`gh issue create --title "[runpane-cloud TEST] agent proof issue" --body "Opened by the P3 gate agent."\`.
+4. Open a DRAFT pull request from that branch: \`gh pr create --draft --title "[runpane-cloud TEST] agent proof PR" --body "Refs the proof issue." --head p3-agent-proof\`.
 5. Comment on the issue with the PR's URL: \`gh issue comment <issue-number> --body "PR: <url>"\`.
 Do not try to push to master or merge anything. When done, reply with exactly one line:
 RESULT issue=<issue-number> pr=<pr-number> ref=<pushed ref>
@@ -201,7 +201,7 @@ SH
 import json, sys
 st = json.loads(sys.argv[1]); r = st["repos"][sys.argv[2]]
 pulls = [i for i in r["issues"] if i["pull"] and (i["head"] or {}).get("ref", "").endswith("/p3-agent-proof")]
-issues = [i for i in r["issues"] if not i["pull"] and i["title"].startswith("[runpane-cloud test]")]
+issues = [i for i in r["issues"] if not i["pull"] and i["title"].startswith("[runpane-cloud TEST]")]
 sys.exit(0 if pulls and issues and any(i["comments"] for i in issues) else 1)
 PY
       sleep 20
@@ -212,7 +212,7 @@ PY
 import json, sys
 st = json.loads(sys.argv[1]); r = st["repos"][sys.argv[2]]; pfx = sys.argv[3]
 pulls = [i for i in r["issues"] if i["pull"] and (i["head"] or {}).get("ref") == pfx + "p3-agent-proof"]
-issues = [i for i in r["issues"] if not i["pull"] and i["title"].startswith("[runpane-cloud test]")]
+issues = [i for i in r["issues"] if not i["pull"] and i["title"].startswith("[runpane-cloud TEST]")]
 ref = r["refs"].get("refs/heads/" + pfx + "p3-agent-proof")
 p = pulls[0] if pulls else {}
 print(json.dumps({"ref": ref, "pr": p.get("number"), "draft": p.get("draft"), "prMarker": p.get("marker"), "prUser": p.get("user"),
@@ -234,6 +234,49 @@ PY
     rpc --host "$HOST" panels last-message --panel "$A_PANEL" --json > "$E2E_RUN_DIR/agent-last-message.json" 2>&1 || true
   else rec agent.pr-issue-push FAIL "agent pane not created" "$E2E_RUN_DIR/agent-pane.json"; fi
 else rec agent.pr-issue-push SKIP "E2E_CLAUDE=0"; fi
+
+# ================================================================ gh-compat: Pane's own gh call sites, run as the daemon runs gh
+if [ -n "$AGENT_OK" ]; then
+  say "gh-compat call sites"
+  PR_N=$(jget 'd["pr"]' < "$E2E_RUN_DIR/agent-result.json"); HEAD_SHA=$(jget 'd["ref"]' < "$E2E_RUN_DIR/agent-result.json")
+  fake_admin "$C_ID" POST /_fake/seed/check "{\"repo\":\"$REPO\",\"sha\":\"$HEAD_SHA\",\"name\":\"rp-e2e-ci\",\"conclusion\":\"success\"}" | ev seed-check.json >/dev/null
+  gc=$(sbx "$S_ID" 180 <<SH
+cd /home/user/app
+export PATH=/usr/local/bin:/home/user/.local/bin:/usr/bin:/bin   # non-interactive, minimal PATH (like the daemon's gh spawns)
+echo "gh=\$(command -v gh) usr-local-link=\$(readlink /usr/local/bin/gh 2>/dev/null)"
+gh pr list --head p3-agent-proof --state all --json number,url,title,state,isDraft,body --limit 1 > /home/user/rcl/gh-list.json 2>/home/user/rcl/gh-list.err; echo "list exit=\$?"
+gh pr view $PR_N --json number,url,state,mergeable,statusCheckRollup,headRefOid > /home/user/rcl/gh-view.json 2>/home/user/rcl/gh-view.err; echo "view exit=\$?"
+cat /home/user/rcl/gh-list.err /home/user/rcl/gh-view.err
+SH
+)
+  printf '%s\n' "$gc" | ev gh-compat.txt >/dev/null
+  cl boat fetch "$S_ID" /home/user/rcl/gh-list.json "$E2E_RUN_DIR/gh-pr-list.json" >/dev/null
+  cl boat fetch "$S_ID" /home/user/rcl/gh-view.json "$E2E_RUN_DIR/gh-pr-view.json" >/dev/null
+  v=$(python3 - "$E2E_RUN_DIR/gh-pr-list.json" "$PR_N" <<'PY'
+import json, sys
+try: d = json.load(open(sys.argv[1]))
+except Exception as e: print(f"unparsable: {e}"); sys.exit(1)
+it = d[0] if isinstance(d, list) and len(d) == 1 else None
+ok = bool(it) and it["number"] == int(sys.argv[2]) and it["isDraft"] is True and it["state"] == "OPEN" \
+     and it["url"].endswith(f"/pull/{sys.argv[2]}") and it["title"].startswith("[runpane-cloud TEST]") and "runpane-cloud:" in it["body"]
+print(json.dumps({k: it.get(k) for k in ("number", "state", "isDraft", "url", "title")}) if it else json.dumps(d)[:300]); sys.exit(0 if ok else 1)
+PY
+) && rec gh-compat.pr-list PASS "gh pr list --head p3-agent-proof --state all --json ... --limit 1 -> $v" "$E2E_RUN_DIR/gh-pr-list.json" \
+    || rec gh-compat.pr-list FAIL "$v / $(tr '\n' ' ' <<<"$gc" | head -c 300)" "$E2E_RUN_DIR/gh-compat.txt"
+  v=$(python3 - "$E2E_RUN_DIR/gh-pr-view.json" "$PR_N" "$HEAD_SHA" <<'PY'
+import json, sys
+try: d = json.load(open(sys.argv[1]))
+except Exception as e: print(f"unparsable: {e}"); sys.exit(1)
+roll = d.get("statusCheckRollup") or []
+check = [c for c in roll if (c.get("name") or c.get("context")) == "rp-e2e-ci" and str(c.get("conclusion") or c.get("state")).upper() == "SUCCESS"]
+ok = d.get("number") == int(sys.argv[2]) and d.get("state") == "OPEN" and d.get("headRefOid") == sys.argv[3] \
+     and d.get("mergeable") == "MERGEABLE" and bool(check) and d.get("url", "").endswith(f"/pull/{sys.argv[2]}")
+print(json.dumps({"number": d.get("number"), "state": d.get("state"), "mergeable": d.get("mergeable"),
+                  "headRefOid": (d.get("headRefOid") or "")[:10], "statusCheckRollup": roll})[:400]); sys.exit(0 if ok else 1)
+PY
+) && rec gh-compat.pr-view PASS "gh pr view $PR_N --json number,url,state,mergeable,statusCheckRollup,headRefOid -> $v" "$E2E_RUN_DIR/gh-pr-view.json" \
+    || rec gh-compat.pr-view FAIL "$v / $(tr '\n' ' ' <<<"$gc" | head -c 300)" "$E2E_RUN_DIR/gh-compat.txt"
+else rec gh-compat SKIP "no agent PR to look at"; fi
 
 # ================================================================ refusals, probed live from inside the Session
 say "refusals"

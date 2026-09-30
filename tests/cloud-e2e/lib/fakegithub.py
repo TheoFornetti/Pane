@@ -264,7 +264,7 @@ class Denied(Exception):
 # endpoint -> required permission (resource, level). Order matters: first match wins.
 REST_PERMS = [
     (r"^/repos/[^/]+/[^/]+$", "metadata", "read"),
-    (r"^/repos/[^/]+/[^/]+/(branches|git/ref|git/refs|compare|commits(?!/[^/]+/(status|statuses|check-runs)))", "contents", None),
+    (r"^/repos/[^/]+/[^/]+/(branches|git/ref|git/refs|git/matching-refs|compare|commits(?!/[^/]+/(status|statuses|check-runs)))", "contents", None),
     (r"^/repos/[^/]+/[^/]+/commits/[^/]+/(status|statuses)$", "statuses", None),
     (r"^/repos/[^/]+/[^/]+/commits/[^/]+/check-runs$", "checks", None),
     (r"^/repos/[^/]+/[^/]+/actions/", "actions", None),
@@ -430,6 +430,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 it.update(pull=True, draft=True, head={"ref": data["head"], "sha": c}, base={"ref": base, "sha": base_sha}, merged=False)
                 save_state(d, st)
             return self._send(201, {"number": it["number"], "head": data["head"]})
+        if method == "POST" and u.path == "/_fake/seed/check":
+            with LOCK:
+                st = load_state(d)
+                run = {"id": now(), "name": data.get("name", "ci"), "head_sha": data["sha"], "status": data.get("status", "completed"),
+                       "conclusion": data.get("conclusion", "success"), "started_at": iso(now()), "completed_at": iso(now()),
+                       "html_url": f"https://github.com/{data['repo']}/runs/1"}
+                st.setdefault("checks", {}).setdefault(data["repo"], []).append(run)
+                save_state(d, st)
+            return self._send(201, run)
         if method == "POST" and u.path == "/_fake/seed/issue":
             with LOCK:
                 st = load_state(d)
@@ -501,8 +510,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         j = {"number": it["number"], "title": it["title"], "body": it["body"], "state": it["state"],
              "user": {"login": it["user"]}, "labels": [{"name": n} for n in it["labels"]], "comments": len(it["comments"]),
              "html_url": f"{base}/{'pull' if it['pull'] else 'issues'}/{it['number']}", "created_at": it["created"]}
+        j.update(updated_at=it.get("updated", it["created"]), closed_at=it.get("closed"))
         if it["pull"]:
-            j.update(draft=it["draft"], merged=it.get("merged", False), head=it["head"], base=it["base"],
+            j.update(draft=it["draft"], merged=it.get("merged", False), merged_at=it.get("merged_at"),
+                     mergeable=None if it.get("merged") else True, head=it["head"], base=it["base"],
                      pull_request={"url": f"{base}/pull/{it['number']}"})
         return j
 
@@ -611,6 +622,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if mb.group(1) == "branches":
                 return self._send(200, {"name": mb.group(2), "commit": {"sha": sha}, "protected": False})
             return self._send(200, {"ref": f"refs/heads/{mb.group(2)}", "object": {"sha": sha, "type": "commit"}})
+        mm = re.match(r"^/git/matching-refs/heads/(.*)$", rest)
+        if mm and method == "GET":
+            out = git(rp, "for-each-ref", "--format=%(refname) %(objectname)", f"refs/heads/{mm.group(1)}").splitlines()
+            out = [l for l in out if l.split(" ")[0].startswith(f"refs/heads/{mm.group(1)}")]
+            return self._send(200, [{"ref": l.split(" ")[0], "object": {"sha": l.split(" ")[1], "type": "commit"}} for l in out])
+        md = re.match(r"^/git/refs/heads/(.+)$", rest)
+        if md and method == "DELETE":
+            if not git(rp, "rev-parse", "--verify", "-q", f"refs/heads/{md.group(1)}", check=False):
+                raise Denied(422, "Reference does not exist")
+            git(rp, "update-ref", "-d", f"refs/heads/{md.group(1)}")
+            self.entry["deletedRef"] = md.group(1)
+            return self._send(204, b"")
         mc = re.match(r"^/compare/(.+)\.\.\.(.+)$", rest)
         if mc and method == "GET":
             a_, b_ = (git(rp, "rev-parse", "--verify", "-q", x, check=False) for x in (mc.group(1), mc.group(2)))
@@ -622,8 +645,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     "files": [{"filename": f} for f in files]})
         ms = re.match(r"^/commits/([^/]+)/(status|statuses|check-runs)$", rest)
         if ms and method == "GET":
+            runs = [c for c in st.get("checks", {}).get(full, []) if c["head_sha"] in (ms.group(1),
+                    git(rp, "rev-parse", "--verify", "-q", ms.group(1), check=False))]
             if ms.group(2) == "check-runs":
-                return self._send(200, {"total_count": 0, "check_runs": []})
+                return self._send(200, {"total_count": len(runs), "check_runs": runs})
             return self._send(200, {"state": "pending", "statuses": [], "total_count": 0} if ms.group(2) == "status" else [])
         if rest.startswith("/actions/runs") and method == "GET":
             return self._send(200, {"total_count": 0, "workflow_runs": []})
@@ -675,7 +700,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if sub == "/merge":
                     self.entry["merge"] = True  # a gate asserts this never happens
                     if method == "PUT":
-                        it.update(state="closed", merged=True); save_state(d, st)
+                        it.update(state="closed", merged=True, merged_at=iso(now()), closed=iso(now())); save_state(d, st)
                         return self._send(200, {"merged": True, "message": "Pull Request successfully merged"})
                     return self._send(204 if it.get("merged") else 404, b"")
                 if sub == "/files" and method == "GET":
@@ -693,6 +718,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     for k in ("title", "body", "state"):
                         if k in data:
                             it[k] = data[k]
+                    it["updated"] = iso(now()); it["closed"] = iso(now()) if it["state"] == "closed" else None
                     if "base" in data:
                         it["base"] = {"ref": data["base"], "sha": git(rp, "rev-parse", f"refs/heads/{data['base']}")}
                     save_state(d, st)

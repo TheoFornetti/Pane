@@ -64,12 +64,19 @@ expect 201 "$(code "${A[@]}" -X POST -d '{"body":"c"}' "$B/repos/acme/app/issues
 expect 200 "$(code "${A[@]}" -X PATCH -d '{"state":"closed"}' "$B/repos/acme/app/issues/2")" "issue closed"
 expect 403 "$(code -H "Authorization: token $RT" -X POST -d '{"title":"x"}' "$B/repos/acme/app/issues")" "issue create with a contents-only token refused"
 expect 403 "$(code "${A[@]}" "$B/repos/acme/app/commits/master/check-runs")" "check-runs need the Checks permission"
+expect 422 "$(code -X POST -H "Authorization: Bearer $J" -d '{"permissions":{"checks":"read"}}' "$B/app/installations/4242/access_tokens")" "checks:read not in this installation's grant"
 expect 403 "$(code "${A[@]}" "$B/repos/acme/app/commits/master/status")" "combined status needs the Commit statuses permission"
 expect 403 "$(code "${A[@]}" "$B/repos/acme/app/actions/runs")" "Actions runs need the Actions permission"
 expect 404 "$(code "${A[@]}" "$B/repos/acme/other/issues")" "a repo outside the token is invisible"
 expect 200 "$(code "${A[@]}" -X PUT "$B/repos/acme/app/pulls/1/merge")" "merge endpoint modelled (and logged)"
 ADM=(-H "X-Fake-Admin: $(cat "$ST/admin-token")")
 expect 201 "$(code "${ADM[@]}" -X POST -d '{"repo":"acme/app","head":"cloud/other/y","title":"theirs"}' "$B/_fake/seed/pull")" "admin seed of another Session's PR"
+HS=$(git -C "$W/c" rev-parse cloud/h/x)
+expect 201 "$(code "${ADM[@]}" -X POST -d "{\"repo\":\"acme/app\",\"sha\":\"$HS\",\"name\":\"ci\"}" "$B/_fake/seed/check")" "admin seed of a check run"
+python3 "$LIB/fakegithub.py" init --state "$ST" --repo acme/app --app-id 777 --app-public-key "$W/app.pub" --installation-id 4242 --grant checks=read >/dev/null
+KT=$(mint '{"repositories":["app"],"permissions":{"checks":"read"}}')
+expect 200 "$(code -H "Authorization: token $KT" "$B/repos/acme/app/commits/$HS/check-runs")" "check-runs with a checks:read token (grant added)"
+python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));sys.exit(0 if d["total_count"]==1 and d["check_runs"][0]["conclusion"]=="success" else 1)' "$W/last.json" && ok "seeded check run returned" || bad "check-runs body"
 expect 403 "$(code "$B/_fake/log")" "admin endpoints need the admin token"
 curl -s "${ADM[@]}" "$B/_fake/log" > "$W/log.jsonl"
 n_merge=$(python3 -c 'import json,sys;print(sum(1 for l in open(sys.argv[1]) if json.loads(l).get("merge")))' "$W/log.jsonl")

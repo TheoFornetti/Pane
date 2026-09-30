@@ -18,7 +18,9 @@ fake_deploy() {
   local sid="$1" repo="$2" app="$3" pub="$4" inst="$5"; shift 5
   cl boat put "$sid" "$E2E_LIB/fakegithub.py" "rcl/fakegithub.py" || return 1
   cl boat put "$sid" "$pub" "rcl/fake-app.pub" || return 1
-  local extra=""; for r in "$@"; do extra+="python3 $FAKE_DIR/fakegithub.py init --state $FAKE_DIR/state --repo $r --app-id $app --app-public-key /home/user/rcl/fake-app.pub --installation-id $inst >/dev/null; "; done
+  # FAKE_GRANTS: extra installation permissions (default: the Checks/Commit statuses READ that Red is asked to add)
+  local grants=""; for g in ${FAKE_GRANTS-checks=read statuses=read}; do grants+="--grant $g "; done
+  local extra=""; for r in "$@"; do extra+="python3 $FAKE_DIR/fakegithub.py init --state $FAKE_DIR/state --repo $r --app-id $app --app-public-key /home/user/rcl/fake-app.pub --installation-id $inst $grants>/dev/null; "; done
   sbx "$sid" 300 <<SH
 set -e
 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
@@ -26,7 +28,7 @@ command -v git >/dev/null || sudo apt-get install -y git >/dev/null 2>&1
 systemctl --user stop $FAKE_UNIT 2>/dev/null || true
 rm -rf $FAKE_DIR/state   # a fresh fake per run
 mkdir -p $FAKE_DIR && install -m 755 /home/user/rcl/fakegithub.py $FAKE_DIR/fakegithub.py
-python3 $FAKE_DIR/fakegithub.py init --state $FAKE_DIR/state --repo $repo --app-id $app --app-public-key /home/user/rcl/fake-app.pub --installation-id $inst
+python3 $FAKE_DIR/fakegithub.py init --state $FAKE_DIR/state --repo $repo --app-id $app --app-public-key /home/user/rcl/fake-app.pub --installation-id $inst $grants
 $extra
 systemctl --user stop $FAKE_UNIT 2>/dev/null || true
 systemctl --user reset-failed $FAKE_UNIT 2>/dev/null || true

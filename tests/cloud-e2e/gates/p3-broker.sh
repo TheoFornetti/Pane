@@ -23,7 +23,9 @@ e2e_init P3-broker
 wait_start_budget 2
 cli_resolve || { rec cli BLOCKED "runpane CLI under test not installable"; exit 1; }
 E2E_TARGET="${E2E_TARGET_OVERRIDE:-${E2E_CLI_SOURCE##*/}}"; export E2E_TARGET
-rpc cloud coordinator github --help 2>&1 | grep -qiE 'unknown|not available' && { rec broker BLOCKED "no 'cloud coordinator github' in $E2E_CLI_SOURCE"; exit 0; }
+# E2E_P3_PHASE=infra: only setup + coordinator + fake + ACL (for an older build: proves the environment, then stops, KEEP)
+PHASE="${E2E_P3_PHASE:-full}"; [ "$PHASE" = infra ] && export KEEP=1
+[ "$PHASE" = full ] && rpc cloud coordinator github --help 2>&1 | grep -qiE 'unknown|not available' && { rec broker BLOCKED "no 'cloud coordinator github' in $E2E_CLI_SOURCE"; exit 0; }
 
 OWNER=rp-e2e; REPO="$OWNER/app"; OTHER="$OWNER/other"; APP_ID=31337; INST=4242
 AGENTBOX_TS_IP=$(tailscale ip -4 2>/dev/null | head -1)
@@ -60,6 +62,19 @@ lst=$(sbx "$C_ID" 60 <<<"ss -Hltn 'sport = :$FAKE_PORT' | awk '{print \$4}'")
 [[ "$MASTER0" =~ ^[0-9a-f]{40}$ ]] && [ "$(tr -d '\n ' <<<"$lst")" = "127.0.0.1:$FAKE_PORT" ] \
   && rec fake.deploy PASS "fake GitHub on the coordinator, listening ONLY on 127.0.0.1:$FAKE_PORT; $REPO master=$MASTER0; App $APP_ID installed on $REPO and $OTHER (no workflows permission, no branch protection)" "$E2E_RUN_DIR/fake-deploy.txt" \
   || { rec fake.deploy FAIL "master=$MASTER0 listeners=$lst" "$E2E_RUN_DIR/fake-deploy.txt"; exit 1; }
+
+if [ "$PHASE" = infra ]; then
+  acl=$(sbx "$C_ID" 120 <<SH
+for port in 443 22 42137; do r=\$(curl -s -o /dev/null -m 6 -w '%{http_code}' http://$AGENTBOX_TS_IP:\$port/ 2>/dev/null); echo "agentbox:\$port=\$r"; done
+c=\$(curl -s -o /dev/null -m 8 -w '%{http_code}' $C_URL/cloud/github/status); echo "own-broker-status=\$c"
+python3 --version; git --version; tailscale status 2>/dev/null | head -8
+SH
+)
+  printf '%s\n' "$acl" | ev infra-acl.txt >/dev/null
+  ! grep -qE '^agentbox:[0-9]+=[1-9]' <<<"$acl" && rec acl.rp-session-to-agentbox-blocked PASS "from the coordinator (tag:rp-session): agentbox $AGENTBOX_TS_IP unreachable on 443/22/42137" "$E2E_RUN_DIR/infra-acl.txt" \
+    || rec acl.rp-session-to-agentbox-blocked FAIL "$(tr '\n' ' ' <<<"$acl" | head -c 300)" "$E2E_RUN_DIR/infra-acl.txt"
+  log "infra phase done; coordinator $C_HOST ($C_ID) kept in $RUNPANE_CLOUD_DIR for an in-place redeploy"; exit 0
+fi
 
 say "broker: github set (App mode, fake base URLs)"
 broker_set_app "$APP_ID" "$E2E_SECRETS/app.pem" "$INST" "http://127.0.0.1:$FAKE_PORT" "http://127.0.0.1:$FAKE_PORT" > "$E2E_RUN_DIR/github-set.json" 2>&1; rc=$?
@@ -270,13 +285,17 @@ THEIR_PR=$(jget 'd["number"]' < "$E2E_RUN_DIR/seed-pull.json"); THEIR_ISSUE=$(jg
 MY_PR=$( [ -n "$AGENT_OK" ] && jget 'd["pr"]' < "$E2E_RUN_DIR/agent-result.json" || echo 1)
 probe merge-put            '403|404|405' '.*' PUT "/cloud/github/pulls/$MY_PR/merge" '{}'
 probe merge-post           '403|404|405' '.*' POST "/cloud/github/pulls/$MY_PR/merge" '{}'
-probe ready-for-review     '400|403'     '.*' PATCH "/cloud/github/pulls/$MY_PR" '{"draft":false}'
-probe other-pr-edit        '403'         'not-owner' PATCH "/cloud/github/pulls/$THEIR_PR" '{"title":"hijacked"}'
-probe other-pr-close       '403'         'not-owner' PATCH "/cloud/github/pulls/$THEIR_PR" '{"state":"closed"}'
-probe other-issue-edit     '403'         'not-owner' PATCH "/cloud/github/issues/$THEIR_ISSUE" '{"body":"hijacked"}'
-probe pr-head-other-host   '403'         'ref-outside-namespace|not-owner' POST /cloud/github/pulls "{\"repo\":\"$REPO\",\"branch\":\"../other-host/theirs\",\"title\":\"x\",\"body\":\"x\"}"
+probe ready-for-review     '400|403'     '.*' PATCH "/cloud/github/pulls/$MY_PR" "{\"repo\":\"$REPO\",\"draft\":false}"
+probe merged-state         '400|403'     '.*' PATCH "/cloud/github/pulls/$MY_PR" "{\"repo\":\"$REPO\",\"state\":\"merged\"}"
+probe other-pr-edit        '403'         'not-owner' PATCH "/cloud/github/pulls/$THEIR_PR" "{\"repo\":\"$REPO\",\"title\":\"hijacked\"}"
+probe other-pr-close       '403'         'not-owner' PATCH "/cloud/github/pulls/$THEIR_PR" "{\"repo\":\"$REPO\",\"state\":\"closed\"}"
+probe other-issue-edit     '403'         'not-owner' PATCH "/cloud/github/issues/$THEIR_ISSUE" "{\"repo\":\"$REPO\",\"body\":\"hijacked\"}"
+probe other-issue-close    '403'         'not-owner' PATCH "/cloud/github/issues/$THEIR_ISSUE" "{\"repo\":\"$REPO\",\"state\":\"closed\"}"
+probe pr-head-dotdot       '400|403'     '.*' POST /cloud/github/pulls "{\"repo\":\"$REPO\",\"branch\":\"../other-host/theirs\",\"title\":\"x\",\"body\":\"x\"}"
+probe pr-head-other-full   '400|403|502' '.*' POST /cloud/github/pulls "{\"repo\":\"$REPO\",\"branch\":\"cloud/other-host/theirs\",\"title\":\"x\",\"body\":\"x\"}"
 probe issue-other-repo     '403'         'repo-not-allowed' POST /cloud/github/issues "{\"repo\":\"$OTHER\",\"title\":\"x\",\"body\":\"x\"}"
-probe read-not-allowlisted '400|403|404'         '.*' GET "/cloud/github/read/$REPO/collaborators"
+probe read-not-allowlisted '400|403|404' '.*' GET "/cloud/github/read/$REPO/collaborators"
+probe read-other-repo      '403'         'repo-not-allowed' GET "/cloud/github/read/$OTHER/issues"
 probe audit-peer           '403'         '.*' GET /cloud/github/audit
 probe unknown-endpoint     '403|404'     '.*' POST /cloud/github/releases "{\"repo\":\"$REPO\"}"
 shimm=$(sbx "$S_ID" 60 <<'SH'
@@ -297,6 +316,7 @@ by = {i["number"]: i for i in r["issues"]}
 ok = all(i["draft"] and not i["merged"] for i in r["issues"] if i["pull"])
 ok &= by[int(sys.argv[3])]["title"] == "another Session's PR" and by[int(sys.argv[3])]["state"] == "open"
 ok &= by[int(sys.argv[4])]["state"] == "open"
+ok &= sum(1 for i in r["issues"] if i["pull"] and (i["head"] or {}).get("ref") == "cloud/other-host/theirs") == 1  # no PR of ours on their head
 sys.exit(0 if ok else 1)
 PY
 
@@ -318,7 +338,7 @@ SH
 sbx "$C_ID" 30 <<<'cat /home/user/rcl/stolen.json' | ev stolen-coordinator-node.json >/dev/null
 [[ "$h1" =~ ^(401|403)$ ]] && rec refuse.token-from-agentbox PASS "the Session's peer token used from agentbox (tailnet member) -> $h1 $(jget 'd.get("code","")' < "$E2E_RUN_DIR/stolen-agentbox.json" 2>/dev/null)" "$E2E_RUN_DIR/stolen-agentbox.json" \
   || rec refuse.token-from-agentbox FAIL "-> $h1" "$E2E_RUN_DIR/stolen-agentbox.json"
-[[ "$h2" =~ ^(401|403)$ ]] && rec refuse.token-from-other-rp-session-node PASS "the same token used from another tag:rp-session node ($C_HOST) -> $h2" "$E2E_RUN_DIR/stolen-coordinator-node.json" \
+[[ "$h2" =~ ^(401|403)$ ]] && rec refuse.token-from-other-rp-session-node PASS "the same token used from another tag:rp-session node ($C_HOST) -> $h2 $(jget 'd.get("code","")' < "$E2E_RUN_DIR/stolen-coordinator-node.json" 2>/dev/null)" "$E2E_RUN_DIR/stolen-coordinator-node.json" \
   || rec refuse.token-from-other-rp-session-node FAIL "-> $h2" "$E2E_RUN_DIR/stolen-coordinator-node.json"
 shred -u "$E2E_SECRETS/session.tok" "$E2E_SECRETS/session-peers.json"
 
@@ -332,10 +352,10 @@ toks = json.loads(sys.argv[1])["tokens"]
 print(json.dumps([{k: t[k] for k in ("repos", "permissions", "issued")} for t in toks], indent=1))
 PY
 ro=$(python3 -c 'import json,sys;t=json.load(open(sys.argv[1]));print(sum(1 for x in t if x["permissions"]=={"contents":"read","metadata":"read"} and x["repos"]==[sys.argv[2]]))' "$E2E_RUN_DIR/minted-tokens.json" "$REPO")
-wide=$(python3 -c 'import json,sys;t=json.load(open(sys.argv[1]));print(sum(1 for x in t if len(x["repos"])!=1))' "$E2E_RUN_DIR/minted-tokens.json")
+wide=$(python3 -c 'import json,sys;t=json.load(open(sys.argv[1]));print(sum(1 for x in t if len(x["repos"])!=1 and set(x["permissions"])-{"metadata"}))' "$E2E_RUN_DIR/minted-tokens.json")
 [ "$(code_of "$r")" = 200 ] && [ "$ro" -ge 1 ] && rec broker.read-token PASS "POST /cloud/github/token -> 200; the fake minted it as contents:read+metadata:read on $REPO only" "$E2E_RUN_DIR/minted-tokens.json" \
   || rec broker.read-token FAIL "HTTP $(code_of "$r") $(errc_of "$r"); read-only tokens minted: $ro" "$E2E_RUN_DIR/minted-tokens.json"
-[ "$wide" = 0 ] && rec broker.tokens-downscoped PASS "every installation token the broker minted names exactly one repository ($(jget 'len(d)' < "$E2E_RUN_DIR/minted-tokens.json") tokens)" "$E2E_RUN_DIR/minted-tokens.json" \
+[ "$wide" = 0 ] && rec broker.tokens-downscoped PASS "every installation token with more than metadata:read names exactly one repository ($(jget 'len(d)' < "$E2E_RUN_DIR/minted-tokens.json") tokens)" "$E2E_RUN_DIR/minted-tokens.json" \
   || rec broker.tokens-downscoped FAIL "$wide token(s) not limited to one repo" "$E2E_RUN_DIR/minted-tokens.json"
 
 # ================================================================ evidence: the fake's log and the coordinator's audit

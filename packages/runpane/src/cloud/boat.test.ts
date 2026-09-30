@@ -18,7 +18,10 @@ interface Recorded {
 function fakeFetch(responses: Array<{ status: number; body?: unknown }>) {
   const calls: Recorded[] = [];
   const impl: typeof fetch = async (input, init) => {
-    const headers = Object.fromEntries(new Headers(init?.headers).entries());
+    const headers: Record<string, string> = {};
+    new Headers(init?.headers).forEach((value, key) => {
+      headers[key] = value;
+    });
     calls.push({
       method: init?.method ?? 'GET',
       url: String(input),

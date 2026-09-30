@@ -8,7 +8,7 @@
 #   non-allowlisted peer -> 403; revoked peer -> refused; peer records survive B's power-off/resume.
 # B's orchestrator panel runs a line logger (launchCommand), so each delivery is one line in a file we can count.
 . "$(dirname "$0")/../lib/common.sh"
-. "$E2E_LIB/provision.sh"; . "$E2E_LIB/fixtures.sh"; . "$E2E_LIB/cli.sh"
+. "$E2E_LIB/provision.sh"; . "$E2E_LIB/fixtures.sh"; . "$E2E_LIB/cli.sh"; . "$E2E_LIB/claude.sh"
 export E2E_DAEMON_DEB_URL="${E2E_DAEMON_DEB_URL-$(dist_url deb)}"
 E2E_TARGET="${E2E_TARGET:-${E2E_DAEMON_DEB_URL:-runpane@latest}}"; E2E_TARGET="${E2E_TARGET##*/}"
 e2e_init M3-peers
@@ -22,14 +22,14 @@ cl remote wait-health "$B_PAIR" --timeout 120 >/dev/null
 
 # ---- B: a shell pane, an orchestration Session whose orchestrator panel logs each line it receives
 fx=$(fixture_shell_pane "$B_ID" m3shell | tail -1); SHELL_PANEL=$(jget 'd["panelId"]' <<<"$fx")
-sess=$(sbx "$B_ID" 120 <<'SH'
-cat > /home/user/rcl/orch.sh <<'O'
-#!/bin/bash
-# e2e orchestrator stand-in: append every submitted line to a log (one line per delivery)
-while IFS= read -r line; do printf '%s\n' "$line" >> /home/user/rcl/orch.log; done
-O
-chmod 755 /home/user/rcl/orch.sh; : > /home/user/rcl/orch.log
-echo '{"name":"e2e-b","launchCommand":"bash /home/user/rcl/orch.sh"}' | /home/user/rcl/rp sessions create --from-json - --json
+# B's orchestrator must be a real agent: peer submits go only into an agent composer (agentOnly), by design.
+sandbox_claude_setup "$B_ID" /home/user > "$E2E_RUN_DIR/b-claude-setup.txt" 2>&1
+cl remote wait-health "$B_PAIR" --timeout 90 >/dev/null
+sess=$(sbx "$B_ID" 180 <<'SH'
+echo '{"name":"e2e-b","agent":"claude"}' | /home/user/rcl/rp sessions create --from-json - --json > /home/user/rcl/session.json
+p=$(python3 -c "import json;print(json.load(open('/home/user/rcl/session.json')).get('panelId',''))")
+/home/user/rcl/rp panels wait --panel "$p" --for ready --timeout-ms 120000 --json > /home/user/rcl/orch-wait.json 2>&1
+cat /home/user/rcl/session.json
 SH
 ); printf '%s\n' "$sess" | ev b-session.json >/dev/null
 B_SESSION=$(jget 'd["session"].get("id")' <<<"$sess" 2>/dev/null); ORCH=$(jget 'd.get("panelId")' <<<"$sess" 2>/dev/null)
@@ -67,7 +67,9 @@ rec mint PASS "B minted peer records for A (allowlisted to Session $B_SESSION) a
 cl remote pairing-mode "$PA" | jget 'd["baseUrl"]' | grep -q "$B_HOST" && rec peer-code-target PASS "A's code points at B's tailnet URL" || rec peer-code-target FAIL "A's code baseUrl is not B"
 tokfile() { (umask 077; python3 -c 'import sys,json;sys.path.insert(0,sys.argv[2]);import cloudlab;print(cloudlab.read_pairing(sys.argv[1])["token"])' "$1" "$E2E_LIB" > "$1.tok"); echo "$1.tok"; }
 PAT=$(tokfile "$PA"); PCT=$(tokfile "$PC")
-orch_count() { sbx "$B_ID" 30 <<<"grep -cF -- '$1' /home/user/rcl/orch.log"; }
+orch_count() {  # deliveries = framed user messages carrying the marker in the orchestrator's Claude transcript
+  sbx "$B_ID" 30 <<<"cat ~/.claude/projects/*/*.jsonl 2>/dev/null | grep -o 'peer message from [^]]*\] [a-z]* $1' | wc -l"; }
+orch_line() { sbx "$B_ID" 30 <<<"cat ~/.claude/projects/*/*.jsonl 2>/dev/null | grep -o '\[peer message from [^]]*\] [a-z]* $1' | head -1"; }
 peer_inv() { cl remote invoke "$B_PAIR" "$1" "$2" --token-file "$3"; }  # B's baseUrl, peer token
 
 # ---- A: peers file + CLI transport over the tailnet (the real peer path)
@@ -98,11 +100,11 @@ print(",".join(p.get("id") or p.get("panelId") for p in d.get("panels",[])))' <<
 M="e2e-peer-$RANDOM$RANDOM"; K="e2e-key-$RANDOM$RANDOM"
 s1=$(sbx "$A_ID" 90 <<<"/home/user/rcl/rp --host $B_HOST panels submit --panel $ORCH --text 'hello $M' --idempotency-key $K --yes --json"); printf '%s\n' "$s1" | ev a-submit-1.json >/dev/null
 sleep 3
-line=$(sbx "$B_ID" 30 <<<"grep -F -- '$M' /home/user/rcl/orch.log | head -1")
-if [[ "$line" == *"[peer message from $A_HOST]"*"hello $M"* ]]; then rec a-submit-framed PASS "landed in B's orchestrator panel as: $line" "$E2E_RUN_DIR/a-submit-1.json"
+sleep 5; line=$(orch_line "$M")
+if [[ "$line" == *"peer message from $A_HOST] hello $M"* ]]; then rec a-submit-framed PASS "landed in B's orchestrator panel as: $line" "$E2E_RUN_DIR/a-submit-1.json"
 else rec a-submit-framed FAIL "orchestrator log line: '$line'" "$E2E_RUN_DIR/a-submit-1.json"; fi
 s2=$(sbx "$A_ID" 90 <<<"/home/user/rcl/rp --host $B_HOST panels submit --panel $ORCH --text 'hello $M' --idempotency-key $K --yes --json"); printf '%s\n' "$s2" | ev a-submit-dup.json >/dev/null
-sleep 3; n=$(orch_count "$M")
+sleep 8; n=$(orch_count "$M")
 [ "$n" = 1 ] && rec idempotency-once PASS "same idempotency key sent twice -> delivered once (dedup: $(grep -o '"deduplicated": *[a-z]*' <<<"$s2"))" "$E2E_RUN_DIR/a-submit-dup.json" \
   || rec idempotency-once FAIL "delivered $n times" "$E2E_RUN_DIR/a-submit-dup.json"
 

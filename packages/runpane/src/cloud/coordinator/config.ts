@@ -56,7 +56,7 @@ export interface CoordinatorConfig {
   github: GitHubConfig | null;
 }
 
-export interface GitHubConfig {
+interface GitHubConfig {
   mode: 'app' | 'pat';
   appId: string | null;
   privateKeyFile: string | null;

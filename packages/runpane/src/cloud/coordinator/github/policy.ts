@@ -58,7 +58,7 @@ const REFUSED_PATH_PREFIXES = ['.github/workflows/'] as const;
 const REPO_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/u;
 const BRANCH_PATTERN = /^[A-Za-z0-9._/-]{1,100}$/u;
 
-export function parseRepo(value: string): string {
+function parseRepo(value: string): string {
   if (!REPO_PATTERN.test(value) || value.endsWith('.git') || value.split('/')[1].startsWith('.')) {
     throw new BrokerError('bad-request', `repo must be owner/name, got ${JSON.stringify(value)}`);
   }
@@ -129,7 +129,7 @@ export function refusedPaths(paths: readonly string[]): string[] {
 
 const MARKER_PATTERN = /<!--\s*runpane-cloud:[^>]*-->/giu;
 
-export function marker(sessionId: string): string {
+function marker(sessionId: string): string {
   return `<!-- runpane-cloud:${sessionId} -->`;
 }
 

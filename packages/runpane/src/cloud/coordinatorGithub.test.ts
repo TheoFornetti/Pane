@@ -17,7 +17,6 @@ const STAGE = '/home/user/.runpane-cloud/coordinator-stage';
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const PEM = privateKey.export({ type: 'pkcs1', format: 'pem' }).toString();
 const PUBLIC_PEM = publicKey.export({ type: 'spki', format: 'pem' }).toString();
-const PAT = 'github_pat_11LAPTOPTEST_0123456789abcdefghijklmnop';
 
 async function run(harness: TestHarness, argv: string[]): Promise<number> {
   return runCloudCommand(parseCloudArgs(argv), harness.deps);

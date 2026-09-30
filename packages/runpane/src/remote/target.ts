@@ -229,10 +229,15 @@ function withIdempotencyKey(channel: string, args: unknown[]): unknown[] {
   return [{ ...request, idempotencyKey: `runpane-cli:${randomUUID()}` }, ...args.slice(1)];
 }
 
-/** The request object a runpane channel takes as its first argument, or null. */
+/**
+ * The request object a runpane channel takes as its first argument, or null.
+ * Decoded from its wire form: CLI requests carry `undefined` optionals
+ * (e.g. `asFilePointer`) that JSON drops but a strict JSON decoder rejects.
+ */
 function firstRequestObject(args: unknown[]): JsonObject | null {
+  if (args[0] === undefined) return null;
   try {
-    return decodeBoundary(args[0], boundary.jsonObject);
+    return decodeBoundary(JSON.parse(JSON.stringify(args[0])), boundary.jsonObject);
   } catch {
     return null;
   }

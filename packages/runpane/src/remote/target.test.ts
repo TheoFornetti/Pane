@@ -183,9 +183,12 @@ describe('invokeRemote wake policy', () => {
 
   it('resolves --panel orchestrator through panels list, also after a wake', async () => {
     const host = sleepingCloudHost();
-    await invokeRemote(cloudTarget(), 'runpane:panels:submit', [{ panelId: 'orchestrator', input: 'hi' }], { ...fast, transport: host.transport });
+    // The CLI's request carries undefined optionals, as buildPanelInputRequest does.
+    await invokeRemote(cloudTarget(), 'runpane:panels:submit', [{ panelId: 'orchestrator', input: 'hi', asFilePointer: undefined }], { ...fast, transport: host.transport });
     assert.deepEqual(host.delivered.map((call) => call.channel), ['runpane:panels:list', 'runpane:panels:submit']);
-    assert.equal(decodeBoundary(host.delivered[1]!.args[0], boundary.object({ panelId: boundary.string })).panelId, 'orch-1');
+    const submitted = decodeBoundary(host.delivered[1]!.args[0], boundary.object({ panelId: boundary.string, idempotencyKey: boundary.string }));
+    assert.equal(submitted.panelId, 'orch-1');
+    assert.match(submitted.idempotencyKey, /^runpane-cli:/);
   });
 
   it('says a plain unreachable host cannot be woken', async () => {

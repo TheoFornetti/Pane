@@ -44,7 +44,7 @@ export const DEFAULT_PANE_SOURCE: PaneSource = { kind: 'runpane-npm', spec: 'run
  * The `cloud` field on a saved remote host profile (final-plan S2). Single writer: the CLI at
  * creation, then the coordinator; `version` goes up whenever the address changes.
  */
-export interface CloudProfileInfo {
+interface CloudProfileInfo {
   provider: 'boat';
   sandboxId: string;
   sessionId: string;
@@ -64,7 +64,7 @@ export interface CloudHostProfile {
   cloud: CloudProfileInfo;
 }
 
-export interface CloudHostMeta {
+interface CloudHostMeta {
   createdAt: string;
   size: CloudSize;
   namePrefix: string;
@@ -97,7 +97,7 @@ export interface CloudStore {
   readPairing(hostname: string): Promise<string>;
 }
 
-export function defaultCloudDir(env: NodeJS.ProcessEnv = process.env): string {
+function defaultCloudDir(env: NodeJS.ProcessEnv = process.env): string {
   if (env.RUNPANE_CLOUD_DIR) return path.resolve(env.RUNPANE_CLOUD_DIR);
   const configHome = env.XDG_CONFIG_HOME ? path.resolve(env.XDG_CONFIG_HOME) : path.join(os.homedir(), '.config');
   return path.join(configHome, 'runpane-cloud');
@@ -158,7 +158,7 @@ export function createCloudStore(dir: string = defaultCloudDir()): CloudStore {
 }
 
 /** Writes JSON through a 0600 temp file and a rename, creating parent dirs 0700. */
-export async function writePrivateJson(filePath: string, value: CloudCredentials | CloudSettings | CloudHostRecord): Promise<void> {
+async function writePrivateJson(filePath: string, value: CloudCredentials | CloudSettings | CloudHostRecord): Promise<void> {
   await ensurePrivateDir(path.dirname(filePath));
   const tmp = `${filePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   await fs.writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
@@ -166,12 +166,12 @@ export async function writePrivateJson(filePath: string, value: CloudCredentials
   await fs.rename(tmp, filePath);
 }
 
-export async function ensurePrivateDir(dir: string): Promise<void> {
+async function ensurePrivateDir(dir: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   await fs.chmod(dir, 0o700);
 }
 
-export async function readJsonFile<Value>(filePath: string): Promise<Value | undefined> {
+async function readJsonFile<Value>(filePath: string): Promise<Value | undefined> {
   let text: string;
   try {
     text = await fs.readFile(filePath, 'utf8');

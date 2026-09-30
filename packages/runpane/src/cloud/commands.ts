@@ -41,7 +41,7 @@ export interface CloudDeps {
  * awake = running and /health answers; asleep = stopped; waking = starting or /health not up yet;
  * daemon-down = running but /health does not answer; lost = the provider no longer has it.
  */
-export type CloudHostStatus = 'awake' | 'asleep' | 'waking' | 'stopping' | 'daemon-down' | 'lost';
+type CloudHostStatus = 'awake' | 'asleep' | 'waking' | 'stopping' | 'daemon-down' | 'lost';
 
 const SANDBOX_READY_TIMEOUT_MS = 180_000;
 const STOP_TIMEOUT_MS = 120_000;
@@ -313,7 +313,7 @@ async function countLiveSandboxes(provider: CloudProvider, records: readonly Clo
     && sandbox.state !== 'gone').length;
 }
 
-export function randomSessionId(): string {
+function randomSessionId(): string {
   const bytes = randomBytes(10);
   let id = '';
   for (const byte of bytes) id += SESSION_ID_ALPHABET[byte % SESSION_ID_ALPHABET.length];

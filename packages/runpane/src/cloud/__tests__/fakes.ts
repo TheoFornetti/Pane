@@ -13,12 +13,12 @@ import { createCloudStore } from '../store';
  * Nothing here talks to the network.
  */
 
-export interface FakeSandbox extends CloudSandbox {
+interface FakeSandbox extends CloudSandbox {
   /** States still to pass through, one per `get` call, before `state` settles. */
   pending: CloudSandbox['state'][];
 }
 
-export interface FakeWorld {
+interface FakeWorld {
   sandboxes: Map<string, FakeSandbox>;
   devices: TailnetDevice[];
   calls: string[];
@@ -27,11 +27,11 @@ export interface FakeWorld {
   failProvision?: string;
 }
 
-export function createFakeWorld(): FakeWorld {
+function createFakeWorld(): FakeWorld {
   return { sandboxes: new Map(), devices: [], calls: [], scripts: [], healthy: new Set() };
 }
 
-export function createFakeProvider(world: FakeWorld): CloudProvider {
+function createFakeProvider(world: FakeWorld): CloudProvider {
   let counter = 0;
   const createdByKey = new Map<string, string>();
   const need = (id: string): FakeSandbox => {
@@ -117,7 +117,7 @@ export function createFakeProvider(world: FakeWorld): CloudProvider {
   };
 }
 
-export function createFakeTailnet(world: FakeWorld): TailnetPort {
+function createFakeTailnet(world: FakeWorld): TailnetPort {
   return {
     async findDevicesByHostname(hostname) {
       return world.devices.filter((device) => device.hostname === hostname).map((device) => ({ ...device }));
@@ -129,7 +129,7 @@ export function createFakeTailnet(world: FakeWorld): TailnetPort {
   };
 }
 
-export function createFakeBootstrap(world: FakeWorld): BootstrapPort {
+function createFakeBootstrap(world: FakeWorld): BootstrapPort {
   return {
     cloudHostname: (sessionId, prefix) => `${prefix}-${sessionId.slice(0, 8)}`,
     createTailnet: () => createFakeTailnet(world),

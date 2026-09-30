@@ -21,7 +21,7 @@ import {
  * - `idle` means ready; `archived` means stopped.
  */
 
-export const BOAT_API_BASE_URL = 'https://boat.dev/api/v1';
+const BOAT_API_BASE_URL = 'https://boat.dev/api/v1';
 const MAX_COMMAND_TIMEOUT_SECONDS = 600;
 const SCRIPT_DIR = '/home/user/.runpane-cloud';
 const RETRY_DELAYS_MS = [500, 1_500, 4_000];

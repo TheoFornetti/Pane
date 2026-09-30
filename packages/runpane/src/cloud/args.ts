@@ -1,7 +1,7 @@
 import { CLOUD_SIZES, type CloudSize } from './provider';
 
-export const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'destroy', 'pair', 'sync', 'coordinator'] as const;
-export type CloudSubcommand = typeof CLOUD_SUBCOMMANDS[number];
+const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'destroy', 'pair', 'sync', 'coordinator'] as const;
+type CloudSubcommand = typeof CLOUD_SUBCOMMANDS[number];
 
 /** Subcommands that act on one host, named by a positional argument or --host. */
 const HOST_SUBCOMMANDS = new Set<CloudSubcommand>(['status', 'stop', 'wake', 'destroy', 'pair']);
@@ -98,7 +98,7 @@ const ALLOWED = {
   coordinator: [],
 } satisfies Record<CloudSubcommand, readonly string[]>;
 
-export function isCloudSubcommand(value: string | undefined): value is CloudSubcommand {
+function isCloudSubcommand(value: string | undefined): value is CloudSubcommand {
   return CLOUD_SUBCOMMANDS.some((name) => name === value);
 }
 

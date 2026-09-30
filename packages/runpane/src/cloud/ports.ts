@@ -35,7 +35,7 @@ export interface ProvisionRequest {
   onStep?: (step: string) => void;
 }
 
-export interface ProvisionOutcome {
+interface ProvisionOutcome {
   hostname: string;
   magicDnsName: string;
   nodeId: string;
@@ -45,7 +45,7 @@ export interface ProvisionOutcome {
   timings: Partial<Record<string, number>>;
 }
 
-export interface HealthResult {
+interface HealthResult {
   ok: boolean;
   status?: number;
   elapsedMs: number;
@@ -59,4 +59,4 @@ export interface BootstrapPort {
   createTailnet(credentials: TailnetCredentials): TailnetPort;
 }
 
-export type TailnetCredentials = NonNullable<CloudCredentials['tailscale']>;
+type TailnetCredentials = NonNullable<CloudCredentials['tailscale']>;

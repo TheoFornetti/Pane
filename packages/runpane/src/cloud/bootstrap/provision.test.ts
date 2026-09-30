@@ -209,7 +209,9 @@ test('provisionSandbox runs every step in order and writes the pairing file 0600
   assert.equal(fs.statSync(coordPath).mode & 0o777, 0o600);
   assert.ok(seen.includes('health:done'));
   // The clone is registered with the daemon once it is healthy, so `panes create --repo app` works.
-  assert.deepEqual(seen.slice(-4), ['health:start', 'health:done', 'register-repo:start', 'register-repo:done']);
+  assert.deepEqual(seen.slice(-6), [
+    'health:start', 'health:done', 'serve-guard:start', 'serve-guard:done', 'register-repo:start', 'register-repo:done',
+  ]);
   assert.equal(invoke.requests.length, 1);
   assert.equal(invoke.requests[0].url, 'https://rp-k3j9x0q2.tailnet-example.ts.net/invoke');
   assert.equal(invoke.requests[0].headers.Authorization, `Bearer ${PAIRING_TOKEN}`);

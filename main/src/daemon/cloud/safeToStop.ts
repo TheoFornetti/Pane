@@ -32,20 +32,20 @@ export interface SafeToStopRunningCommand {
   command: string;
 }
 
-export interface SafeToStopLock {
+interface SafeToStopLock {
   name: string;
   ownerLabel?: string;
   paneId?: string;
   panelId?: string;
 }
 
-export interface SafeToStopWatcher {
+interface SafeToStopWatcher {
   channel: string;
   inFlight: number;
   lastFinishedAt?: number;
 }
 
-export interface SafeToStopPendingPr {
+interface SafeToStopPendingPr {
   paneId: string;
   prNumber: number;
 }

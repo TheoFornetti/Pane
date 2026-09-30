@@ -161,7 +161,7 @@ const DEFAULTS: Omit<ParsedArgs, 'command'> = {
 };
 
 export function parseRunpaneArgs(argv: string[]): ParsedArgs {
-  const args = [...argv];
+  const args = moveLeadingTargetFlags(argv);
   const first = args[0];
 
   if (!first || first === '-h' || first === '--help') {
@@ -364,6 +364,23 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
 
     throw new Error(`Unknown option for ${parsed.command}: ${arg}`);
   }
+}
+
+const TARGET_FLAGS = new Set(['--host', '--thread']);
+
+/**
+ * `runpane --host B panels list` reads like `ssh host cmd`, so a leading
+ * --host/--thread pair moves behind the command, where it parses as a local
+ * flag (commands that take no target still reject it).
+ */
+function moveLeadingTargetFlags(argv: string[]): string[] {
+  const leading: string[] = [];
+  let index = 0;
+  while (TARGET_FLAGS.has(argv[index] ?? '') && argv[index + 1] !== undefined) {
+    leading.push(argv[index]!, argv[index + 1]!);
+    index += 2;
+  }
+  return [...argv.slice(index), ...leading];
 }
 
 function matchCommand(args: string[]): { name: string; tokens: string[] } | undefined {

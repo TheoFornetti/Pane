@@ -1,0 +1,401 @@
+name: Runpane Cloud desktop test build (fork)
+
+# Fork-only. Builds the Pane desktop for Windows (x64) and macOS (arm64, x64) as
+# an unsigned SIDE-BY-SIDE test build and publishes it as the fork PRERELEASE
+# rc-desktop-<sha8>. It never publishes to upstream channels and uses no signing
+# secrets.
+#
+# A side-by-side build carries `paneSideBySide` in its packaged package.json
+# (main/src/utils/sideBySide.ts): its data and Chromium profile live in
+# ~/.pane_cloudtest, it keeps its own single-instance lock, and it never registers
+# a login item, a pane:// handler, agent MCP servers or skills, or checks for
+# updates. It runs next to an installed Pane without touching it; each platform
+# job proves that against the released Pane installed on the runner.
+on:
+  push:
+    branches:
+      - rc/p2/p2-desktop-builds
+    paths:
+      - .github/workflows/rc-desktop.yml
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or SHA to build (default the branch the workflow runs from)
+        type: string
+        default: ''
+      macos:
+        description: Also build macOS
+        type: boolean
+        default: true
+      proof_tag:
+        description: Only rerun the relay kit proof against this existing rc-desktop-<sha8> prerelease
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc-desktop-${{ inputs.ref || github.ref }}-${{ inputs.proof_tag }}
+  cancel-in-progress: false
+
+env:
+  SIDE_BY_SIDE_NAME: cloudtest
+  # The released Pane the smoke runs beside (Red's installed version).
+  INSTALLED_RELEASE: v2.4.141
+  # Never sign, whatever the runner has.
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  CSC_DISABLE: 'true'
+
+jobs:
+  meta:
+    name: Version and checks
+    if: github.repository != 'greenfield-inc/Pane'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      sha: ${{ steps.meta.outputs.sha }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ inputs.ref || github.sha }}
+
+    - id: meta
+      name: Version = <pkg>-rc.<commit UTC time>.g<sha8> (as scripts/cloud-dist)
+      run: |
+        set -euo pipefail
+        sha=$(git rev-parse HEAD)
+        stamp=$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d%H%M%S HEAD)
+        version="$(node -p 'require("./package.json").version')-rc.${stamp}.g${sha:0:8}"
+        { echo "sha=$sha"; echo "version=$version"; echo "tag=rc-desktop-${sha:0:8}"; } >> "$GITHUB_OUTPUT"
+        echo "Building $version from $sha" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    - name: Typecheck main
+      run: pnpm --filter main typecheck
+
+    - name: Side-by-side unit tests
+      run: CI=1 pnpm --filter main exec vitest run src/utils/sideBySide.test.ts src/utils/appDirectory.test.ts
+
+  windows:
+    name: Windows x64
+    needs: meta
+    if: ${{ !inputs.proof_tag }}
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ needs.meta.outputs.sha }}
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install
+
+    - name: Build (unpacked, unsigned, side-by-side)
+      shell: bash
+      run: >-
+        node scripts/build-win.js x64 --
+        -c.win.target=dir
+        -c.appId=com.dcouple.pane.${{ env.SIDE_BY_SIDE_NAME }}
+        -c.extraMetadata.version=${{ needs.meta.outputs.version }}
+        -c.extraMetadata.paneSideBySide=${{ env.SIDE_BY_SIDE_NAME }}
+
+    - name: Package zip
+      shell: pwsh
+      run: |
+        $name = "Pane-CloudTest-${{ needs.meta.outputs.version }}-Windows-x64"
+        New-Item -ItemType Directory -Force -Path release | Out-Null
+        Move-Item dist-electron\win-unpacked "dist-electron\$name"
+        Push-Location dist-electron
+        7z a -tzip -mx=7 "..\release\$name.zip" $name | Select-Object -Last 3
+        Pop-Location
+        Move-Item "dist-electron\$name" dist-electron\win-unpacked
+        Get-ChildItem release
+
+    - name: Download the released Pane for the side-by-side smoke
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: gh release download $env:INSTALLED_RELEASE --repo greenfield-inc/Pane --pattern "Pane-*-Windows-x64.exe" --dir installed
+
+    - name: Side-by-side smoke
+      shell: pwsh
+      run: |
+        $setup = (Get-ChildItem installed\*.exe | Select-Object -First 1).FullName
+        scripts\cloud-dist\desktop-side-by-side-smoke.ps1 -TestExe "$PWD\dist-electron\win-unpacked\Pane.exe" `
+          -ExpectedVersion "${{ needs.meta.outputs.version }}" -InstalledSetup $setup `
+          -SideBySideName $env:SIDE_BY_SIDE_NAME -OutDir smoke-windows
+
+    - uses: actions/upload-artifact@v7
+      if: always()
+      with:
+        name: smoke-windows
+        path: smoke-windows
+        if-no-files-found: warn
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: desktop-windows
+        path: release/*.zip
+        if-no-files-found: error
+        retention-days: 14
+
+  macos:
+    name: macOS arm64 + x64
+    needs: meta
+    # inputs.macos is null on push, and Actions compares null == false.
+    if: github.event_name != 'workflow_dispatch' || (inputs.macos && !inputs.proof_tag)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ needs.meta.outputs.sha }}
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install
+
+    - name: Build (unpacked, unsigned, side-by-side)
+      run: |
+        set -euo pipefail
+        pnpm run build:frontend
+        pnpm run build:main
+        pnpm run inject-build-info
+        pnpm run generate-notices
+        node scripts/configure-build.js
+        # A separate bundle id: macOS would otherwise bring the installed Pane
+        # forward instead of opening this one.
+        pnpm exec electron-builder --mac dir --arm64 --x64 --publish never \
+          -c.appId=com.dcouple.pane.${SIDE_BY_SIDE_NAME} \
+          -c.extraMetadata.version=${{ needs.meta.outputs.version }} \
+          -c.extraMetadata.paneSideBySide=${SIDE_BY_SIDE_NAME}
+        node scripts/verify-mac-universal-binaries.js
+
+    - name: Ad-hoc sign and zip
+      run: |
+        set -euo pipefail
+        mkdir -p release
+        for pair in "mac-arm64:arm64" "mac:x64"; do
+          dir=${pair%%:*}; arch=${pair##*:}
+          stage="stage-$arch"
+          mkdir -p "$stage"
+          ditto "dist-electron/$dir/Pane.app" "$stage/Pane Cloud Test.app"
+          # Unsigned arm64 apps do not start at all; an ad-hoc signature is enough.
+          codesign --force --deep --sign - "$stage/Pane Cloud Test.app"
+          codesign --verify --deep --strict "$stage/Pane Cloud Test.app"
+          ditto -c -k --keepParent "$stage/Pane Cloud Test.app" \
+            "release/Pane-CloudTest-${{ needs.meta.outputs.version }}-macOS-$arch.zip"
+        done
+        ls -la release
+
+    - name: Side-by-side smoke (arm64)
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        gh release download "$INSTALLED_RELEASE" --repo greenfield-inc/Pane --pattern 'Pane-*-macOS-arm64.zip' --dir installed
+        mkdir -p smoke-app && ditto -x -k release/*-macOS-arm64.zip smoke-app
+        bash scripts/cloud-dist/desktop-side-by-side-smoke-mac.sh "$PWD/smoke-app/Pane Cloud Test.app" \
+          "${{ needs.meta.outputs.version }}" installed/*.zip "$SIDE_BY_SIDE_NAME" smoke-macos
+
+    - uses: actions/upload-artifact@v7
+      if: always()
+      with:
+        name: smoke-macos
+        path: smoke-macos
+        if-no-files-found: warn
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: desktop-macos
+        path: release/*.zip
+        if-no-files-found: error
+        retention-days: 14
+
+  release:
+    name: Publish fork prerelease rc-desktop-<sha8>
+    needs: [meta, windows, macos]
+    if: >-
+      always() &&
+      github.repository != 'greenfield-inc/Pane' &&
+      needs.windows.result == 'success' &&
+      (needs.macos.result == 'success' || needs.macos.result == 'skipped')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ needs.meta.outputs.sha }}
+
+    - uses: actions/download-artifact@v7
+      with:
+        pattern: desktop-*
+        path: release
+        merge-multiple: true
+
+    # The relay kit: the scripts that install the test build, save a cloud host into its data dir from
+    # a pairing file and drive it with Playwright (scripts/cloud-dist/sobeck), plus playwright-core at
+    # the repo's version. The test build's Pane.exe runs it as Node, so the target needs no Node.
+    - name: Build the relay kit
+      env:
+        VERSION: ${{ needs.meta.outputs.version }}
+      run: |
+        set -euo pipefail
+        playwright=$(grep -m1 -oE "^  '@playwright/test@[0-9.]+'" pnpm-lock.yaml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+        kit=kit/relay-kit
+        mkdir -p "$kit"
+        cp scripts/cloud-dist/sobeck/{install.ps1,run-proof.ps1,remove.ps1,seed-profile.cjs,proof.mjs} "$kit/"
+        (cd "$kit" && echo '{"private":true}' > package.json && npm install --no-audit --no-fund --no-package-lock "playwright-core@$playwright")
+        (cd kit && zip -qr "../release/Pane-CloudTest-relay-kit-$VERSION.zip" relay-kit)
+        cp scripts/cloud-dist/sobeck/install.ps1 release/sobeck-install.ps1
+
+    - name: Publish prerelease
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        TAG: ${{ needs.meta.outputs.tag }}
+        SHA: ${{ needs.meta.outputs.sha }}
+        VERSION: ${{ needs.meta.outputs.version }}
+      run: |
+        set -euo pipefail
+        case "$REPO" in greenfield-inc/*) echo "refusing to publish to $REPO" >&2; exit 1 ;; esac
+        cd release
+        rm -f SHA256SUMS.txt
+        sha256sum -- * > SHA256SUMS.txt
+        cat SHA256SUMS.txt
+        NOTES="Unsigned SIDE-BY-SIDE desktop test build of ${SHA} (Runpane Cloud fork), built by GitHub Actions run ${GITHUB_RUN_ID}. Not an upstream release; it never updates itself.
+        Version: ${VERSION}
+        It keeps its data in ~/.pane_${SIDE_BY_SIDE_NAME} and runs next to an installed Pane without touching it. Remove it by deleting its folder and ~/.pane_${SIDE_BY_SIDE_NAME}.
+        Windows: unzip, run Pane.exe inside the folder (SmartScreen: More info, then Run anyway).
+        macOS: unzip, then right-click Pane Cloud Test.app and choose Open (or xattr -dr com.apple.quarantine on it)."
+        if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+          gh release upload "$TAG" --repo "$REPO" --clobber -- *
+        else
+          gh release create "$TAG" --repo "$REPO" --prerelease --target "$SHA" \
+            --title "Pane desktop side-by-side test build ${SHA:0:8}" --notes "$NOTES" -- *
+        fi
+        echo "https://github.com/${REPO}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
+
+  # Runs the relay's scripts on a Windows runner against the published prerelease: download + verify +
+  # unpack (install.ps1), save a host from a pairing file (seed-profile.cjs), drive the app (proof.mjs).
+  # The runner has no tailnet, so a real headless Pane daemon on loopback stands in for the cloud
+  # Session (ci-fake-host.ps1) and Claude's reply is skipped. The released Pane runs throughout and must
+  # be left untouched.
+  relay-proof:
+    name: Relay kit proof (Windows)
+    needs: [meta, release]
+    if: always() && needs.meta.result == 'success' && (needs.release.result == 'success' || inputs.proof_tag)
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ needs.meta.outputs.sha }}
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Build the runpane CLI (fake host setup only)
+      run: |
+        pnpm install --filter runpane --ignore-scripts
+        pnpm --filter runpane build
+
+    - name: Install and start the released Pane
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release download $env:INSTALLED_RELEASE --repo greenfield-inc/Pane --pattern "Pane-*-Windows-x64.exe" --dir installed
+        Start-Process -FilePath (Get-ChildItem installed\*.exe)[0].FullName -ArgumentList '/S' -Wait
+        Start-Process "$env:LOCALAPPDATA\Programs\Pane\Pane.exe"
+        $deadline = (Get-Date).AddSeconds(180)
+        while ((Get-Date) -lt $deadline -and -not (Get-ChildItem -File "$HOME\.pane" -ErrorAction SilentlyContinue)) { Start-Sleep 2 }
+        Start-Sleep 15
+        New-Item -ItemType Directory -Force relay-evidence | Out-Null
+        (Get-ChildItem -Force "$HOME\.pane").Name | Sort-Object | Set-Content relay-evidence\installed-before.txt
+        (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' | Out-String) + (Get-ItemProperty 'HKCU:\Software\Classes\pane\shell\open\command' -ErrorAction SilentlyContinue | Out-String) | Set-Content relay-evidence\registry-before.txt
+
+    - name: install.ps1 from the prerelease
+      shell: pwsh
+      env:
+        TAG: ${{ inputs.proof_tag || needs.meta.outputs.tag }}
+      run: |
+        $base = "https://github.com/${{ github.repository }}/releases/download/$env:TAG"
+        Invoke-WebRequest -UseBasicParsing "$base/sobeck-install.ps1" -OutFile sobeck-install.ps1
+        $sums = (Invoke-WebRequest -UseBasicParsing "$base/SHA256SUMS.txt").Content
+        if ($sums -is [byte[]]) { $sums = [Text.Encoding]::UTF8.GetString($sums) }
+        function Sum($pattern) { (($sums -split "`n" | Where-Object { $_ -match $pattern }) -split '\s+')[0] }
+        powershell -NoProfile -ExecutionPolicy Bypass -File sobeck-install.ps1 -Tag $env:TAG -Repo ${{ github.repository }} `
+          -AppSha256 (Sum '-Windows-x64\.zip') -KitSha256 (Sum 'relay-kit')
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        # A wrong hash must stop the install.
+        powershell -NoProfile -ExecutionPolicy Bypass -File sobeck-install.ps1 -Tag $env:TAG -Repo ${{ github.repository }} `
+          -AppSha256 ('0' * 64) -KitSha256 (Sum 'relay-kit') -Root "$HOME\PaneCloudTest-badhash"
+        if ($LASTEXITCODE -eq 0 -or (Test-Path "$HOME\PaneCloudTest-badhash\app")) { Write-Error 'install.ps1 accepted a wrong hash'; exit 1 }
+        Write-Host 'PASS install.ps1 refuses a wrong hash'
+        exit 0
+
+    - name: Use this checkout's kit scripts (proof_tag reruns only)
+      if: inputs.proof_tag
+      shell: pwsh
+      run: Copy-Item scripts\cloud-dist\sobeck\* "$HOME\PaneCloudTest\kit\" -Force -Exclude ci-fake-host.ps1
+
+    # One step: a daemon started in an earlier step does not reliably outlive it on Windows runners.
+    - name: Fake cloud host, then run-proof.ps1 (seed from the pairing file, drive the app)
+      shell: pwsh
+      run: |
+        scripts\cloud-dist\sobeck\ci-fake-host.ps1 -Exe "$HOME\PaneCloudTest\app\Pane.exe" `
+          -PairingFile "$HOME\PaneCloudTest\pairing.txt" -RunpaneCli "$PWD\packages\runpane\dist\cli.js"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\PaneCloudTest\kit\run-proof.ps1" `
+          -OutDir "$PWD\relay-evidence\proof" -NoClaudeReply -HostnamePrefix $env:COMPUTERNAME
+        $code = $LASTEXITCODE
+        # The pairing token must not appear in anything the proof wrote.
+        $token = (Get-Content "$HOME\.pane_cloudtest\config.json" -Raw | ConvertFrom-Json).remoteDaemon.client.profiles[0].token
+        if (-not $token) { Write-Error 'no saved profile token to search for'; exit 1 }
+        $leaks = @(Get-ChildItem -Recurse -File relay-evidence | Select-String -SimpleMatch $token -List)
+        if ($leaks.Count -gt 0) { Write-Error "token found in: $(($leaks | ForEach-Object Filename) -join ', ')"; exit 1 }
+        Write-Host 'PASS no pairing token in the evidence'
+        exit $code
+
+    - name: The released Pane was left alone
+      if: always()
+      shell: pwsh
+      run: |
+        $failed = $false
+        # Logs for diagnosis (never config.json, which holds the saved token).
+        New-Item -ItemType Directory -Force relay-evidence\logs | Out-Null
+        Copy-Item -Recurse -ErrorAction SilentlyContinue "$HOME\.pane_cloudtest\logs" relay-evidence\logs\test-app
+        Copy-Item -Recurse -ErrorAction SilentlyContinue C:\rc-fake-host\logs relay-evidence\logs\fake-host
+        Copy-Item -ErrorAction SilentlyContinue C:\rc-fake-host\daemon.*.txt relay-evidence\logs\
+        (Get-ChildItem -Force "$HOME\.pane").Name | Sort-Object | Set-Content relay-evidence\installed-after.txt
+        (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' | Out-String) + (Get-ItemProperty 'HKCU:\Software\Classes\pane\shell\open\command' -ErrorAction SilentlyContinue | Out-String) | Set-Content relay-evidence\registry-after.txt
+        $added = Compare-Object (Get-Content relay-evidence\installed-before.txt) (Get-Content relay-evidence\installed-after.txt) | Where-Object SideIndicator -eq '=>'
+        if ($added) { Write-Host "FAIL new entries in ~\.pane: $($added.InputObject -join ', ')"; $failed = $true } else { Write-Host 'PASS ~\.pane has no new entries' }
+        if ((Get-Content -Raw relay-evidence\registry-before.txt) -ne (Get-Content -Raw relay-evidence\registry-after.txt)) { Write-Host 'FAIL login item or pane:// handler changed'; $failed = $true } else { Write-Host 'PASS login item and pane:// handler unchanged' }
+        $installedExe = "$env:LOCALAPPDATA\Programs\Pane\Pane.exe"
+        if (Get-Process -Name Pane -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $installedExe }) { Write-Host 'PASS released Pane still running' } else { Write-Host 'FAIL released Pane not running'; $failed = $true }
+        powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\PaneCloudTest\kit\remove.ps1"
+        if ((Test-Path "$HOME\PaneCloudTest") -or (Test-Path "$HOME\.pane_cloudtest")) { Write-Host 'FAIL remove.ps1 left files'; $failed = $true } else { Write-Host 'PASS remove.ps1 removed the test build and its data' }
+        if (Test-Path $installedExe) { Write-Host 'PASS released Pane still installed after remove.ps1' } else { Write-Host 'FAIL released Pane gone'; $failed = $true }
+        if ($failed) { exit 1 }
+
+    - uses: actions/upload-artifact@v7
+      if: always()
+      with:
+        name: relay-proof
+        path: relay-evidence
+        if-no-files-found: warn

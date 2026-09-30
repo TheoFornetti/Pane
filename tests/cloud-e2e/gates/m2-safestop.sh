@@ -144,6 +144,6 @@ expect cond.user-client-attached.invoke invoke user-client-attached
 g=$(ss window '[{"flush":"never","recentOutputMs":10000,"clientWindowMs":1}]')
 [[ ",$g," != *",user-client-attached,"* ]] && rec user-client-window PASS "outside the client window the user client no longer blocks (now: $g)" "$E2E_RUN_DIR/ss-window.json" \
   || rec user-client-window FAIL "still blocked with clientWindowMs=1" "$E2E_RUN_DIR/ss-window.json"
-cli=$(sbx "$SB_ID" 60 <<<'/home/user/rcl/rp cloud safe-to-stop --flush never --json 2>&1; echo "exit=$?"'); printf '%s\n' "$cli" | ev cli-safe-to-stop.txt >/dev/null
+cli=$(sbx "$SB_ID" 60 <<<'/home/user/rcl/rp cloud safe-to-stop --dry-run --json 2>&1; echo "exit=$?"'); printf '%s\n' "$cli" | ev cli-safe-to-stop.txt >/dev/null
 if grep -q '^exit=3' <<<"$cli" && grep -q '"safe": *false' <<<"$cli"; then rec cli-exit-code PASS "in-sandbox 'runpane cloud safe-to-stop' exit 3 with safe:false while blocked" "$E2E_RUN_DIR/cli-safe-to-stop.txt"
 else rec cli-exit-code FAIL "unexpected CLI result: $(tail -c 200 <<<"$cli")" "$E2E_RUN_DIR/cli-safe-to-stop.txt"; fi

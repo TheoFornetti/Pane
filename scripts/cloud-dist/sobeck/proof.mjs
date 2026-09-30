@@ -66,6 +66,22 @@ const check = (name, verdict, detail) => {
 };
 const pass = (name, ok, detail) => check(name, ok ? 'PASS' : 'FAIL', detail);
 
+// App console lines go to app-console.log for diagnosis, with every saved host token redacted.
+const secrets = (() => {
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(paneDir, 'config.json'), 'utf8'));
+    return (config.remoteDaemon?.client?.profiles ?? []).map((profile) => profile.token).filter(Boolean);
+  } catch {
+    return [];
+  }
+})();
+const redact = (text) => secrets.reduce((current, secret) => current.split(secret).join('<redacted>'), text);
+const appLog = (source, text) => {
+  for (const line of String(text).split(/\r?\n/)) {
+    if (line.trim()) fs.appendFileSync(path.join(out, 'app-console.log'), `${new Date().toISOString()} [${source}] ${redact(line).slice(0, 500)}\n`);
+  }
+};
+
 const childEnv = { ...env, PANE_DIR: paneDir };
 delete childEnv.ELECTRON_RUN_AS_NODE;
 log(`launching ${paneExe} with PANE_DIR=${paneDir}; host "${hostLabel}"`);
@@ -75,7 +91,14 @@ const app = await electron.launch({
   env: childEnv,
   timeout: 120_000,
 });
+app.process().stdout?.on('data', (chunk) => appLog('main', chunk));
+app.process().stderr?.on('data', (chunk) => appLog('main:err', chunk));
 const page = await app.firstWindow();
+page.on('console', (message) => {
+  if (message.type() === 'error' || message.type() === 'warning' || /remote|connect|switch|profile/i.test(message.text())) {
+    appLog(`renderer:${message.type()}`, message.text());
+  }
+});
 let shotIndex = 0;
 const shot = async (name) => {
   const file = path.join(out, `${String(++shotIndex).padStart(2, '0')}-${name}.png`);

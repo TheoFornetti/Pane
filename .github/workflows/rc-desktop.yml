@@ -349,6 +349,11 @@ jobs:
         Write-Host 'PASS install.ps1 refuses a wrong hash'
         exit 0
 
+    - name: Use this checkout's kit scripts (proof_tag reruns only)
+      if: inputs.proof_tag
+      shell: pwsh
+      run: Copy-Item scripts\cloud-dist\sobeck\* "$HOME\PaneCloudTest\kit\" -Force -Exclude ci-fake-host.ps1
+
     - name: Fake cloud host (real headless Pane daemon on loopback)
       shell: pwsh
       run: |
@@ -374,6 +379,11 @@ jobs:
       shell: pwsh
       run: |
         $failed = $false
+        # Logs for diagnosis (never config.json, which holds the saved token).
+        New-Item -ItemType Directory -Force relay-evidence\logs | Out-Null
+        Copy-Item -Recurse -ErrorAction SilentlyContinue "$HOME\.pane_cloudtest\logs" relay-evidence\logs\test-app
+        Copy-Item -Recurse -ErrorAction SilentlyContinue C:\rc-fake-host\logs relay-evidence\logs\fake-host
+        Copy-Item -ErrorAction SilentlyContinue C:\rc-fake-host\daemon.*.txt relay-evidence\logs\
         (Get-ChildItem -Force "$HOME\.pane").Name | Sort-Object | Set-Content relay-evidence\installed-after.txt
         (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' | Out-String) + (Get-ItemProperty 'HKCU:\Software\Classes\pane\shell\open\command' -ErrorAction SilentlyContinue | Out-String) | Set-Content relay-evidence\registry-after.txt
         $added = Compare-Object (Get-Content relay-evidence\installed-before.txt) (Get-Content relay-evidence\installed-after.txt) | Where-Object SideIndicator -eq '=>'

@@ -21,7 +21,7 @@ export interface GitHubRepoInfo {
   admin: boolean;
 }
 
-export interface GitHubDeployKey {
+interface GitHubDeployKey {
   id: number;
   title: string;
   readOnly: boolean;
@@ -84,14 +84,14 @@ const metaSchema = boundary.object({ ssh_keys: boundary.array(boundary.nonEmptyS
 
 const errorSchema = boundary.object({ message: boundary.optional(boundary.string) });
 
-export class GitHubApiError extends Error {
+class GitHubApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
     this.name = 'GitHubApiError';
   }
 }
 
-export function createGitHubApi(token: string, fetchImpl: typeof fetch = fetch): GitHubApi {
+function createGitHubApi(token: string, fetchImpl: typeof fetch = fetch): GitHubApi {
   async function request(method: 'GET' | 'POST' | 'DELETE', route: string, body?: Record<string, string | boolean>, okStatuses = [200, 201, 204]) {
     const headers = new Headers({
       Authorization: `Bearer ${token}`,

@@ -139,7 +139,10 @@ async function collectTerminalStream() {
     });
   }).catch(() => undefined);
 }
-const stripAnsi = (text) => text.replace(/\u001b\[[0-9;?]*[ -\/]*[@-~]|\u001b\][^\u0007\u001b]*(\u0007|\u001b\\)|\u001b[@-Z\\-_]/g, '');
+const ESC = String.fromCharCode(27);
+const BEL = String.fromCharCode(7);
+const ANSI = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]|${ESC}\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)|${ESC}[@-Z\\\\-_]`, 'g');
+const stripAnsi = (text) => text.replace(ANSI, '');
 const streamText = async () => stripAnsi(await page.evaluate(() => window.__proofStream ?? '').catch(() => ''));
 const domText = () => page.evaluate(() => [...document.querySelectorAll('.xterm-rows')].map((rows) => rows.textContent ?? '').join('\n'));
 const terminalText = async () => `${await domText()}\n${await streamText()}`;

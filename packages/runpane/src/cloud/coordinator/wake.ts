@@ -33,6 +33,7 @@ type WakeFailureCode =
   | 'directory-unreadable'
   | 'runaway-guard'
   | 'wake-rate-limited'
+  | 'peer-wake-refused'
   | 'provider-rate-limited'
   | 'provider-error';
 
@@ -58,11 +59,26 @@ export interface WakeOptions {
   upgradeTimeoutMs: number;
 }
 
+/** Who asked for a wake: the laptop CLI (`user:*`) or another cloud Session (its session id). */
+export interface WakeCaller {
+  role: 'user' | 'peer';
+  id: string;
+}
+
+/**
+ * Resumes one peer may cause per rolling hour, on top of the account-wide runaway guard. boat's
+ * start limit is account-wide, so without it one peer could spend the whole hour's starts.
+ */
+export const PEER_RESUMES_PER_HOUR = 2;
+const PEER_RESUME_WINDOW_MS = 60 * 60_000;
+
 const STOPPING_WAIT_MS = 60_000;
 const RATE_LIMIT_BACKOFF_MS = [5_000, 10_000, 20_000, 30_000];
 
 export class WakeService {
   private readonly inflight = new Map<string, Promise<WakeResult>>();
+  /** Per peer caller: when its wakes resumed a sandbox, within the last hour. */
+  private readonly peerResumes = new Map<string, number[]>();
 
   constructor(
     private readonly deps: {
@@ -92,27 +108,29 @@ export class WakeService {
   /**
    * Wakes a host: resumes its sandbox if it is asleep and, with `wait`, returns once the daemon's
    * /health reports ready (then applies the pinned version). Concurrent wakes of one sandbox share
-   * a single resume.
+   * a single resume. Only a wake that resumed the sandbox holds idle-stop off for its grace period:
+   * a peer must not be able to keep an awake sandbox up by asking again and again.
    */
-  async wake(host: string, request: { wait: boolean; timeoutMs?: number }): Promise<WakeResult> {
+  async wake(host: string, request: { wait: boolean; timeoutMs?: number }, caller?: WakeCaller): Promise<WakeResult> {
     const resolved = await this.resolve(host);
     if (!resolved.ok) return resolved;
     const { entry } = resolved;
-    // Any wake request counts as activity: idle-stop leaves the sandbox alone for the grace period.
-    this.deps.activity.markWoken(entry.sandboxId);
+    if (caller?.role === 'peer' && caller.id === entry.sessionId) {
+      return { ok: false, code: 'peer-wake-refused', message: 'a cloud Session may not wake its own sandbox' };
+    }
     const timeoutMs = Math.min(request.timeoutMs ?? this.options.defaultTimeoutMs, this.options.maxTimeoutMs);
     const existing = this.inflight.get(entry.sandboxId);
     if (existing) {
       return request.wait ? existing : this.status(entry.sessionId);
     }
-    const run = this.runWake(entry, request.wait, timeoutMs).finally(() => {
+    const run = this.runWake(entry, request.wait, timeoutMs, caller).finally(() => {
       this.inflight.delete(entry.sandboxId);
     });
     this.inflight.set(entry.sandboxId, run);
     return run;
   }
 
-  private async runWake(entry: DirectoryEntry, wait: boolean, timeoutMs: number): Promise<WakeResult> {
+  private async runWake(entry: DirectoryEntry, wait: boolean, timeoutMs: number, caller: WakeCaller | undefined): Promise<WakeResult> {
     const deadline = this.deps.clock.now() + timeoutMs;
     let sandbox: ProviderSandbox;
     try {
@@ -122,10 +140,12 @@ export class WakeService {
       return { ok: false, code: 'provider-error', message: describeError(error) };
     }
 
+    let resumed = false;
     if (sandbox.state === 'stopped') {
       // Without wait the caller wants an answer now: one resume attempt, no rate-limit retries.
-      const resumed = await this.resume(entry, wait ? deadline : this.deps.clock.now());
-      if (resumed) return resumed;
+      const failure = await this.resume(entry, wait ? deadline : this.deps.clock.now(), caller);
+      if (failure) return failure;
+      resumed = true;
       if (!wait) return this.report(entry, 'waking', null, 'resume requested');
     } else if (sandbox.state === 'missing' || sandbox.state === 'failed') {
       return this.classify(entry, sandbox);
@@ -149,11 +169,19 @@ export class WakeService {
       last.detail = `timed out after ${timeoutMs} ms: ${last.detail}`;
       return last;
     }
-    this.deps.activity.markWoken(entry.sandboxId);
+    if (resumed) this.deps.activity.markWoken(entry.sandboxId);
     return this.applyPinnedVersion(entry, last, deadline);
   }
 
-  private async resume(entry: DirectoryEntry, retryUntil: number): Promise<WakeFailure | null> {
+  private async resume(entry: DirectoryEntry, retryUntil: number, caller: WakeCaller | undefined): Promise<WakeFailure | null> {
+    const peerWindow = caller?.role === 'peer' ? this.recentPeerResumes(caller.id) : null;
+    if (peerWindow && peerWindow.length >= PEER_RESUMES_PER_HOUR) {
+      return {
+        ok: false,
+        code: 'wake-rate-limited',
+        message: `peer ${caller?.id ?? ''} already resumed ${PEER_RESUMES_PER_HOUR} sandbox(es) this hour; ask the user to wake ${entry.label}`,
+      };
+    }
     let managed: ProviderSandbox[];
     try {
       managed = (await this.deps.provider.list()).filter((sandbox) => isManagedSandbox(sandbox, this.options));
@@ -214,6 +242,7 @@ export class WakeService {
       await this.deps.clock.sleep(backoff);
     }
     this.deps.guard.recordResume(entry.sandboxId);
+    if (caller?.role === 'peer' && peerWindow) this.peerResumes.set(caller.id, [...peerWindow, this.deps.clock.now()]);
     this.deps.activity.markWoken(entry.sandboxId);
     this.deps.alerts.emit({
       level: 'info',
@@ -223,6 +252,11 @@ export class WakeService {
       sessionId: entry.sessionId,
     });
     return null;
+  }
+
+  private recentPeerResumes(peerId: string): number[] {
+    const now = this.deps.clock.now();
+    return (this.peerResumes.get(peerId) ?? []).filter((at) => now - at < PEER_RESUME_WINDOW_MS);
   }
 
   private async waitWhileStopping(sandboxId: string): Promise<ProviderSandbox> {

@@ -5,7 +5,7 @@ import { BoatProviderError } from '../boatProvider';
 import { RunawayGuard, SandboxActivity } from '../guards';
 import { IdleStopper } from '../idleStop';
 import type { ProviderSandbox } from '../types';
-import { WakeService } from '../wake';
+import { PEER_RESUMES_PER_HOUR, WakeService } from '../wake';
 import type { WakeOptions, WakeResult } from '../wake';
 import { entry, FakeClock, FakeDirectory, FakeProbe, FakeProvider, sandbox } from './fakes';
 
@@ -196,6 +196,46 @@ describe('WakeService.wake', () => {
     noWait.provider.resumeErrors = [limited()];
     assert.equal(status(await noWait.wake.wake('s1', { wait: false })), 'error:provider-rate-limited');
     assert.equal(noWait.provider.mutations().length, 1);
+  });
+
+  it('a wake of a host that is already awake does not hold off idle-stop', async () => {
+    const { wake, provider, probe, directory, activity, alerts } = setup([sandbox('bx_a', 'running')]);
+    const idle = new IdleStopper({ directory, provider, probe, activity, alerts }, {
+      requiredConsecutiveSafe: 1,
+      wakeGraceMs: 600_000,
+      dryRun: false,
+    });
+    assert.equal(status(await wake.wake('s1', { wait: true }, { role: 'peer', id: 'peer-a' })), 'awake');
+    assert.equal(status(await wake.wake('s1', { wait: false })), 'awake');
+    assert.equal((await idle.runOnce()).results[0].decision, 'stopped');
+  });
+
+  it('refuses a peer waking its own sandbox', async () => {
+    const { wake, provider } = setup([sandbox('bx_a', 'stopped')]);
+    assert.equal(status(await wake.wake('s1', { wait: false }, { role: 'peer', id: 's1' })), 'error:peer-wake-refused');
+    assert.deepEqual(provider.mutations(), []);
+  });
+
+  it('gives each peer a small resume budget of its own, apart from user wakes', async () => {
+    const { wake, provider, clock } = setup([sandbox('bx_a', 'stopped')]);
+    const sleep = async () => {
+      await provider.get('bx_a'); // finishes the fake boot a resume left pending
+      const current = provider.sandboxes.get('bx_a');
+      if (current) current.state = 'stopped';
+    };
+    const peer = { role: 'peer' as const, id: 'peer-a' };
+    for (let attempt = 0; attempt < PEER_RESUMES_PER_HOUR; attempt += 1) {
+      assert.notEqual(status(await wake.wake('s1', { wait: false }, peer)), 'error:wake-rate-limited');
+      await sleep();
+    }
+    assert.equal(status(await wake.wake('s1', { wait: false }, peer)), 'error:wake-rate-limited');
+    assert.equal(provider.mutations().length, PEER_RESUMES_PER_HOUR);
+    // The user's own wake is not held back by a peer's budget, and the peer's budget refills.
+    assert.notEqual(status(await wake.wake('s1', { wait: false })), 'error:wake-rate-limited');
+    await sleep();
+    clock.time += 3_601_000;
+    assert.notEqual(status(await wake.wake('s1', { wait: false }, peer)), 'error:wake-rate-limited');
+    assert.equal(provider.mutations().length, PEER_RESUMES_PER_HOUR + 2);
   });
 
   it('a wake keeps idle-stop away for the grace period', async () => {

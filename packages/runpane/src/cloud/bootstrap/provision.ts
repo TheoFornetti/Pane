@@ -38,6 +38,12 @@ interface ProvisionOptions {
    */
   extraClients?: { label: string; outputPath: string; scope?: 'coordinator' }[];
   tags?: string[];
+  /**
+   * TCP ports other tailnet nodes may open on this sandbox (default [443], Tailscale Serve in front of
+   * the daemon). The tailnet policy lets rp-session nodes reach each other on every port; the host
+   * firewall narrows that. A coordinator box adds its API port.
+   */
+  tailnetTcpPorts?: number[];
   healthTimeoutMs?: number;
   sandboxHome?: string;
   fetchImpl?: typeof fetch;
@@ -128,6 +134,10 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
       return check;
     }, (value) => `${String(value.passed)} passed`);
   }
+
+  const tailnetTcpPorts = options.tailnetTcpPorts ?? [443];
+  await step('firewall', () => runner.run('firewall', [tailnetTcpPorts.join(',')], firewallStepSchema, { timeoutSeconds: 300 }),
+    (value) => `tailnet tcp ${(value.allowedTcp ?? tailnetTcpPorts).join(',')} only`);
 
   const deletedStaleNodeIds: string[] = [];
   const tailnet = await step('tailscale-join', async () => {
@@ -334,6 +344,7 @@ const checkStepSchema = boundary.object({
 const installStepSchema = boundary.object({ version: boundary.optional(boundary.nullable(boundary.string)) });
 const pairingStepSchema = boundary.object({ code: boundary.nonEmptyString });
 const cloneStepSchema = boundary.object({ head: boundary.optional(boundary.string) });
+const firewallStepSchema = boundary.object({ allowedTcp: boundary.optional(boundary.array(boundary.number)) });
 
 type TailnetStepResult = ReturnType<typeof tailnetStepSchema.decode>;
 

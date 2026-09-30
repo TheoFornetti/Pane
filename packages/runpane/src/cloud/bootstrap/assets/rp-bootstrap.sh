@@ -267,6 +267,59 @@ step_health_local() {
   result "$(python3 -c 'import json,sys;print(json.dumps({"ok":True,"listenPort":int(sys.argv[1]),"health":json.loads(sys.argv[2])}))' "$port" "$body")"
 }
 
+# firewall <tcp ports csv>: only these TCP ports (default Tailscale Serve's 443) are reachable over the tailnet.
+# The tailnet policy lets rp-session nodes reach each other on every port, which exposes the provider's own
+# in-sandbox services (desktop stream, agent service, sshd) to a compromised peer. Idempotent; the rules live
+# in /etc and a oneshot unit reloads them at boot, so they survive stop/resume (a resume is a fresh boot).
+step_firewall() {
+  local ports="${1:-443}" port elements="" nft
+  for port in ${ports//,/ }; do
+    case "$port" in ''|*[!0-9]*) fail "firewall: bad port '$port'" ;; esac
+    elements="${elements:+$elements, }$port"
+  done
+  [ -n "$elements" ] || fail "firewall: no ports"
+  if ! command -v nft >/dev/null 2>&1; then
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q nftables >"$RP_STATE/nftables-install.log" 2>&1 \
+      || fail "installing nftables failed: $(tail -2 "$RP_STATE/nftables-install.log" | tr '\n' ' ')"
+  fi
+  nft="$(command -v nft)"
+  sudo tee /etc/rp-tailnet-firewall.nft >/dev/null <<NFT
+#!$nft -f
+# Runpane Cloud: over the tailnet, only tcp {$elements} (Tailscale Serve) and replies reach this sandbox.
+table inet rp_tailnet
+delete table inet rp_tailnet
+table inet rp_tailnet {
+  chain input {
+    type filter hook input priority filter; policy accept;
+    iifname "tailscale0" ct state established,related accept
+    iifname "tailscale0" tcp dport { $elements } accept
+    iifname "tailscale0" counter drop
+  }
+}
+NFT
+  sudo tee /etc/systemd/system/rp-tailnet-firewall.service >/dev/null <<UNIT
+[Unit]
+Description=Runpane Cloud tailnet firewall (tcp $elements only over tailscale0)
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target tailscaled.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=$nft -f /etc/rp-tailnet-firewall.nft
+ExecStop=$nft delete table inet rp_tailnet
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  sudo systemctl daemon-reload
+  sudo systemctl enable rp-tailnet-firewall.service >/dev/null 2>&1 || fail "could not enable rp-tailnet-firewall.service"
+  sudo systemctl restart rp-tailnet-firewall.service || fail "rp-tailnet-firewall.service failed: $(sudo systemctl status rp-tailnet-firewall.service --no-pager 2>&1 | tail -3 | tr '\n' ' ')"
+  sudo "$nft" list table inet rp_tailnet >/dev/null 2>&1 || fail "the rp_tailnet table is not loaded"
+  result "$(python3 -c 'import json,sys;print(json.dumps({"ok":True,"allowedTcp":[int(p) for p in sys.argv[1].split(",") if p]}))' "$ports")"
+}
+
 # clone <url> <ref> <dir>: public HTTPS clone (no credentials in the sandbox). Idempotent.
 step_clone() {
   local url="$1" ref="$2" dir="$3"
@@ -296,5 +349,6 @@ case "$step" in
   pairing-read) step_pairing_read "$@" ;;
   health-local) step_health_local ;;
   clone) step_clone "$@" ;;
+  firewall) step_firewall "$@" ;;
   *) fail "unknown step '$step'" ;;
 esac

@@ -73,6 +73,7 @@ class FakeSandbox implements SandboxHandle {
   private reply(step: string, args: string[]) {
     switch (step) {
       case 'identity': return { ok: true, reset: true, machineId: 'abc' };
+      case 'firewall': return { ok: true, allowedTcp: args[0].split(',').map(Number) };
       case 'tailscale-install': return { ok: true, installed: false, backendState: 'NeedsLogin' };
       case 'tailnet-identity': return JSON.parse(this.identity());
       case 'check': return this.state.checkOk ? { ok: true, failed: [], passed: 29 } : { ok: false, failed: ['npmrc (/home/user) present'], passed: 28 };
@@ -175,13 +176,15 @@ test('provisionSandbox runs every step in order and writes the pairing file 0600
   });
 
   assert.deepEqual(sandbox.steps.map((step) => step[0]), [
-    'identity', 'tailscale-install', 'tailnet-identity', 'check', 'tailscale-up',
+    'identity', 'tailscale-install', 'tailnet-identity', 'check', 'firewall', 'tailscale-up',
     'install-pane', 'pairing-read', 'add-client', 'pairing-read', 'clone',
   ]);
-  assert.deepEqual(sandbox.steps[4].slice(2), ['rp-k3j9x0q2']);
-  assert.deepEqual(sandbox.steps[5].slice(1), ['deb-url', 'https://example.test/pane.deb', 'ff', '', 'Cloud k3j9']);
-  assert.deepEqual(sandbox.steps[7].slice(1), ['runpane-cloud-coordinator', 'runpane-cloud-coordinator', 'coordinator']);
-  assert.deepEqual(sandbox.steps[9].slice(1), ['https://github.com/example/app.git', 'main', '/home/user/app']);
+  // Only Tailscale Serve (tcp/443) may reach the sandbox over the tailnet, set up before it joins.
+  assert.deepEqual(sandbox.steps[4].slice(1), ['443']);
+  assert.deepEqual(sandbox.steps[5].slice(2), ['rp-k3j9x0q2']);
+  assert.deepEqual(sandbox.steps[6].slice(1), ['deb-url', 'https://example.test/pane.deb', 'ff', '', 'Cloud k3j9']);
+  assert.deepEqual(sandbox.steps[8].slice(1), ['runpane-cloud-coordinator', 'runpane-cloud-coordinator', 'coordinator']);
+  assert.deepEqual(sandbox.steps[10].slice(1), ['https://github.com/example/app.git', 'main', '/home/user/app']);
   assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tailnet-example.ts.net');
   assert.equal(result.baseUrl, 'https://rp-k3j9x0q2.tailnet-example.ts.net');
   assert.equal(result.nodeId, 'nNEW11CNTRL');
@@ -232,6 +235,7 @@ test('provisionSandbox skips the join when the sandbox is already on the tailnet
   });
   assert.equal(tailscale.minted.length, 0);
   assert.ok(!sandbox.steps.some((step) => step[0] === 'check' || step[0] === 'tailscale-up'));
+  assert.ok(sandbox.steps.some((step) => step[0] === 'firewall'), 'the firewall is (re)applied on a retry too');
 });
 
 test('provisionSandbox refuses a failed strip-list check, Tailscale SSH, and a suffixed name', async () => {

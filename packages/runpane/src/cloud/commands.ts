@@ -6,6 +6,8 @@ import { placeAgentCredentials } from './agentCredentials';
 import { COORDINATOR_LIFECYCLE_USAGE, isCoordinatorLifecycleCommand, runCoordinatorLifecycle } from './coordinatorDeploy';
 import { NO_COORDINATOR, pushDirectory, type CoordinatorPushResult } from './coordinatorSync';
 import { syncDesktopProfiles, type DesktopImportResult } from './desktop';
+import { connectDeployKey, deployKeyCloneUrl, parseRepoSpec, revokeGitHubGrants, runGitCommand, runGitHubCommand } from './github';
+import type { GitHubPort } from './githubApi';
 import { decodePairingCode } from './pairing';
 import { pushPeersFile, runPeersCommand } from './peers';
 import type { BootstrapPort, TailnetDevice, TailnetPort } from './ports';
@@ -61,6 +63,8 @@ export interface CloudDeps {
    * Rejects when the daemon can't answer (an older daemon, or it is down).
    */
   safeToStop?(profile: { baseUrl: string; token: string }): Promise<CloudSafeToStopAnswer>;
+  /** GitHub with the laptop's own credential, and the local git for mediated pushes. */
+  github: GitHubPort;
 }
 
 interface CoordinatorWakeResult {
@@ -109,6 +113,8 @@ export async function runCloudCommand(args: CloudArgs, deps: CloudDeps): Promise
       if (!deps.runCoordinator) throw new Error('runpane cloud coordinator is not available in this build.');
       return deps.runCoordinator(args.passthrough);
     case 'peers': return runPeersCommand(args.passthrough, deps);
+    case 'github': return runGitHubCommand(args.passthrough, deps);
+    case 'git': return runGitCommand(args.passthrough, deps);
   }
 }
 
@@ -232,6 +238,16 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const maxLive = settings.maxLiveSandboxes ?? DEFAULT_MAX_LIVE_SANDBOXES;
   const progress = (line: string) => (args.json ? deps.stderr(line) : deps.stdout(line));
 
+  // A private repository is cloned over a deploy key: check the laptop's GitHub credential can add one
+  // before a billed sandbox exists.
+  const githubRepo = args.github && args.repo ? parseRepoSpec(args.repo) : undefined;
+  const githubTokenSource = args.githubTokenFile ? { kind: 'file' as const, path: args.githubTokenFile } : { kind: 'gh' as const };
+  if (args.githubTokenFile === '-') throw new Error('new --github-token-file needs a file (the token is read more than once), not stdin.');
+  if (githubRepo) {
+    const info = await deps.github.api(await deps.github.resolveToken(githubTokenSource)).getRepo(githubRepo);
+    if (!info.admin) throw new Error(`Your GitHub credential cannot add deploy keys to ${info.fullName} (that needs admin on the repository).`);
+  }
+
   const records = await deps.store.listHosts();
   const live = await countLiveSandboxes(provider, records, namePrefix);
   if (live >= maxLive) {
@@ -286,6 +302,16 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     await waitForSandbox(provider, sandbox.id, 'running', SANDBOX_READY_TIMEOUT_MS, deps);
     timings.readyMs = deps.now() - started;
     progress(`runpane cloud: sandbox ${sandbox.id} is up; joining the tailnet and installing the Pane daemon...`);
+    let cloneRepo = record.meta.repo;
+    if (githubRepo && record.meta.repo) {
+      const grant = await connectDeployKey(record, provider.handle(sandbox.id), deps, {
+        repo: githubRepo,
+        readWrite: args.readWrite,
+        tokenSource: githubTokenSource,
+        onStep: (step) => progress(`  - ${step}`),
+      });
+      cloneRepo = { ...record.meta.repo, url: deployKeyCloneUrl(grant.repo) };
+    }
 
     const coordinatorEnabled = settings.coordinator?.enabled === true;
     const outcome = await deps.bootstrap.provision(provider.handle(sandbox.id), {
@@ -293,7 +319,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       label,
       hostname,
       paneSource,
-      repo: record.meta.repo,
+      repo: cloneRepo,
       transport: args.transport ?? settings.transport ?? 'auto',
       pairingOutputPath: record.meta.pairingPath,
       extraClients: coordinatorEnabled
@@ -335,6 +361,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     } else {
       deps.stderr(`runpane cloud: setup of ${hostname} failed; removing its tailnet device and sandbox ${sandbox.id}...`);
       try {
+        await revokeGitHubGrants(record, deps);
         await destroyHost(record, provider, deps.bootstrap.createTailnet(tailnetCredentials), deps);
         await deps.store.removeHost(hostname);
       } catch (cleanupError) {
@@ -728,6 +755,7 @@ async function runDestroy(args: CloudArgs, deps: CloudDeps): Promise<number> {
   }
   const { provider, tailnet } = await loadCloudWithTailnet(deps);
   const record = findHost(await deps.store.listHosts(), requiredHost(args));
+  const github = record.meta.github?.length ? await revokeGitHubGrants(record, deps) : undefined;
   const result = await destroyHost(record, provider, tailnet, deps);
   const desktop = await importIntoDesktop(args, deps, [], [record.profile.cloud.sessionId]);
   await deps.store.removeHost(record.profile.cloud.hostname);
@@ -737,8 +765,8 @@ async function runDestroy(args: CloudArgs, deps: CloudDeps): Promise<number> {
   report(
     args,
     deps,
-    { ok: true, host: record.profile.cloud.hostname, ...result, desktop: desktopSummary(desktop), coordinator, peers },
-    `${record.profile.cloud.hostname} destroyed: tailnet device${result.deletedNodeIds.length === 1 ? '' : 's'} ${result.deletedNodeIds.join(', ') || '(none)'} deleted, sandbox ${record.profile.cloud.sandboxId} ${result.sandbox}.`,
+    { ok: true, host: record.profile.cloud.hostname, ...result, desktop: desktopSummary(desktop), coordinator, peers, ...(github ? { github } : {}) },
+    `${record.profile.cloud.hostname} destroyed: tailnet device${result.deletedNodeIds.length === 1 ? '' : 's'} ${result.deletedNodeIds.join(', ') || '(none)'} deleted, sandbox ${record.profile.cloud.sandboxId} ${result.sandbox}.${github?.deletedKeys.length ? ` GitHub deploy keys deleted: ${github.deletedKeys.join(', ')}.` : ''}${github?.pats.length ? ` Delete the personal access token it used for ${github.pats.join(', ')} at https://github.com/settings/personal-access-tokens.` : ''}`,
   );
   return 0;
 }

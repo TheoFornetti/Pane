@@ -103,6 +103,12 @@ const scopedKeySchema = boundary.object({
   secret: boundary.nonEmptyString,
 });
 
+const fileReadSchema = boundary.object({
+  content: boundary.string,
+  encoding: boundary.optional(boundary.string),
+  size: boundary.optional(boundary.number),
+});
+
 const errorFields = { code: boundary.optional(boundary.string), message: boundary.optional(boundary.string) };
 const errorSchema = boundary.object({ ...errorFields, error: boundary.optional(boundary.object(errorFields)) });
 
@@ -271,6 +277,19 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
       );
     },
     handle,
+    async readFile(sandboxId, filePath) {
+      const request: BoatRequest = {
+        method: 'GET',
+        path: `/sandboxes/${encodeId(sandboxId)}/files?path=${encodeURIComponent(filePath)}&encoding=base64`,
+        retry: true,
+      };
+      const file = decode(await call(request, [200]), fileReadSchema, request);
+      const content = file.encoding === 'base64' ? Buffer.from(file.content, 'base64') : Buffer.from(file.content, 'utf8');
+      if (file.size !== undefined && content.length !== file.size) {
+        throw new CloudProviderError(`boat GET /sandboxes/${sandboxId}/files returned ${content.length} of ${file.size} bytes`, 0);
+      }
+      return content;
+    },
     async createScopedKey(keyRequest) {
       // Not retried: a resend after a lost response would mint a second key.
       const request: BoatRequest = { method: 'POST', path: '/api-keys/scoped', body: keyRequest };

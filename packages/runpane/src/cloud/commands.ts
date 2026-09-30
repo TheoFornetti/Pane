@@ -1,10 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import type { CloudArgs } from './args';
-import type { JsonObject } from '../boundaryDecoder';
-import { buildCoordinatorDirectory, NO_COORDINATOR, type CoordinatorPushResult } from './coordinatorSync';
+import type { JsonObject, JsonValue } from '../boundaryDecoder';
+import { placeAgentCredentials } from './agentCredentials';
+import { COORDINATOR_LIFECYCLE_USAGE, isCoordinatorLifecycleCommand, runCoordinatorLifecycle } from './coordinatorDeploy';
+import { NO_COORDINATOR, pushDirectory, type CoordinatorPushResult } from './coordinatorSync';
 import { syncDesktopProfiles, type DesktopImportResult } from './desktop';
 import { decodePairingCode } from './pairing';
+import { pushPeersFile, runPeersCommand } from './peers';
 import type { BootstrapPort, TailnetDevice, TailnetPort } from './ports';
 import type { CloudProvider, CloudSandbox, CloudSize } from './provider';
 import {
@@ -42,11 +45,28 @@ export interface CloudDeps {
    */
   pushCoordinatorDirectory(directory: JsonObject): Promise<CoordinatorPushResult>;
   /**
+   * POST /cloud/wake on the configured coordinator and wait. Resolves null when no coordinator is
+   * configured or it cannot be reached; never throws.
+   */
+  wakeViaCoordinator(sessionId: string, timeoutMs: number): Promise<CoordinatorWakeResult | null>;
+  /** Packs this CLI's own package (dist + package.json) as a base64 .tar.gz, for the coordinator sandbox. */
+  packCoordinatorApp(): Promise<{ archiveBase64: string; version: string }>;
+  /** GET <coordinator>/health; never throws. */
+  probeCoordinatorHealth(baseUrl: string): Promise<{ ok: boolean; status?: number; version?: string }>;
+  /** Calls a cloud host's daemon over the tailnet with the saved (full) client token. */
+  invokeDaemon(profile: CloudHostProfile, channel: string, args: JsonObject[], timeoutMs: number): Promise<JsonValue | undefined>;
+  /**
    * Asks the host's daemon `runpane:cloud:safe-to-stop` with `flush: "always"` over its paired
    * token: SQLite's WAL is checkpointed and files fsynced, and the answer lists what is still busy.
    * Rejects when the daemon can't answer (an older daemon, or it is down).
    */
   safeToStop?(profile: { baseUrl: string; token: string }): Promise<CloudSafeToStopAnswer>;
+}
+
+interface CoordinatorWakeResult {
+  status: string;
+  version?: string | null;
+  detail?: string | null;
 }
 
 export interface CloudSafeToStopAnswer {
@@ -65,6 +85,7 @@ type CloudHostStatus = 'awake' | 'asleep' | 'waking' | 'stopping' | 'daemon-down
 const SANDBOX_READY_TIMEOUT_MS = 180_000;
 const STOP_TIMEOUT_MS = 120_000;
 const DEFAULT_WAKE_TIMEOUT_MS = 120_000;
+const WAKE_REPAIR_CHECK_MS = 30_000;
 const DEFAULT_NEW_HEALTH_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 1_500;
 const STATUS_HEALTH_TIMEOUT_MS = 5_000;
@@ -82,8 +103,11 @@ export async function runCloudCommand(args: CloudArgs, deps: CloudDeps): Promise
     case 'pair': return runPair(args, deps);
     case 'sync': return runSync(args, deps);
     case 'coordinator':
+      if (isCoordinatorLifecycleCommand(args.passthrough)) return runCoordinatorLifecycle(args.passthrough, deps);
+      if (['help', '--help', '-h', undefined].includes(args.passthrough[0])) deps.stdout(`${COORDINATOR_LIFECYCLE_USAGE}\n`);
       if (!deps.runCoordinator) throw new Error('runpane cloud coordinator is not available in this build.');
       return deps.runCoordinator(args.passthrough);
+    case 'peers': return runPeersCommand(args.passthrough, deps);
   }
 }
 
@@ -114,6 +138,10 @@ async function runSetup(args: CloudArgs, deps: CloudDeps): Promise<number> {
   if (args.anthropicKeyFile) {
     credentials.anthropic = { apiKey: await readRequiredSecret(deps, args.anthropicKeyFile, 'Anthropic API key') };
     changed.push('Anthropic API key');
+  }
+  if (args.claudeTokenFile) {
+    credentials.claude = { oauthToken: await readRequiredSecret(deps, args.claudeTokenFile, 'Claude token') };
+    changed.push('Claude token');
   }
 
   const nextSettings: CloudSettings = { ...settings };
@@ -149,6 +177,7 @@ async function runSetup(args: CloudArgs, deps: CloudDeps): Promise<number> {
       boat: Boolean(credentials.boat),
       tailscale: Boolean(credentials.tailscale),
       anthropic: Boolean(credentials.anthropic),
+      claude: Boolean(credentials.claude),
     },
     checks,
     settings: nextSettings,
@@ -160,6 +189,7 @@ async function runSetup(args: CloudArgs, deps: CloudDeps): Promise<number> {
     deps.stdout(`  boat API key:            ${summary.configured.boat ? 'set' : 'missing'}${checks.boat ? ` - ${checks.boat}` : ''}`);
     deps.stdout(`  Tailscale OAuth client:  ${summary.configured.tailscale ? 'set' : 'missing'}${checks.tailscale ? ` - ${checks.tailscale}` : ''}`);
     deps.stdout(`  Anthropic API key:       ${summary.configured.anthropic ? 'set' : 'not set (optional)'}`);
+    deps.stdout(`  Claude token:            ${summary.configured.claude ? 'set' : 'not set (optional)'}`);
     deps.stdout(`  golden snapshot:         ${nextSettings.goldenSnapshot ?? 'none (plain image; bootstrap installs everything)'}`);
     if (!summary.configured.boat || !summary.configured.tailscale) {
       deps.stdout('Next: runpane cloud setup --boat-key-file <path|-> --tailscale-client-id <id> --tailscale-secret-file <path|->');
@@ -212,9 +242,6 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const started = deps.now();
   const timings: Record<string, number> = {};
 
-  if (credentials.anthropic) {
-    deps.stderr('runpane cloud: note: the saved Anthropic API key is not copied into the sandbox yet; sign agents in inside the Session.');
-  }
   progress(`runpane cloud: creating ${size} sandbox ${hostname}${fromSnapshot ? ` from ${fromSnapshot}` : ''}...`);
   const sandbox = await provider.create({
     name: hostname,
@@ -286,6 +313,15 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       if (pairing.tunnel.note) record.profile.tunnel.note = pairing.tunnel.note;
     }
     record.meta.magicDnsName = outcome.magicDnsName;
+    const agentKeys = await placeAgentCredentials(provider.handle(sandbox.id), credentials,
+      record.meta.repo ? [`/home/user/${repoDirName(record.meta.repo.url)}`] : []);
+    if (agentKeys.length > 0) {
+      // The daemon restarted with the agent environment; wait for it again before handing the host over.
+      const health = await deps.bootstrap.waitForDaemonHealth(pairing.baseUrl, { timeoutMs: 60_000, intervalMs: 500 });
+      if (!health.ok) throw new Error(`the daemon did not come back after adding the agent credentials (${agentKeys.join(', ')})`);
+      progress(`  - agent-credentials done: ${agentKeys.join(', ')}`);
+      timings.agentCredentialsMs = deps.now() - started;
+    }
     if (outcome.daemonVersion) record.meta.daemonVersion = outcome.daemonVersion;
     if (coordinatorEnabled) record.meta.coordinatorPairingPath = deps.store.coordinatorPairingPath(hostname);
     await deps.store.writeHost(record);
@@ -307,6 +343,8 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
 
   const desktop = await importIntoDesktop(args, deps, [record.profile]);
   const coordinator = await pushDirectory(deps);
+  // A new Session allows no peers, but its peers list names the coordinator so submits can wake peers later.
+  const peersFile = settings.coordinator?.deployment ? await pushPeersFile(record, await deps.store.listHosts(), deps, provider) : null;
   timings.totalMs = deps.now() - started;
 
   if (args.json) {
@@ -316,6 +354,8 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       pairingPath: record.meta.pairingPath,
       desktop: desktopSummary(desktop),
       coordinator,
+      peersFile,
+      agentCredentials: agentCredentialsSummary(credentials),
       timings,
     }, null, 2));
   } else {
@@ -324,6 +364,10 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     deps.stdout(`  pairing code saved to ${record.meta.pairingPath} (0600; not printed).`);
     printDesktopOutcome(deps, desktop, hostname);
     printCoordinatorOutcome(deps, coordinator);
+    const agents = agentCredentialsSummary(credentials);
+    deps.stdout(agents.length > 0
+      ? `  agents: signed in with the saved ${agents.join(' and ')}.`
+      : '  agents: no Anthropic key or Claude token saved; sign in inside the Session, or save one with runpane cloud setup --anthropic-key-file <path|->.');
     deps.stdout(`  phone: run \`runpane cloud pair ${hostname}\` and paste the code into https://runpane.com/app/.`);
   }
   return 0;
@@ -336,6 +380,15 @@ async function countLiveSandboxes(provider: CloudProvider, records: readonly Clo
     (managedIds.has(sandbox.id) || sandbox.name.startsWith(`${namePrefix}-`))
     && sandbox.state !== 'stopped'
     && sandbox.state !== 'gone').length;
+}
+
+function agentCredentialsSummary(credentials: CloudCredentials): string[] {
+  return [credentials.anthropic ? 'Anthropic API key' : null, credentials.claude ? 'Claude token' : null].filter((kind): kind is string => kind !== null);
+}
+
+function repoDirName(url: string): string {
+  const name = url.replace(/\/+$/u, '').split('/').pop()?.replace(/\.git$/u, '') ?? '';
+  return /^[A-Za-z0-9._-]+$/u.test(name) && name !== '.' && name !== '..' ? name : 'repo';
 }
 
 function randomSessionId(): string {
@@ -361,8 +414,11 @@ async function runList(args: CloudArgs, deps: CloudDeps): Promise<number> {
       size: sandbox?.size ?? record.meta.size,
     };
   });
-  const known = new Set(records.map((record) => record.profile.cloud.sandboxId));
   const settings = await deps.store.readSettings();
+  const coordinatorId = settings.coordinator?.deployment?.sandboxId;
+  // The coordinator's own sandbox shares the name prefix but is not a cloud Session.
+  const known = new Set(records.map((record) => record.profile.cloud.sandboxId));
+  if (coordinatorId) known.add(coordinatorId);
   const prefixes = new Set([settings.namePrefix ?? DEFAULT_NAME_PREFIX, ...records.map((record) => record.meta.namePrefix)]);
   const unmanaged = sandboxes
     .filter((sandbox) => !known.has(sandbox.id) && [...prefixes].some((prefix) => sandbox.name.startsWith(`${prefix}-`)))
@@ -510,7 +566,7 @@ async function runStop(args: CloudArgs, deps: CloudDeps): Promise<number> {
 }
 
 async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
-  const { provider, tailnet } = await loadCloudWithTailnet(deps);
+  const { provider, tailnet, tailnetCredentials } = await loadCloudWithTailnet(deps);
   const record = findHost(await deps.store.listHosts(), requiredHost(args));
   const { sandboxId, hostname } = record.profile.cloud;
   const timeoutMs = args.timeoutMs ?? DEFAULT_WAKE_TIMEOUT_MS;
@@ -522,8 +578,21 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     throw new Error(`${hostname} is lost: the provider reports ${sandbox.providerState} for ${sandboxId}.`);
   }
   if (sandbox.state === 'stopping') sandbox = await waitForSandbox(provider, sandboxId, 'stopped', STOP_TIMEOUT_MS, deps);
-  const resumed = sandbox.state === 'stopped';
-  if (resumed) {
+  // With a coordinator, wake through it: it applies the pinned Pane version and gives the Session its
+  // idle-stop grace. A resize, or a coordinator that is down or refuses, falls back to a direct resume.
+  let coordinator: CoordinatorWakeResult | null = null;
+  if (sandbox.state === 'stopped' && !args.size) {
+    if (!args.json) deps.stdout(`runpane cloud: waking ${hostname} through the coordinator...`);
+    coordinator = await deps.wakeViaCoordinator(record.profile.cloud.sessionId, timeoutMs);
+    if (coordinator?.status === 'awake') {
+      timings.coordinatorWakeMs = deps.now() - started;
+      sandbox = await provider.get(sandboxId);
+    } else if (coordinator && !args.json) {
+      deps.stdout(`runpane cloud: the coordinator answered ${coordinator.status}${coordinator.detail ? ` (${coordinator.detail})` : ''}; resuming directly.`);
+    }
+  }
+  const resumed = coordinator?.status === 'awake' || sandbox.state === 'stopped';
+  if (sandbox.state === 'stopped') {
     if (!args.json) deps.stdout(`runpane cloud: waking ${hostname}...`);
     await provider.resume(sandboxId, args.size ? { size: args.size } : undefined);
     timings.resumeCallMs = deps.now() - started;
@@ -531,13 +600,38 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
   await waitForSandbox(provider, sandboxId, 'running', Math.max(timeoutMs - (deps.now() - started), 1_000), deps);
   timings.runningMs = deps.now() - started;
   if (!record.profile.baseUrl) throw new Error(`${hostname} has no daemon address yet; its setup never finished. Destroy it and create a new one.`);
-  const health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, {
-    timeoutMs: Math.max(timeoutMs - (deps.now() - started), 1_000),
+  const remaining = () => Math.max(timeoutMs - (deps.now() - started), 1_000);
+  // A healthy wake answers in 9-13 s (M0); after that, check the node before waiting out the rest.
+  let health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, {
+    timeoutMs: Math.min(remaining(), WAKE_REPAIR_CHECK_MS),
     intervalMs: 500,
   });
   timings.healthMs = deps.now() - started;
+  let repaired: { previousBackendState: string; oldNodeId: string; nodeId: string } | null = null;
+  if (!health.ok) {
+    // A resume can bring the node back logged out (tailscaled.state lost); re-enrol under the same name.
+    const repair = await deps.bootstrap.repairTailnet(provider.handle(sandboxId), { hostname, oldNodeId: record.profile.cloud.nodeId }, tailnetCredentials);
+    if (repair.reenrolled) {
+      if (!args.json) deps.stdout(`runpane cloud: ${hostname}'s tailnet node came back logged out (${repair.previousBackendState}); re-enrolled it as ${repair.nodeId} under the same name.`);
+      repaired = { previousBackendState: repair.previousBackendState, oldNodeId: record.profile.cloud.nodeId, nodeId: repair.nodeId };
+      record.profile.cloud = { ...record.profile.cloud, nodeId: repair.nodeId, version: record.profile.cloud.version + 1 };
+      await deps.store.writeHost(record);
+      await importIntoDesktop(args, deps, [record.profile]);
+      await pushDirectory(deps);
+      health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: 90_000, intervalMs: 500 });
+      timings.repairedHealthMs = deps.now() - started;
+    } else {
+      health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: remaining(), intervalMs: 500 });
+      timings.healthMs = deps.now() - started;
+    }
+  }
   const devices = await tailnet.findDevicesByHostname(hostname);
   const sameNode = devices.some((device) => device.nodeId === record.profile.cloud.nodeId);
+  // Grants changed while it slept are written now (final-plan M1: "sleeping peers get it when they wake").
+  const settings = await deps.store.readSettings();
+  const peersFile = health.ok && (record.meta.peers?.length || settings.coordinator?.deployment)
+    ? await pushPeersFile(record, await deps.store.listHosts(), deps, provider)
+    : null;
   const summary = {
     ok: health.ok,
     host: hostname,
@@ -547,6 +641,9 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     sameTailnetNode: sameNode,
     nodeIds: devices.map((device) => device.nodeId),
     version: health.version ?? null,
+    coordinator,
+    repaired,
+    peersFile,
     timings,
   };
   report(
@@ -554,7 +651,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     deps,
     summary,
     health.ok
-      ? `${hostname} is awake at ${record.profile.baseUrl} (${(timings.healthMs / 1000).toFixed(1)} s${sameNode ? ', same tailnet node' : ', TAILNET NODE CHANGED'}).`
+      ? `${hostname} is awake at ${record.profile.baseUrl} (${((deps.now() - started) / 1000).toFixed(1)} s${repaired ? ', re-enrolled tailnet node' : sameNode ? ', same tailnet node' : ', TAILNET NODE CHANGED'}).`
       : `${hostname} is running but its daemon did not answer /health within ${Math.round(timeoutMs / 1000)} s.`,
   );
   return health.ok ? 0 : 1;
@@ -571,15 +668,46 @@ async function runDestroy(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const result = await destroyHost(record, provider, tailnet, deps);
   const desktop = await importIntoDesktop(args, deps, [], [record.profile.cloud.sessionId]);
   await deps.store.removeHost(record.profile.cloud.hostname);
+  const peers = await forgetPeerGrants(record, provider, deps);
   const coordinator = await pushDirectory(deps);
   if (!args.json) printCoordinatorOutcome(deps, coordinator);
   report(
     args,
     deps,
-    { ok: true, host: record.profile.cloud.hostname, ...result, desktop: desktopSummary(desktop), coordinator },
+    { ok: true, host: record.profile.cloud.hostname, ...result, desktop: desktopSummary(desktop), coordinator, peers },
     `${record.profile.cloud.hostname} destroyed: tailnet device${result.deletedNodeIds.length === 1 ? '' : 's'} ${result.deletedNodeIds.join(', ') || '(none)'} deleted, sandbox ${record.profile.cloud.sandboxId} ${result.sandbox}.`,
   );
   return 0;
+}
+
+/**
+ * After a destroy: the Sessions it could message revoke its peer records (best effort: a sleeping one
+ * keeps a record whose sender no longer exists), and Sessions that could message it drop the grant.
+ */
+async function forgetPeerGrants(destroyed: CloudHostRecord, provider: CloudProvider, deps: CloudDeps) {
+  const host = destroyed.profile.cloud.hostname;
+  const records = await deps.store.listHosts();
+  const revoked: string[] = [];
+  for (const grant of destroyed.meta.peers ?? []) {
+    const target = records.find((record) => record.profile.cloud.hostname === grant.host);
+    if (!target) continue;
+    try {
+      await deps.invokeDaemon(target.profile, 'runpane:peers:revoke', [{ peer: grant.peerId }], 30_000);
+      revoked.push(grant.host);
+    } catch (error) {
+      deps.stderr(`runpane cloud: could not revoke ${host}'s peer record on ${grant.host} (${error instanceof Error ? error.message : String(error)}); run runpane cloud wake ${grant.host} and remove it with runpane --host ${grant.host} peers revoke --peer ${grant.peerId} --yes.`);
+    }
+  }
+  const dropped: string[] = [];
+  for (const record of records) {
+    if (!record.meta.peers?.some((grant) => grant.host === host)) continue;
+    record.meta.peers = record.meta.peers.filter((grant) => grant.host !== host);
+    if (record.meta.peers.length === 0) delete record.meta.peers;
+    await deps.store.writeHost(record);
+    await pushPeersFile(record, records, deps, provider);
+    dropped.push(record.profile.cloud.hostname);
+  }
+  return { revokedOn: revoked, droppedFrom: dropped };
 }
 
 /** Tailnet device first, then the sandbox (a live node would otherwise linger as an orphan). */
@@ -635,16 +763,6 @@ async function runSync(args: CloudArgs, deps: CloudDeps): Promise<number> {
 }
 
 // ---------------------------------------------------------------- shared helpers
-
-/** Pushes the whole directory after a change. Never throws: the change itself already happened. */
-async function pushDirectory(deps: CloudDeps): Promise<CoordinatorPushResult> {
-  try {
-    const directory = await buildCoordinatorDirectory(await deps.store.listHosts(), new Date(deps.now()));
-    return await deps.pushCoordinatorDirectory(directory);
-  } catch (error) {
-    return { pushed: false, reason: error instanceof Error ? error.message : String(error) };
-  }
-}
 
 function printCoordinatorOutcome(deps: CloudDeps, result: CoordinatorPushResult): void {
   if (result.pushed) {

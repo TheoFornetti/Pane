@@ -125,6 +125,12 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const configManager = new ConfigManager();
   await configManager.initialize();
   installPaneRuntime(rendererEventSink, configManager, options.getPtyHostRuntime, getWebviewContextMap);
+  if (mode === 'desktop') {
+    // `runpane cloud new|sync|destroy` save remote hosts into config.json while the app runs; the
+    // renderer refetches so the host switcher shows them without a restart.
+    configManager.on('config-updated', () => rendererEventSink.send('config:changed'));
+    configManager.startWatching();
+  }
 
   const logger = new Logger(configManager);
   console.log('[Main] Logger initialized with file logging to ~/.pane/logs');

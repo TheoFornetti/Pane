@@ -255,6 +255,40 @@ describe('RemotePaneClient', () => {
     await client.disconnect();
   });
 
+  // The desktop names `runpane cloud wake` while a cloud host is retrying after a failure; a retry
+  // attempt must not clear the reason, or the hint only shows between attempts.
+  it('keeps the failure reason on every retry attempt', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    server.setEventsReady(false);
+    const connectionStates: Array<{ status: string; errorMessage: string | null | undefined }> = [];
+
+    const client = new RemotePaneClient({
+      id: 'profile-retry-reason',
+      label: 'Remote host',
+      baseUrl: server.baseUrl,
+      token: 'secret-token',
+      transport: 'http+sse',
+    }, {
+      reconnectInitialDelayMs: 5,
+      reconnectMaxDelayMs: 20,
+      reconnectErrorThreshold: 3,
+      onConnectionStateChange(status, errorMessage) {
+        connectionStates.push({ status, errorMessage });
+      },
+    });
+
+    await expect(client.connect({ retryOnInitialFailure: true })).rejects.toThrow();
+    await waitFor(() => connectionStates.some((state) => state.status === 'error'), 1_500);
+
+    const retries = connectionStates.filter((state) => state.status === 'reconnecting');
+    expect(retries.length).toBeGreaterThanOrEqual(3);
+    expect(retries.every((state) => state.errorMessage === 'Remote daemon not ready yet')).toBe(true);
+    expect(connectionStates[0]).toEqual({ status: 'connecting', errorMessage: null });
+
+    await client.disconnect();
+  });
+
   it('stays quiet while suspended for system sleep and reconnects on resume', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);

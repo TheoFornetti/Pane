@@ -134,6 +134,8 @@ export class RemotePaneClient {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatStaleTimer: NodeJS.Timeout | null = null;
   private consecutiveReconnectFailures = 0;
+  /** Why the client is retrying; reported on every retry attempt until the stream is ready again. */
+  private reconnectReason: string | null = null;
   private lastSeenAt: string | null = null;
   private closedByClient = false;
   /** Set while the system sleeps: no stream, heartbeat or reconnect until resume(). */
@@ -270,7 +272,7 @@ export class RemotePaneClient {
     this.clearReconnectTimer();
     const generation = ++this.streamGeneration;
     const isStale = (): boolean => generation !== this.streamGeneration;
-    this.onConnectionStateChange?.(isReconnect ? 'reconnecting' : 'connecting', null, {
+    this.onConnectionStateChange?.(isReconnect ? 'reconnecting' : 'connecting', isReconnect ? this.reconnectReason : null, {
       lastSeenAt: this.lastSeenAt,
     });
 
@@ -363,6 +365,7 @@ export class RemotePaneClient {
               clearHandshakeTimer();
               const lastSeenAt = this.markRemoteSeen();
               this.consecutiveReconnectFailures = 0;
+              this.reconnectReason = null;
               const readyPayload = parseRemoteReadyEventPayload(event.data);
               if (readyPayload?.resync === 'refetch-state-after-reconnect') {
                 this.onResyncRequired?.();
@@ -491,6 +494,7 @@ export class RemotePaneClient {
     if (this.closedByClient || this.suspended || this.reconnectTimer) {
       return;
     }
+    this.reconnectReason = message;
 
     if (this.consecutiveReconnectFailures >= this.reconnectErrorThreshold) {
       this.onConnectionStateChange?.('error', message, { lastSeenAt: this.lastSeenAt });

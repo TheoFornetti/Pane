@@ -533,7 +533,15 @@
         "cloud destroy",
         "cloud pair",
         "cloud sync",
-        "cloud coordinator"
+        "cloud coordinator",
+        "cloud coordinator deploy",
+        "cloud coordinator status",
+        "cloud coordinator stop",
+        "cloud coordinator start",
+        "cloud coordinator destroy",
+        "cloud peers allow",
+        "cloud peers revoke",
+        "cloud peers list"
       ],
       "properties": {
         "default": {
@@ -807,6 +815,30 @@
           "$ref": "#/$defs/helpLines"
         },
         "cloud coordinator": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator deploy": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator stop": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator start": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator destroy": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud peers allow": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud peers revoke": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud peers list": {
           "$ref": "#/$defs/helpLines"
         }
       },

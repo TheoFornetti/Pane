@@ -316,6 +316,8 @@ These flags are consumed by local daemon-control commands:
 
 ```bash
 --pane-dir <path>
+--host <name|session-id|pane-remote://...|pairing-file>
+--thread <cloud-session>
 --repo <selector>
 --pane <pane-id>
 --panel <panel-id>

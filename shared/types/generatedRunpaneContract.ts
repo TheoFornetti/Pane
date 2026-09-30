@@ -445,7 +445,8 @@ export const RUNPANE_CONTRACT = {
       "name": "panels list",
       "summary": "List tool panels inside a Pane session.",
       "usage": [
-        "runpane panels list --pane <pane-id> [--json] [--pane-dir <path>]"
+        "runpane panels list --pane <pane-id> [--json] [--pane-dir <path>]",
+        "runpane panels list (--host <target>|--thread <cloud-session>) [--pane <pane-id>] [--json]"
       ],
       "toolsets": [
         "panels"
@@ -500,7 +501,8 @@ export const RUNPANE_CONTRACT = {
       "name": "panels submit",
       "summary": "Send and submit text to a terminal panel, including idle agent composers.",
       "usage": [
-        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json] [--pane-dir <path>]"
+        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json] [--pane-dir <path>]",
+        "runpane panels submit (--host <target>|--thread <cloud-session>) --panel <panel-id|orchestrator> (--text <text>|--input-file <path|->) --yes [--json]"
       ],
       "mutates": true,
       "toolsets": [
@@ -1288,6 +1290,16 @@ export const RUNPANE_CONTRACT = {
         "name": "--pane-dir",
         "value": "<path>",
         "description": "Connect to a Pane daemon using this Pane data directory."
+      },
+      {
+        "name": "--host",
+        "value": "<name|session-id|pane-remote://...|pairing-file>",
+        "description": "Call a remote Pane daemon over HTTP instead of the local socket: a saved or cloud host, a connection code, or a file holding one. Defaults to $RUNPANE_HOST. A submit wakes a sleeping cloud host through the runpane cloud coordinator; other commands report it asleep."
+      },
+      {
+        "name": "--thread",
+        "value": "<cloud-session>",
+        "description": "Like --host, but only matches cloud Sessions (by Session id, host name or label) from the peers list or runpane cloud host records."
       },
       {
         "name": "--repo",

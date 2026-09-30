@@ -992,6 +992,8 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--note":
         parsed.note = value
         return
+    if flag in ("--host", "--thread"):
+        raise ValueError(f"{flag} (remote daemons over HTTP) needs the npm runpane CLI: npx --yes runpane@latest ...")
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 

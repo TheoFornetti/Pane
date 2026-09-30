@@ -25,6 +25,10 @@ export interface ParsedArgs {
   json: boolean;
   contextCommand?: string;
   paneDir?: string;
+  /** --host: a remote daemon to call over HTTP (see remote/hostDirectory.ts). */
+  host?: string;
+  /** --thread: like --host, cloud Sessions only. */
+  thread?: string;
   repo?: string;
   paneId?: string;
   sessionId?: string;
@@ -495,6 +499,14 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.paneDir = value;
     return;
   }
+  if (flag === '--host') {
+    parsed.host = value;
+    return;
+  }
+  if (flag === '--thread') {
+    parsed.thread = value;
+    return;
+  }
   if (flag === '--repo') {
     parsed.repo = value;
     return;
@@ -809,6 +821,18 @@ function parseNonNegativeIntegerFlag(flag: string, value: string): number {
 /** True when any cadence flag that needs a named daemon cursor was given. */
 export function hasCadenceValueFlag(parsed: ParsedArgs): boolean {
   return [parsed.settleMs, parsed.blockedSettleMs, parsed.minIntervalMs].some(value => value !== undefined);
+}
+
+/**
+ * Commands that honour --host/--thread/$RUNPANE_HOST: every daemon-control
+ * command except the ones that inspect or repair the local install, and the
+ * `runpane cloud` family, which manages hosts rather than calling one.
+ */
+export function takesDaemonTarget(command: RunpaneCommand): boolean {
+  return isRunpaneLocalCommand(command)
+    && command !== 'doctor'
+    && command !== 'daemon repair'
+    && !command.startsWith('cloud');
 }
 
 function isRunpaneLocalCommand(command: RunpaneCommand): boolean {

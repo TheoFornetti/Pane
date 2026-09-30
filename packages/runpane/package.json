@@ -26,6 +26,7 @@
     "lint": "pnpm --dir ../.. run lint:ox:runpane && pnpm run lint:eslint",
     "lint:eslint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test \".test-dist/**/*.test.js\"",
     "prepack": "pnpm run build"
   },
   "engines": {

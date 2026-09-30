@@ -159,10 +159,11 @@ step_serve_restore() {
 }
 
 # install-pane <mode> <debUrl> <debSha256> <runpaneSpec> <label>
-#   mode: deb-url (install the given .deb, e.g. the fork build, then set up with runpane),
-#         runpane-npm (runpane downloads the release .deb), preinstalled (the image already has /opt/Pane).
-# Setup always runs `runpane install daemon --format deb --prefer-tunnel tailscale`. Its output (which carries
-# the pairing code) goes to a 0600 log; the code is moved into pairing.code and redacted from the log.
+#   mode: deb-url (install the given .deb, e.g. the fork build), preinstalled (the golden image has /opt/Pane),
+#         runpane-npm (`runpane install daemon --format deb` downloads the release .deb; <runpaneSpec> picks the CLI).
+# With Pane already on disk, setup calls `pane --remote-setup` directly, as `runpane install daemon` does after it
+# resolves and downloads the upstream .deb it then ignores. Setup output (which carries the pairing code) goes to a
+# 0600 log; the code is moved into pairing.code and redacted from the log.
 step_install_pane() {
   local mode="$1" deb_url="$2" deb_sha="$3" spec="$4" label="$5" rc=0 code
   if [ -s "$RP_STATE/pairing.code" ] && systemctl --user is-active -q pane-remote-daemon.service; then
@@ -189,14 +190,19 @@ step_install_pane() {
   sudo loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
   # Pane's setup runs `tailscale serve` as this user; make it the node's operator (no other rights).
   sudo tailscale set --operator="$(id -un)" >/dev/null 2>&1 || fail "tailscale set --operator failed"
-  npx --yes --package="$spec" runpane install daemon --format deb --prefer-tunnel tailscale --auto-listen-port \
-    --label "$label" >"$RP_STATE/install.log" 2>&1 || rc=$?
+  if [ "$mode" = runpane-npm ]; then
+    npx --yes --package="$spec" runpane install daemon --format deb --prefer-tunnel tailscale --auto-listen-port \
+      --label "$label" >"$RP_STATE/install.log" 2>&1 || rc=$?
+  else
+    ELECTRON_OZONE_PLATFORM_HINT=headless /opt/Pane/pane --ozone-platform=headless --disable-gpu --remote-setup \
+      --prefer-tunnel tailscale --auto-listen-port --label "$label" >"$RP_STATE/install.log" 2>&1 || rc=$?
+  fi
   code="$(awk '/^Connection code:/{getline; print; exit}' "$RP_STATE/install.log" | tr -d '\r')"
   sed -i -E 's#pane-remote://[^[:space:]]*#<pairing-redacted>#g' "$RP_STATE/install.log"
-  if [ "$rc" -ne 0 ]; then fail "runpane install daemon exited $rc: $(tail -5 "$RP_STATE/install.log" | tr '\n' ' ')"; fi
+  if [ "$rc" -ne 0 ]; then fail "Pane remote setup exited $rc: $(tail -5 "$RP_STATE/install.log" | tr '\n' ' ')"; fi
   case "$code" in
     pane-remote://*) printf '%s' "$code" >"$RP_STATE/pairing.code"; chmod 600 "$RP_STATE/pairing.code" ;;
-    *) fail "runpane install daemon printed no pane-remote:// connection code" ;;
+    *) fail "Pane remote setup printed no pane-remote:// connection code" ;;
   esac
   result "$(python3 -c 'import json,sys;print(json.dumps({"ok":True,"skipped":False,"version":sys.argv[1] or None,"listenPort":int(sys.argv[2])}))' "$(pane_version)" "$(pane_listen_port)")"
 }

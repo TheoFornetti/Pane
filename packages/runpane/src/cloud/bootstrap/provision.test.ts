@@ -156,7 +156,7 @@ test('provisionSandbox runs every step in order and writes the pairing file 0600
     'install-pane', 'pairing-read', 'add-client', 'pairing-read', 'clone',
   ]);
   assert.deepEqual(sandbox.steps[4].slice(2), ['rp-k3j9x0q2']);
-  assert.deepEqual(sandbox.steps[5].slice(1), ['deb-url', 'https://example.test/pane.deb', 'ff', 'runpane@latest', 'Cloud k3j9']);
+  assert.deepEqual(sandbox.steps[5].slice(1), ['deb-url', 'https://example.test/pane.deb', 'ff', '', 'Cloud k3j9']);
   assert.deepEqual(sandbox.steps[9].slice(1), ['https://github.com/example/app.git', 'main', '/home/user/app']);
   assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tail03bf19.ts.net');
   assert.equal(result.baseUrl, 'https://rp-k3j9x0q2.tail03bf19.ts.net');

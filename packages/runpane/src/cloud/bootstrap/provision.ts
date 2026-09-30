@@ -15,7 +15,6 @@ import type {
 } from './types';
 
 const DEFAULT_SANDBOX_HOME = '/home/user';
-const DEFAULT_RUNPANE_SPEC = 'runpane@latest';
 const UPLOADED_ASSETS: CloudBootstrapAssetName[] = ['rp-bootstrap.sh', 'golden-scrub.sh', 'golden-check.sh'];
 const HOSTNAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const PAIRING_PATTERN = /pane-remote:\/\/\S+/g;
@@ -34,8 +33,6 @@ export interface ProvisionOptions {
   paneSource: PaneSource;
   /** Tailnet hostname; defaults to cloudHostname(sessionId). Used verbatim. */
   hostname?: string;
-  /** npm spec (or tarball URL) of the runpane CLI that runs `install daemon` in the sandbox. */
-  runpaneSpec?: string;
   repo?: { url: string; ref?: string; dir?: string };
   /** Local path that receives the pane-remote:// code with mode 0600. The code is never printed. */
   pairingOutputPath: string;
@@ -144,9 +141,7 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
   }, (value) => value.magicDnsName);
   assertTailnetIdentity(tailnet, hostname, tags);
 
-  const runpaneSpec = options.paneSource.kind === 'runpane-npm'
-    ? options.paneSource.spec
-    : options.runpaneSpec ?? DEFAULT_RUNPANE_SPEC;
+  const runpaneSpec = options.paneSource.kind === 'runpane-npm' ? options.paneSource.spec : '';
   const install = await step('install-pane', () => runner.run('install-pane', [
     options.paneSource.kind,
     options.paneSource.kind === 'deb-url' ? options.paneSource.url : '',

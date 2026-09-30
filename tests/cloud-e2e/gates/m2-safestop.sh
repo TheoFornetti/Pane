@@ -127,11 +127,11 @@ NEWNAME="e2e-renamed-$RANDOM"
 rp_in "$SB_ID" panes rename --pane "$PANE" --name "$NEWNAME" --yes --json | ev rename.json >/dev/null
 fl=$(cl remote invoke "$SB_PAIRING" runpane:cloud:safe-to-stop '[{"flush":"always"}]'); printf '%s\n' "$fl" | ev flush.json >/dev/null
 cl boat stop "$SB_ID" >/dev/null   # immediately: M0 snapshot point is ~3.6-4.7 s after this call
-flushed=$(jget 'bool(d["body"]["result"].get("flush"))' <<<"$fl" 2>/dev/null)
+flushed=$(jget '"yes" if d["body"]["result"].get("flush") else "no"' <<<"$fl" 2>/dev/null)
 cl boat wait "$SB_ID" archived --timeout 180 >/dev/null; cl boat resume "$SB_ID" >/dev/null
 cl remote wait-health "$SB_PAIRING" --timeout 180 >/dev/null
 names=$(rp_in "$SB_ID" panes list --repo e2e-repo --json); printf '%s\n' "$names" | ev panes-after-resume.json >/dev/null
-if grep -qF "$NEWNAME" <<<"$names" && [ "$flushed" = True ]; then rec flush-survives-poweroff PASS "rename -> safe-to-stop flush:always ($(jget 'd["body"]["result"]["flush"]' <<<"$fl" | head -c 160)) -> immediate boat stop -> resume: rename persisted" "$E2E_RUN_DIR/flush.json"
+if grep -qF "$NEWNAME" <<<"$names" && [ "$flushed" = yes ]; then rec flush-survives-poweroff PASS "rename -> safe-to-stop flush:always ($(jget 'd["body"]["result"]["flush"]' <<<"$fl" | head -c 160)) -> immediate boat stop -> resume: rename persisted" "$E2E_RUN_DIR/flush.json"
 else rec flush-survives-poweroff FAIL "flush=$flushed; renamed pane present after resume: $(grep -cF "$NEWNAME" <<<"$names")" "$E2E_RUN_DIR/panes-after-resume.json"; fi
 
 # ---- 7. user-client-attached (runs last: it makes the gate itself a user client)

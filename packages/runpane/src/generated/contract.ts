@@ -1308,7 +1308,7 @@ export const RUNPANE_CONTRACT = {
       "name": "cloud new",
       "summary": "Create a cloud Session: a sandbox from the golden image, joined to your tailnet, running a Pane daemon, saved as a remote host.",
       "usage": [
-        "runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]"
+        "runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--github [--read-write] [--github-token-file <path>]] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]"
       ],
       "mutates": true,
       "wrappers": [
@@ -1372,7 +1372,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "cloud destroy",
-      "summary": "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host.",
+      "summary": "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host. Deletes its GitHub deploy keys first.",
       "usage": [
         "runpane cloud destroy <host> [--desktop-dir <path>|--no-import] --yes [--json]"
       ],
@@ -1532,6 +1532,50 @@ export const RUNPANE_CONTRACT = {
       ],
       "mutates": true,
       "idempotent": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud github connect",
+      "summary": "Let a cloud Session reach one GitHub repository: generates an ed25519 key inside the sandbox and registers its public half as a read-only deploy key with your GitHub credential, which never enters the sandbox.",
+      "usage": [
+        "runpane cloud github connect <host> --repo <owner/name> [--read-write] [--token-file <path|->] [--json]",
+        "runpane cloud github connect <host> --repo <owner/name> --pat-file <path|-> [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud github disconnect",
+      "summary": "Remove a cloud Session's GitHub access: deletes its deploy key on GitHub and the key (or token) files in the sandbox.",
+      "usage": [
+        "runpane cloud github disconnect <host> [--repo <owner/name>] [--token-file <path|->] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud github list",
+      "summary": "List which GitHub repositories each cloud Session can reach.",
+      "usage": [
+        "runpane cloud github list [<host>] [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud git push",
+      "summary": "Publish a cloud Session's branch: bundles it in the sandbox, brings it to this machine and pushes it with your GitHub credential to cloud/<host>/<branch>. Never pushes to the default branch, main or master.",
+      "usage": [
+        "runpane cloud git push <host> --path <dir> --branch <branch> [--repo <owner/name>] [--prefix <prefix/>] [--force] [--token-file <path|->] [--json]"
+      ],
+      "mutates": true,
       "wrappers": [
         "npm"
       ]
@@ -3254,14 +3298,17 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud new": [
         "Usage:",
-        "  runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
+        "  runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--github [--read-write] [--github-token-file <path>]] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
         "",
         "Create a cloud Session: a sandbox from the golden image, joined to your tailnet, running a Pane daemon, saved as a remote host.",
         "",
         "Options:",
         "  --label <name>                 Name shown in Pane.",
-        "  --repo <https-url>             Public repository to clone into the sandbox.",
+        "  --repo <https-url>             Repository to clone into the sandbox: public HTTPS, or a private GitHub one with --github.",
         "  --ref <ref>                    Branch or tag to check out.",
+        "  --github                       Clone --repo over a deploy key generated in the sandbox (private repositories; see runpane cloud github connect).",
+        "  --read-write                   With --github: a writable deploy key.",
+        "  --github-token-file <path>     With --github: your GitHub token file instead of `gh auth token`.",
         "  --size <small|default|large>   Machine size.",
         "  --from <snapshot>              Named snapshot to start from (default: the saved golden).",
         "  --no-golden                    Start from the plain image.",
@@ -3334,7 +3381,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane cloud destroy <host> [--desktop-dir <path>|--no-import] --yes [--json]",
         "",
-        "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host.",
+        "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host. Deletes its GitHub deploy keys first.",
         "",
         "Options:",
         "  <host>                 Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
@@ -3505,13 +3552,66 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator|peers> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator|peers|github|git> [options]",
         "",
         "Run each Pane Session on its own cloud sandbox with a normal Pane daemon, paired to your Pane apps as a remote host.",
         "Keys stay on this machine (~/.config/runpane-cloud, 0600). Pane desktop only lists the saved remote hosts.",
         "",
         "Start with: runpane cloud setup, then runpane cloud new --yes.",
         "Run \"runpane help cloud <command>\" for options."
+      ],
+      "cloud github connect": [
+        "Usage:",
+        "  runpane cloud github connect <host> --repo <owner/name> [--read-write] [--token-file <path|->] [--json]",
+        "  runpane cloud github connect <host> --repo <owner/name> --pat-file <path|-> [--json]",
+        "",
+        "Let a cloud Session reach one GitHub repository: generates an ed25519 key inside the sandbox and registers its public half as a read-only deploy key with your GitHub credential, which never enters the sandbox.",
+        "",
+        "Options:",
+        "  <host>                  The cloud Session.",
+        "  --repo <owner/name>     The repository, as owner/name or a GitHub URL.",
+        "  --read-write            Register a writable deploy key: anything in the Session could push to any branch. Prefer runpane cloud git push.",
+        "  --token-file <path|->   Your GitHub token in a file (or - for stdin) instead of `gh auth token`; it stays on this machine.",
+        "  --pat-file <path|->     Use this fine-grained personal access token instead of a deploy key; kept in a 0600 file in the sandbox. Classic tokens are refused.",
+        "  --json                  Print machine-readable output."
+      ],
+      "cloud github disconnect": [
+        "Usage:",
+        "  runpane cloud github disconnect <host> [--repo <owner/name>] [--token-file <path|->] [--json]",
+        "",
+        "Remove a cloud Session's GitHub access: deletes its deploy key on GitHub and the key (or token) files in the sandbox.",
+        "",
+        "Options:",
+        "  <host>                  The cloud Session.",
+        "  --repo <owner/name>     Which repository, when the Session has several.",
+        "  --token-file <path|->   Your GitHub token in a file (or - for stdin) instead of `gh auth token`; it stays on this machine.",
+        "  --json                  Print machine-readable output."
+      ],
+      "cloud github list": [
+        "Usage:",
+        "  runpane cloud github list [<host>] [--json]",
+        "",
+        "List which GitHub repositories each cloud Session can reach.",
+        "",
+        "Options:",
+        "  <host>   Only this cloud Session.",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud git push": [
+        "Usage:",
+        "  runpane cloud git push <host> --path <dir> --branch <branch> [--repo <owner/name>] [--prefix <prefix/>] [--force] [--token-file <path|->] [--json]",
+        "",
+        "Publish a cloud Session's branch: bundles it in the sandbox, brings it to this machine and pushes it with your GitHub credential to cloud/<host>/<branch>. Never pushes to the default branch, main or master.",
+        "",
+        "Options:",
+        "  <host>                  The cloud Session.",
+        "  --path <dir>            The repository directory in the Session (relative paths are under /home/user).",
+        "  --branch <branch>       The local branch in the Session to publish.",
+        "  --repo <owner/name>     The GitHub repository (default: the directory's origin remote).",
+        "  --prefix <prefix/>      Branch prefix to push under (default cloud/<host>/).",
+        "  --force                 Overwrite the target branch when it has diverged (it is always under the prefix).",
+        "  --token-file <path|->   Your GitHub token in a file (or - for stdin) instead of `gh auth token`; it stays on this machine.",
+        "  --json                  Print machine-readable output."
       ]
     },
     "pip": {
@@ -4633,7 +4733,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud new": [
         "Usage:",
-        "  runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
+        "  runpane cloud new [--label <name>] [--repo <https-url>] [--ref <ref>] [--github [--read-write] [--github-token-file <path>]] [--size <small|default|large>] [--transport <auto|https|http>] [--from <snapshot>|--no-golden] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--desktop-dir <path>|--no-import] [--timeout-ms <milliseconds>] [--keep-on-failure] --yes [--json]",
         "",
         "`runpane cloud new` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud new"
@@ -4781,10 +4881,39 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator|peers> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator|peers|github|git> [options]",
         "",
         "`runpane cloud` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud"
+      ],
+      "cloud github connect": [
+        "Usage:",
+        "  runpane cloud github connect <host> --repo <owner/name> [--read-write] [--token-file <path|->] [--json]",
+        "  runpane cloud github connect <host> --repo <owner/name> --pat-file <path|-> [--json]",
+        "",
+        "`runpane cloud github connect` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud github connect"
+      ],
+      "cloud github disconnect": [
+        "Usage:",
+        "  runpane cloud github disconnect <host> [--repo <owner/name>] [--token-file <path|->] [--json]",
+        "",
+        "`runpane cloud github disconnect` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud github disconnect"
+      ],
+      "cloud github list": [
+        "Usage:",
+        "  runpane cloud github list [<host>] [--json]",
+        "",
+        "`runpane cloud github list` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud github list"
+      ],
+      "cloud git push": [
+        "Usage:",
+        "  runpane cloud git push <host> --path <dir> --branch <branch> [--repo <owner/name>] [--prefix <prefix/>] [--force] [--token-file <path|->] [--json]",
+        "",
+        "`runpane cloud git push` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud git push"
       ]
     }
   },
@@ -14439,13 +14568,29 @@ export const RUNPANE_CONTRACT = {
             "name": "--repo",
             "value": "<https-url>",
             "required": false,
-            "description": "Public repository to clone into the sandbox."
+            "description": "Repository to clone into the sandbox: public HTTPS, or a private GitHub one with --github."
           },
           {
             "name": "--ref",
             "value": "<ref>",
             "required": false,
             "description": "Branch or tag to check out."
+          },
+          {
+            "name": "--github",
+            "required": false,
+            "description": "Clone --repo over a deploy key generated in the sandbox (private repositories; see runpane cloud github connect)."
+          },
+          {
+            "name": "--read-write",
+            "required": false,
+            "description": "With --github: a writable deploy key."
+          },
+          {
+            "name": "--github-token-file",
+            "value": "<path>",
+            "required": false,
+            "description": "With --github: your GitHub token file instead of `gh auth token`."
           },
           {
             "name": "--size",
@@ -14676,7 +14821,7 @@ export const RUNPANE_CONTRACT = {
       },
       "cloud destroy": {
         "name": "cloud destroy",
-        "summary": "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host.",
+        "summary": "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host. Deletes its GitHub deploy keys first.",
         "details": "Order matters: the tailnet device is deleted through the Tailscale API first, so no orphan node keeps the host name; then the sandbox; then the local record and the desktop profile.",
         "requiresPaneDaemon": false,
         "mutates": true,
@@ -15172,6 +15317,176 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Values are resolved on this machine and reach the sandbox only in a 0600 file written over the provider files API: never in sandbox metadata, env, command lines or logs. Production, infrastructure and secret-manager names (PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*, plus settings.json secretsDenyList) are refused.",
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud github connect": {
+        "name": "cloud github connect",
+        "summary": "Let a cloud Session reach one GitHub repository: generates an ed25519 key inside the sandbox and registers its public half as a read-only deploy key with your GitHub credential, which never enters the sandbox.",
+        "details": "The private key stays in the sandbox (0600). The sandbox gets the ssh host alias github.com-<owner>-<name> with github.com's host keys pinned, so git clone git@github.com-<owner>-<name>:<owner>/<name>.git works there. Registering a deploy key needs admin on the repository. The Session must be awake.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "The cloud Session."
+          },
+          {
+            "name": "--repo",
+            "value": "<owner/name>",
+            "required": true,
+            "description": "The repository, as owner/name or a GitHub URL."
+          },
+          {
+            "name": "--read-write",
+            "required": false,
+            "description": "Register a writable deploy key: anything in the Session could push to any branch. Prefer runpane cloud git push."
+          },
+          {
+            "name": "--token-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "Your GitHub token in a file (or - for stdin) instead of `gh auth token`; it stays on this machine."
+          },
+          {
+            "name": "--pat-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "Use this fine-grained personal access token instead of a deploy key; kept in a 0600 file in the sandbox. Classic tokens are refused."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud github connect rp-alpha123 --repo acme/shop"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud github disconnect": {
+        "name": "cloud github disconnect",
+        "summary": "Remove a cloud Session's GitHub access: deletes its deploy key on GitHub and the key (or token) files in the sandbox.",
+        "details": "The deploy key is deleted on GitHub even while the Session sleeps. A personal access token is shredded in the sandbox (it must be awake); delete the token itself on GitHub.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "The cloud Session."
+          },
+          {
+            "name": "--repo",
+            "value": "<owner/name>",
+            "required": false,
+            "description": "Which repository, when the Session has several."
+          },
+          {
+            "name": "--token-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "Your GitHub token in a file (or - for stdin) instead of `gh auth token`; it stays on this machine."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud github disconnect rp-alpha123"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud github list": {
+        "name": "cloud github list",
+        "summary": "List which GitHub repositories each cloud Session can reach.",
+        "details": "Reads the local records; no network calls.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": false,
+            "description": "Only this cloud Session."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud github list"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud git push": {
+        "name": "cloud git push",
+        "summary": "Publish a cloud Session's branch: bundles it in the sandbox, brings it to this machine and pushes it with your GitHub credential to cloud/<host>/<branch>. Never pushes to the default branch, main or master.",
+        "details": "Only the commits GitHub does not have travel, as a git bundle. The target is always <prefix><branch>; it prints a compare URL to open a pull request from.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "The cloud Session."
+          },
+          {
+            "name": "--path",
+            "value": "<dir>",
+            "required": true,
+            "description": "The repository directory in the Session (relative paths are under /home/user)."
+          },
+          {
+            "name": "--branch",
+            "value": "<branch>",
+            "required": true,
+            "description": "The local branch in the Session to publish."
+          },
+          {
+            "name": "--repo",
+            "value": "<owner/name>",
+            "required": false,
+            "description": "The GitHub repository (default: the directory's origin remote)."
+          },
+          {
+            "name": "--prefix",
+            "value": "<prefix/>",
+            "required": false,
+            "description": "Branch prefix to push under (default cloud/<host>/)."
+          },
+          {
+            "name": "--force",
+            "required": false,
+            "description": "Overwrite the target branch when it has diverged (it is always under the prefix)."
+          },
+          {
+            "name": "--token-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "Your GitHub token in a file (or - for stdin) instead of `gh auth token`; it stays on this machine."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud git push rp-alpha123 --path shop --branch fix-checkout"
+        ],
+        "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
         ]
       }

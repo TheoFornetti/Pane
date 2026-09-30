@@ -50,6 +50,9 @@ export interface SandboxHandle {
   writeFile(path: string, content: string): Promise<void>;
 }
 
+/** The largest file one `readFile` call returns (boat answers 400 above 5 MiB). */
+export const MAX_SANDBOX_READ_BYTES = 4 * 1024 * 1024;
+
 /** A provider API key limited to some actions, e.g. the coordinator's stop/resume-only key. */
 export interface ScopedKeyRequest {
   name: string;
@@ -78,6 +81,11 @@ export interface CloudProvider {
   /** Permanently deletes the sandbox and its disk. Idempotent: a 404 counts as deleted. */
   destroy(sandboxId: string): Promise<void>;
   handle(sandboxId: string): SandboxHandle;
+  /**
+   * Reads one file from the sandbox (under /home/user or /tmp). boat caps a read at 5 MiB, so callers
+   * split bigger files first (see MAX_SANDBOX_READ_BYTES).
+   */
+  readFile(sandboxId: string, path: string): Promise<Buffer>;
   createScopedKey(request: ScopedKeyRequest): Promise<ScopedKey>;
   /** Revokes an API key. Idempotent: a 404 counts as revoked. */
   revokeKey(keyId: string): Promise<void>;

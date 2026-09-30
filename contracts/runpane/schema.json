@@ -545,7 +545,11 @@
         "cloud peers list",
         "cloud secrets set",
         "cloud secrets list",
-        "cloud secrets rm"
+        "cloud secrets rm",
+        "cloud github connect",
+        "cloud github disconnect",
+        "cloud github list",
+        "cloud git push"
       ],
       "properties": {
         "default": {
@@ -855,6 +859,18 @@
           "$ref": "#/$defs/helpLines"
         },
         "cloud secrets rm": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud github connect": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud github disconnect": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud github list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud git push": {
           "$ref": "#/$defs/helpLines"
         }
       },

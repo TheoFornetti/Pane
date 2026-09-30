@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -6,8 +7,9 @@ import type { CloudDeps } from '../commands';
 import { NO_COORDINATOR } from '../coordinatorSync';
 import { encodePairingCode } from '../pairing';
 import type { BootstrapPort, ProvisionRequest, TailnetDevice, TailnetPort } from '../ports';
+import type { BundlePushRequest, GitHubPort, GitHubRepoInfo } from '../githubApi';
 import { CloudProviderError, type CloudProvider, type CloudSandbox, type CloudSize, type CreateSandboxRequest, type SandboxHandle } from '../provider';
-import { createCloudStore } from '../store';
+import { createCloudStore, type GitHubTokenSource } from '../store';
 
 /**
  * In-memory fakes for the `runpane cloud` tests: a provider whose sandboxes move through states
@@ -51,6 +53,24 @@ interface FakeWorld {
   /** What the daemon's safe-to-stop answers `cloud stop`; 'unreachable' makes the call fail. */
   safeToStop?: { safe: boolean; blockers: { condition: string; message: string }[] } | 'unreachable';
   failRename?: string;
+  github: FakeGitHub;
+  /** Binary files readable with provider.readFile, by `<sandboxId>:<path>`. */
+  binaryFiles: Map<string, Buffer>;
+  /** The repository URL each provision was asked to clone. */
+  provisionRepos: string[];
+}
+
+/** GitHub as the laptop's credential sees it, plus what the sandbox's git steps report. */
+export interface FakeGitHub {
+  repos: Map<string, GitHubRepoInfo>;
+  keys: { repo: string; id: number; title: string; key: string; readOnly: boolean }[];
+  nextKeyId: number;
+  pushes: BundlePushRequest[];
+  tokenSources: GitHubTokenSource[];
+  /** The sandbox's ls-remote with the new credential fails. */
+  verifyFails?: boolean;
+  /** What the sandbox's bundle step finds; `data` is split into parts the provider can read back. */
+  bundle?: { head: string; origin: string; prerequisites: string[]; commits: number; data?: Buffer };
 }
 
 export interface FakeDaemon {
@@ -62,6 +82,9 @@ function createFakeWorld(): FakeWorld {
   return {
     sandboxes: new Map(), devices: [], calls: [], scripts: [], healthy: new Set(),
     files: new Map(), daemons: new Map(), coordinatorHealthy: true, sandboxCounter: 0, createdByKey: new Map(), loggedOut: new Set(), serveLost: new Set(),
+    binaryFiles: new Map(),
+    provisionRepos: [],
+    github: { repos: new Map(), keys: [], nextKeyId: 100, pushes: [], tokenSources: [] },
   };
 }
 
@@ -85,6 +108,8 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       world.calls.push(`script ${id}`);
       world.scripts.push({ sandboxId: id, script });
       if (script.includes('tailscale ip -4')) return { exitCode: 0, stdout: '100.64.0.9\n', stderr: '' };
+      const github = fakeSandboxGit(world, id, script);
+      if (github) return github;
       const install = /install -m 600 (\S+) (\S+peers\.json)/u.exec(script);
       if (install) world.files.set(`${id}:${install[2]}`, world.files.get(`${id}:${install[1]}`) ?? '');
       return { exitCode: 0, stdout: script.includes('RP_AGENT_ENV') ? 'RP_AGENT_ENV ok\n' : 'RP_COORD ok\n', stderr: '' };
@@ -153,6 +178,12 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
       world.sandboxes.delete(id);
     },
     handle,
+    async readFile(id, filePath) {
+      world.calls.push(`read ${id} ${filePath}`);
+      const data = world.binaryFiles.get(`${id}:${filePath}`);
+      if (!data) throw new CloudProviderError(`fake: no file ${filePath}`, 404);
+      return data;
+    },
     async createScopedKey(request) {
       if (world.maxKeyTtlDays !== undefined && Number.parseInt(request.ttl, 10) > world.maxKeyTtlDays) {
         throw new CloudProviderError('boat POST /api-keys/scoped failed with HTTP 403 (api_key_action_forbidden): A delegated key cannot outlive its parent.', 403, 'api_key_action_forbidden');
@@ -162,6 +193,100 @@ function createFakeProvider(world: FakeWorld): CloudProvider {
     },
     async revokeKey(keyId) {
       world.calls.push(`revoke-key ${keyId}`);
+    },
+  };
+}
+
+/** The sandbox side of `runpane cloud github|git`: keygen, ls-remote, bundle and cleanup scripts. */
+function fakeSandboxGit(world: FakeWorld, id: string, script: string) {
+  if (script.includes('ssh-keygen -q -t ed25519')) {
+    world.calls.push(`sandbox-keygen ${id}`);
+    return { exitCode: 0, stdout: `RP_PUBKEY ssh-ed25519 AAAAC3fake${id} runpane-cloud\nRP_FPR SHA256:fake${id}\n`, stderr: '' };
+  }
+  if (script.includes('git ls-remote')) {
+    world.calls.push(`sandbox-ls-remote ${id} ${/git ls-remote '([^']+)'/u.exec(script)?.[1] ?? ''}`);
+    return world.github.verifyFails
+      ? { exitCode: 1, stdout: 'RP_FAIL git@github.com: Permission denied (publickey).\n', stderr: '' }
+      : { exitCode: 0, stdout: 'RP_OK 0123456789abcdef\n', stderr: '' };
+  }
+  if (script.includes('git bundle create')) {
+    const xfer = /mkdir -p (\S+\/xfer\/[0-9a-f]+)/u.exec(script)?.[1] ?? '';
+    world.calls.push(`sandbox-bundle ${id}`);
+    const bundle = world.github.bundle;
+    if (!bundle) return { exitCode: 1, stdout: 'RP_FAIL no such local branch\n', stderr: '' };
+    const parts: string[] = [];
+    const data = bundle.data ?? Buffer.alloc(0);
+    const partSize = 4 * 1024 * 1024;
+    for (let offset = 0, index = 0; offset < data.length; offset += partSize, index++) {
+      const name = `part-${String(index).padStart(4, '0')}`;
+      world.binaryFiles.set(`${id}:${xfer}/${name}`, data.subarray(offset, offset + partSize));
+      parts.push(name);
+    }
+    const summary = {
+      head: bundle.head,
+      origin: bundle.origin,
+      prerequisites: bundle.prerequisites,
+      commits: bundle.commits,
+      size: data.length,
+      sha256: data.length ? createHash('sha256').update(data).digest('hex') : '',
+      parts,
+    };
+    return { exitCode: 0, stdout: `RP_BUNDLE ${JSON.stringify(summary)}\n`, stderr: '' };
+  }
+  if (script.includes('rp_github_known_hosts') || script.includes('runpane-cloud-git')) {
+    world.calls.push(`sandbox-credential-cleanup ${id}`);
+    return { exitCode: 0, stdout: 'RP_OK removed\n', stderr: '' };
+  }
+  if (script.startsWith('rm -rf ') && script.includes('/xfer/')) {
+    world.calls.push(`sandbox-xfer-cleanup ${id}`);
+    return { exitCode: 0, stdout: '', stderr: '' };
+  }
+  return undefined;
+}
+
+function createFakeGitHub(world: FakeWorld): GitHubPort {
+  const github = world.github;
+  return {
+    async resolveToken(source) {
+      github.tokenSources.push(source);
+      return 'laptop-gh-token';
+    },
+    api(token) {
+      const repoInfo = (repo: string) => {
+        const info = [...github.repos.values()].find((candidate) => candidate.fullName.toLowerCase() === repo.toLowerCase());
+        if (!info) throw new Error(`GitHub GET /repos/${repo} failed with HTTP 404: Not Found`);
+        return info;
+      };
+      return {
+        async getRepo(repo) {
+          world.calls.push(`github-get-repo ${repo} ${token}`);
+          return repoInfo(repo);
+        },
+        async addDeployKey(repo, key) {
+          world.calls.push(`github-add-key ${repo} ${key.readOnly ? 'ro' : 'rw'}`);
+          const created = { repo: repoInfo(repo).fullName, id: github.nextKeyId++, title: key.title, key: key.key, readOnly: key.readOnly };
+          github.keys.push(created);
+          return { id: created.id, title: created.title, readOnly: created.readOnly };
+        },
+        async deleteDeployKey(repo, keyId) {
+          world.calls.push(`github-delete-key ${repo} ${keyId}`);
+          const before = github.keys.length;
+          github.keys = github.keys.filter((key) => !(key.repo === repo && key.id === keyId));
+          return github.keys.length < before;
+        },
+        async getDeployKey(repo, keyId) {
+          const key = github.keys.find((candidate) => candidate.repo === repo && candidate.id === keyId);
+          return key ? { id: key.id, title: key.title, readOnly: key.readOnly } : null;
+        },
+        async sshKnownHosts() {
+          return ['github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl'];
+        },
+      };
+    },
+    async pushBundle(request) {
+      world.calls.push(`push ${request.repo} ${request.head} -> ${request.targetRef}`);
+      github.pushes.push(request);
+      return 'created';
     },
   };
 }
@@ -213,6 +338,7 @@ function createFakeBootstrap(world: FakeWorld): BootstrapPort {
     },
     async provision(sandbox: SandboxHandle, request: ProvisionRequest) {
       world.calls.push(`provision ${sandbox.id} ${request.hostname}`);
+      if (request.repo) world.provisionRepos.push(request.repo.url);
       if (world.failProvision) throw new Error(world.failProvision);
       const nodeId = `n${request.hostname.replace(/-/g, '')}CNTRL`;
       const magicDnsName = `${request.hostname}.tailtest.ts.net`;
@@ -273,6 +399,7 @@ export async function createTestHarness(): Promise<TestHarness> {
   });
   const deps: CloudDeps = {
     store,
+    github: createFakeGitHub(world),
     createProvider: () => createFakeProvider(world),
     bootstrap: createFakeBootstrap(world),
     readSecretFile: (file) => fs.readFile(file, 'utf8'),

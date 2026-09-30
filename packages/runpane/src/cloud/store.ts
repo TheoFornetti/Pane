@@ -114,6 +114,31 @@ interface CloudHostMeta {
   repo?: { url: string; ref?: string };
   /** Sessions this one may message (J3): each is a peer record minted on the target host. */
   peers?: PeerGrant[];
+  /** GitHub repositories this Session can reach (`runpane cloud github connect`). */
+  github?: GitHubGrant[];
+}
+
+/** Where the laptop's GitHub credential came from, so disconnect and destroy can find it again. */
+export type GitHubTokenSource = { kind: 'gh' } | { kind: 'file'; path: string } | { kind: 'stdin' };
+
+/**
+ * One GitHub repository a cloud Session can reach. `deploy-key`: an ed25519 key generated inside the
+ * sandbox (the private half never leaves it), registered on the repository as a deploy key through the
+ * laptop's credential. `pat`: a fine-grained personal access token the user made, kept in a 0600 file
+ * in the sandbox. Neither ever carries the laptop's own GitHub credential.
+ */
+export interface GitHubGrant {
+  /** owner/name */
+  repo: string;
+  mode: 'deploy-key' | 'pat';
+  /** Deploy keys: read-only unless connected with --read-write. PATs: whatever the token allows. */
+  readOnly?: boolean;
+  /** Deploy keys: the ssh host alias (`git@<alias>:owner/name.git`) and GitHub's key id and fingerprint. */
+  sshAlias?: string;
+  keyId?: number;
+  fingerprint?: string;
+  tokenSource?: GitHubTokenSource;
+  connectedAt: string;
 }
 
 export interface PeerGrant {

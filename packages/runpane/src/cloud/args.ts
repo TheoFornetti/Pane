@@ -4,7 +4,7 @@ import { CLOUD_SIZES, type CloudSize } from './provider';
 const CLOUD_TRANSPORTS = ['auto', 'https', 'http'] as const;
 export type CloudTransport = (typeof CLOUD_TRANSPORTS)[number];
 
-const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'repair', 'destroy', 'pair', 'sync', 'coordinator', 'peers', 'secrets'] as const;
+const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'repair', 'destroy', 'pair', 'sync', 'coordinator', 'peers', 'secrets', 'github', 'git'] as const;
 type CloudSubcommand = typeof CLOUD_SUBCOMMANDS[number];
 
 /** Subcommands that act on one host, named by a positional argument or --host. */
@@ -42,7 +42,11 @@ export interface CloudArgs {
   maxLive?: number;
   coordinator?: boolean;
   noVerify: boolean;
-  /** `runpane cloud coordinator|peers|secrets ...`: everything after the subcommand, parsed by its own module. */
+  /** `new --github`: clone --repo over a deploy key generated in the sandbox (private repositories). */
+  github: boolean;
+  readWrite: boolean;
+  githubTokenFile?: string;
+  /** `runpane cloud coordinator|peers|secrets|github|git ...`: everything after the subcommand, parsed by its own module. */
   passthrough: string[];
 }
 
@@ -74,6 +78,7 @@ const VALUE_FLAGS = new Map<string, ValueFlag>([
   ['--claude-token-file', 'claudeTokenFile'],
   ['--golden', 'golden'],
   ['--max-live', 'maxLive'],
+  ['--github-token-file', 'githubTokenFile'],
 ]);
 
 const BOOLEAN_FLAGS = new Map<string, BooleanFlag>([
@@ -87,6 +92,8 @@ const BOOLEAN_FLAGS = new Map<string, BooleanFlag>([
   ['--no-golden', 'noGolden'],
   ['--pane-preinstalled', 'panePreinstalled'],
   ['--no-verify', 'noVerify'],
+  ['--github', 'github'],
+  ['--read-write', 'readWrite'],
 ]);
 
 /** Flags each subcommand accepts, beyond --json. */
@@ -95,7 +102,8 @@ const ALLOWED = {
     '--golden', '--no-golden', '--size', '--transport', '--name-prefix', '--pane-deb-url', '--pane-npm-spec', '--pane-preinstalled', '--max-live',
     '--coordinator', '--no-coordinator', '--no-verify'],
   new: ['--label', '--repo', '--ref', '--size', '--transport', '--from', '--no-golden', '--name-prefix', '--pane-deb-url', '--pane-npm-spec',
-    '--pane-preinstalled', '--desktop-dir', '--no-import', '--timeout-ms', '--keep-on-failure', '--yes', '-y'],
+    '--pane-preinstalled', '--desktop-dir', '--no-import', '--timeout-ms', '--keep-on-failure', '--yes', '-y',
+    '--github', '--read-write', '--github-token-file'],
   list: [],
   status: ['--host'],
   stop: ['--host', '--yes', '-y', '--force', '--no-wait'],
@@ -107,6 +115,8 @@ const ALLOWED = {
   coordinator: [],
   peers: [],
   secrets: [],
+  github: [],
+  git: [],
 } satisfies Record<CloudSubcommand, readonly string[]>;
 
 function isCloudSubcommand(value: string | undefined): value is CloudSubcommand {
@@ -130,9 +140,11 @@ export function parseCloudArgs(argv: readonly string[]): CloudArgs {
     noGolden: false,
     panePreinstalled: false,
     noVerify: false,
+    github: false,
+    readWrite: false,
     passthrough: [],
   };
-  if (first === 'coordinator' || first === 'peers' || first === 'secrets') {
+  if (first === 'coordinator' || first === 'peers' || first === 'secrets' || first === 'github' || first === 'git') {
     parsed.passthrough = [...rest];
     return parsed;
   }
@@ -182,6 +194,10 @@ export function parseCloudArgs(argv: readonly string[]): CloudArgs {
   if ([parsed.paneDebUrl, parsed.paneNpmSpec, parsed.panePreinstalled || undefined].filter(Boolean).length > 1) {
     throw new Error('Use only one of --pane-deb-url, --pane-npm-spec, --pane-preinstalled.');
   }
+  if ((parsed.readWrite || parsed.githubTokenFile) && !parsed.github) {
+    throw new Error('--read-write and --github-token-file go with --github.');
+  }
+  if (parsed.github && !parsed.repo) throw new Error('--github needs --repo <owner/name or GitHub URL>.');
   if (parsed.noGolden && (parsed.fromSnapshot || parsed.golden)) {
     throw new Error('--no-golden cannot be combined with --from or --golden.');
   }

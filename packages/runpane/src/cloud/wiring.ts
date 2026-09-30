@@ -12,6 +12,7 @@ import type { CloudDeps, CloudSafeToStopAnswer } from './commands';
 import { callCoordinator, readClientConfig } from './coordinator/client';
 import { NO_COORDINATOR, type CoordinatorPushResult } from './coordinatorSync';
 import { defaultDesktopDir } from './desktop';
+import { createGitHubPort } from './githubApi';
 import type { BootstrapPort } from './ports';
 import { createCloudStore } from './store';
 import { createTailscaleApi } from './tailscale';
@@ -98,6 +99,7 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
     },
     safeToStop: (profile) => askSafeToStop(profile),
     runLocal,
+    github: createGitHubPort(readSecretFile),
   };
 }
 

@@ -1293,9 +1293,9 @@
     },
     {
       "name": "cloud setup",
-      "summary": "Save the cloud provider key, Tailscale OAuth client and optional Anthropic key locally (0600) for runpane cloud.",
+      "summary": "Save the cloud provider key, Tailscale OAuth client and optional agent sign-in (Anthropic API key or Claude token) locally (0600) for runpane cloud.",
       "usage": [
-        "runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]"
+        "runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]"
       ],
       "mutates": true,
       "wrappers": [
@@ -1394,6 +1394,95 @@
       "summary": "Run or manage the always-on runpane cloud coordinator (idle-stop, reconcile, wake).",
       "usage": [
         "runpane cloud coordinator <subcommand> [options]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator deploy",
+      "summary": "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (stop + alert only) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
+      "usage": [
+        "runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--json]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator status",
+      "summary": "Show the coordinator: sandbox state, service health and version. With a host, asks the coordinator about that cloud Session instead (never wakes it).",
+      "usage": [
+        "runpane cloud coordinator status [--json]",
+        "runpane cloud coordinator status <host>"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator stop",
+      "summary": "Stop the coordinator sandbox. Cloud Sessions keep running, but idle-stop and wake-on-submit pause until it starts again.",
+      "usage": [
+        "runpane cloud coordinator stop --yes [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator start",
+      "summary": "Start a stopped coordinator and wait until its service answers /health.",
+      "usage": [
+        "runpane cloud coordinator start [--json]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator destroy",
+      "summary": "Delete the coordinator: its tailnet device, its sandbox, and its scoped provider key.",
+      "usage": [
+        "runpane cloud coordinator destroy --yes [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud peers allow",
+      "summary": "Let one cloud Session message another: mints a peer record on the target, allowlisted to one of its Pane Sessions (orchestrator panel only), and writes it into the source's peers list. Nothing is allowed by default.",
+      "usage": [
+        "runpane cloud peers allow <from-host> <to-host> [--session <session>] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud peers revoke",
+      "summary": "Stop one cloud Session from messaging another: deletes the peer record on the target and updates the source's peers list.",
+      "usage": [
+        "runpane cloud peers revoke <from-host> <to-host> [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud peers list",
+      "summary": "List which cloud Sessions may message which.",
+      "usage": [
+        "runpane cloud peers list [<host>] [--json]"
       ],
       "wrappers": [
         "npm"
@@ -3092,9 +3181,9 @@
       ],
       "cloud setup": [
         "Usage:",
-        "  runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
+        "  runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
         "",
-        "Save the cloud provider key, Tailscale OAuth client and optional Anthropic key locally (0600) for runpane cloud.",
+        "Save the cloud provider key, Tailscale OAuth client and optional agent sign-in (Anthropic API key or Claude token) locally (0600) for runpane cloud.",
         "",
         "Options:",
         "  --boat-key-file <path|->           File (or - for stdin) holding the boat.dev API key.",
@@ -3102,6 +3191,7 @@
         "  --tailscale-secret-file <path|->   File (or - for stdin) holding the Tailscale OAuth client secret.",
         "  --tailscale-tailnet <name>         Tailnet name; default is the OAuth client's own tailnet.",
         "  --anthropic-key-file <path|->      File (or - for stdin) holding an Anthropic API key for cloud Sessions.",
+        "  --claude-token-file <path|->       File (or - for stdin) holding a Claude token (claude setup-token) for cloud Sessions.",
         "  --golden <snapshot>                Named snapshot new cloud Sessions start from.",
         "  --no-golden                        Start new cloud Sessions from the plain image.",
         "  --size <small|default|large>       Default machine size.",
@@ -3224,9 +3314,105 @@
         "Options:",
         "  <subcommand>   Coordinator subcommand."
       ],
+      "cloud coordinator deploy": [
+        "Usage:",
+        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--json]",
+        "",
+        "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (stop + alert only) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
+        "",
+        "Options:",
+        "  --yes                          Confirm; the command changes billed cloud resources.",
+        "  --name <host>                  Tailnet and sandbox name (default <name-prefix>-coord).",
+        "  --size <small|default|large>   Machine size (default small).",
+        "  --from <snapshot>              Named snapshot to start from (default the saved golden snapshot).",
+        "  --no-golden                    Start from the plain image.",
+        "  --reconcile                    Turn the reconciler on (default: on; stop + alert only, never deletes).",
+        "  --no-reconcile                 Turn the reconciler off.",
+        "  --idle-check-seconds <n>       How often idle-stop asks each awake Session (default 300).",
+        "  --wake-grace-seconds <n>       How long after a wake idle-stop leaves a Session alone (default 600).",
+        "  --pin-version <version>        Pane version to upgrade Sessions to when they wake.",
+        "  --pin-deb-url <url>            The .deb of the pinned version.",
+        "  --pin-deb-sha256 <hex>         SHA-256 of that .deb (required: the daemon installs it as root).",
+        "  --no-pin                       Remove the pinned version.",
+        "  --key-ttl <duration>           Scoped provider key lifetime, e.g. 90d (default 365d).",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud coordinator status": [
+        "Usage:",
+        "  runpane cloud coordinator status [--json]",
+        "  runpane cloud coordinator status <host>",
+        "",
+        "Show the coordinator: sandbox state, service health and version. With a host, asks the coordinator about that cloud Session instead (never wakes it).",
+        "",
+        "Options:",
+        "  <host>   Optional cloud Session to ask the coordinator about.",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud coordinator stop": [
+        "Usage:",
+        "  runpane cloud coordinator stop --yes [--json]",
+        "",
+        "Stop the coordinator sandbox. Cloud Sessions keep running, but idle-stop and wake-on-submit pause until it starts again.",
+        "",
+        "Options:",
+        "  --yes    Confirm; the command changes billed cloud resources.",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud coordinator start": [
+        "Usage:",
+        "  runpane cloud coordinator start [--json]",
+        "",
+        "Start a stopped coordinator and wait until its service answers /health.",
+        "",
+        "Options:",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud coordinator destroy": [
+        "Usage:",
+        "  runpane cloud coordinator destroy --yes [--json]",
+        "",
+        "Delete the coordinator: its tailnet device, its sandbox, and its scoped provider key.",
+        "",
+        "Options:",
+        "  --yes    Confirm; the command changes billed cloud resources.",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud peers allow": [
+        "Usage:",
+        "  runpane cloud peers allow <from-host> <to-host> [--session <session>] [--json]",
+        "",
+        "Let one cloud Session message another: mints a peer record on the target, allowlisted to one of its Pane Sessions (orchestrator panel only), and writes it into the source's peers list. Nothing is allowed by default.",
+        "",
+        "Options:",
+        "  <from-host>           The cloud Session that may send.",
+        "  <to-host>             The cloud Session that receives; it must be awake.",
+        "  --session <session>   Pane Session on <to-host> (id or exact name); needed when it has more than one.",
+        "  --json                Print machine-readable output."
+      ],
+      "cloud peers revoke": [
+        "Usage:",
+        "  runpane cloud peers revoke <from-host> <to-host> [--json]",
+        "",
+        "Stop one cloud Session from messaging another: deletes the peer record on the target and updates the source's peers list.",
+        "",
+        "Options:",
+        "  <from-host>   The cloud Session that could send.",
+        "  <to-host>     The cloud Session that received.",
+        "  --json        Print machine-readable output."
+      ],
+      "cloud peers list": [
+        "Usage:",
+        "  runpane cloud peers list [<host>] [--json]",
+        "",
+        "List which cloud Sessions may message which.",
+        "",
+        "Options:",
+        "  <host>   Only grants from or to this cloud Session.",
+        "  --json   Print machine-readable output."
+      ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator|peers> [options]",
         "",
         "Run each Pane Session on its own cloud sandbox with a normal Pane daemon, paired to your Pane apps as a remote host.",
         "Keys stay on this machine (~/.config/runpane-cloud, 0600). Pane desktop only lists the saved remote hosts.",
@@ -4347,7 +4533,7 @@
       ],
       "cloud setup": [
         "Usage:",
-        "  runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
+        "  runpane cloud setup [--boat-key-file <path|->] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--anthropic-key-file <path|->] [--claude-token-file <path|->] [--golden <snapshot>|--no-golden] [--size <small|default|large>] [--name-prefix <prefix>] [--pane-deb-url <url>|--pane-npm-spec <spec>|--pane-preinstalled] [--max-live <count>] [--coordinator|--no-coordinator] [--no-verify] [--json]",
         "",
         "`runpane cloud setup` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud setup"
@@ -4415,9 +4601,66 @@
         "`runpane cloud coordinator` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud coordinator"
       ],
+      "cloud coordinator deploy": [
+        "Usage:",
+        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--json]",
+        "",
+        "`runpane cloud coordinator deploy` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator deploy"
+      ],
+      "cloud coordinator status": [
+        "Usage:",
+        "  runpane cloud coordinator status [--json]",
+        "  runpane cloud coordinator status <host>",
+        "",
+        "`runpane cloud coordinator status` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator status"
+      ],
+      "cloud coordinator stop": [
+        "Usage:",
+        "  runpane cloud coordinator stop --yes [--json]",
+        "",
+        "`runpane cloud coordinator stop` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator stop"
+      ],
+      "cloud coordinator start": [
+        "Usage:",
+        "  runpane cloud coordinator start [--json]",
+        "",
+        "`runpane cloud coordinator start` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator start"
+      ],
+      "cloud coordinator destroy": [
+        "Usage:",
+        "  runpane cloud coordinator destroy --yes [--json]",
+        "",
+        "`runpane cloud coordinator destroy` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator destroy"
+      ],
+      "cloud peers allow": [
+        "Usage:",
+        "  runpane cloud peers allow <from-host> <to-host> [--session <session>] [--json]",
+        "",
+        "`runpane cloud peers allow` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud peers allow"
+      ],
+      "cloud peers revoke": [
+        "Usage:",
+        "  runpane cloud peers revoke <from-host> <to-host> [--json]",
+        "",
+        "`runpane cloud peers revoke` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud peers revoke"
+      ],
+      "cloud peers list": [
+        "Usage:",
+        "  runpane cloud peers list [<host>] [--json]",
+        "",
+        "`runpane cloud peers list` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud peers list"
+      ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|destroy|pair|sync|coordinator|peers> [options]",
         "",
         "`runpane cloud` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud"
@@ -13863,7 +14106,7 @@
       },
       "cloud setup": {
         "name": "cloud setup",
-        "summary": "Save the cloud provider key, Tailscale OAuth client and optional Anthropic key locally (0600) for runpane cloud.",
+        "summary": "Save the cloud provider key, Tailscale OAuth client and optional agent sign-in (Anthropic API key or Claude token) locally (0600) for runpane cloud.",
         "details": "Keys are read from files or stdin, never from arguments, and are stored in ~/.config/runpane-cloud (override with $RUNPANE_CLOUD_DIR). The desktop app never sees them.",
         "requiresPaneDaemon": false,
         "mutates": true,
@@ -13897,6 +14140,12 @@
             "value": "<path|->",
             "required": false,
             "description": "File (or - for stdin) holding an Anthropic API key for cloud Sessions."
+          },
+          {
+            "name": "--claude-token-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "File (or - for stdin) holding a Claude token (claude setup-token) for cloud Sessions."
           },
           {
             "name": "--golden",
@@ -14302,6 +14551,291 @@
         ],
         "examples": [
           "runpane cloud coordinator --help"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator deploy": {
+        "name": "cloud coordinator deploy",
+        "summary": "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (stop + alert only) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
+        "details": "Creates a small sandbox from the golden image, joins it to the tailnet as tag:rp-session (Tailscale SSH off), mints a provider key scoped to sandbox.read/stop/resume, installs the coordinator service from this CLI's own package, writes this machine's caller token to <cloud dir>/coordinator.json (0600) and pushes the directory. Run it again to update the service or change settings in place; it never creates a second coordinator. Afterwards `runpane cloud new` adds the coordinator's paired client to each Session so idle-stop can ask safe-to-stop.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm; the command changes billed cloud resources."
+          },
+          {
+            "name": "--name",
+            "value": "<host>",
+            "required": false,
+            "description": "Tailnet and sandbox name (default <name-prefix>-coord)."
+          },
+          {
+            "name": "--size",
+            "value": "<small|default|large>",
+            "required": false,
+            "description": "Machine size (default small)."
+          },
+          {
+            "name": "--from",
+            "value": "<snapshot>",
+            "required": false,
+            "description": "Named snapshot to start from (default the saved golden snapshot)."
+          },
+          {
+            "name": "--no-golden",
+            "required": false,
+            "description": "Start from the plain image."
+          },
+          {
+            "name": "--reconcile",
+            "required": false,
+            "description": "Turn the reconciler on (default: on; stop + alert only, never deletes)."
+          },
+          {
+            "name": "--no-reconcile",
+            "required": false,
+            "description": "Turn the reconciler off."
+          },
+          {
+            "name": "--idle-check-seconds",
+            "value": "<n>",
+            "required": false,
+            "description": "How often idle-stop asks each awake Session (default 300)."
+          },
+          {
+            "name": "--wake-grace-seconds",
+            "value": "<n>",
+            "required": false,
+            "description": "How long after a wake idle-stop leaves a Session alone (default 600)."
+          },
+          {
+            "name": "--pin-version",
+            "value": "<version>",
+            "required": false,
+            "description": "Pane version to upgrade Sessions to when they wake."
+          },
+          {
+            "name": "--pin-deb-url",
+            "value": "<url>",
+            "required": false,
+            "description": "The .deb of the pinned version."
+          },
+          {
+            "name": "--pin-deb-sha256",
+            "value": "<hex>",
+            "required": false,
+            "description": "SHA-256 of that .deb (required: the daemon installs it as root)."
+          },
+          {
+            "name": "--no-pin",
+            "required": false,
+            "description": "Remove the pinned version."
+          },
+          {
+            "name": "--key-ttl",
+            "value": "<duration>",
+            "required": false,
+            "description": "Scoped provider key lifetime, e.g. 90d (default 365d)."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator deploy --yes"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator status": {
+        "name": "cloud coordinator status",
+        "summary": "Show the coordinator: sandbox state, service health and version. With a host, asks the coordinator about that cloud Session instead (never wakes it).",
+        "details": "Without a host: the coordinator sandbox's state, its service /health and version, the managed name prefix and pinned version. With a host: the coordinator's view of that cloud Session (awake, asleep, waking, daemon-down or lost); it never wakes it.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": false,
+            "description": "Optional cloud Session to ask the coordinator about."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator status"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator stop": {
+        "name": "cloud coordinator stop",
+        "summary": "Stop the coordinator sandbox. Cloud Sessions keep running, but idle-stop and wake-on-submit pause until it starts again.",
+        "details": "Stops the coordinator's sandbox (billing stops, disk and tailnet identity are kept). While it is stopped nothing idle-stops Sessions, and a panels submit to a sleeping Session cannot wake it.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm; the command changes billed cloud resources."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator stop --yes"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator start": {
+        "name": "cloud coordinator start",
+        "summary": "Start a stopped coordinator and wait until its service answers /health.",
+        "details": "Resumes the coordinator's sandbox; its service starts by itself (systemd user unit with lingering). Waits for /health, then pushes the directory.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator start"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator destroy": {
+        "name": "cloud coordinator destroy",
+        "summary": "Delete the coordinator: its tailnet device, its sandbox, and its scoped provider key.",
+        "details": "Deletes the coordinator's tailnet device first, then its sandbox, then revokes its scoped provider key, and removes coordinator.json and the caller secret. Existing cloud Sessions are not touched.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm; the command changes billed cloud resources."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator destroy --yes"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud peers allow": {
+        "name": "cloud peers allow",
+        "summary": "Let one cloud Session message another: mints a peer record on the target, allowlisted to one of its Pane Sessions (orchestrator panel only), and writes it into the source's peers list. Nothing is allowed by default.",
+        "details": "Calls <to-host>'s daemon with your saved token: runpane:peers:mint for <from-host>'s label, allowlisted to one Pane Session on <to-host> (the only one, or --session). The peer's token goes only into <from-host>'s peers list (~/.config/runpane-cloud/peers.json in its sandbox, 0600), where `runpane --host <to-host> panels submit --panel orchestrator` finds it. A peer may only submit to that Session's orchestrator panel, list it and wait on it. The grant is one-way.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<from-host>",
+            "required": true,
+            "description": "The cloud Session that may send."
+          },
+          {
+            "name": "<to-host>",
+            "required": true,
+            "description": "The cloud Session that receives; it must be awake."
+          },
+          {
+            "name": "--session",
+            "value": "<session>",
+            "required": false,
+            "description": "Pane Session on <to-host> (id or exact name); needed when it has more than one."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud peers allow rp-alpha123 rp-beta4567"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud peers revoke": {
+        "name": "cloud peers revoke",
+        "summary": "Stop one cloud Session from messaging another: deletes the peer record on the target and updates the source's peers list.",
+        "details": "Deletes the peer record on <to-host> (its token stops working at once), then rewrites <from-host>'s peers list. <to-host> must be awake.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<from-host>",
+            "required": true,
+            "description": "The cloud Session that could send."
+          },
+          {
+            "name": "<to-host>",
+            "required": true,
+            "description": "The cloud Session that received."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud peers revoke rp-alpha123 rp-beta4567"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud peers list": {
+        "name": "cloud peers list",
+        "summary": "List which cloud Sessions may message which.",
+        "details": "Reads the local records; no network calls.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": false,
+            "description": "Only grants from or to this cloud Session."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud peers list"
         ],
         "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."

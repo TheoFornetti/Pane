@@ -151,11 +151,12 @@ runpane --host "api work" panels submit --panel <panel id> --text "npm test" --y
 
 ### Agents in a cloud Session
 
-Agents run inside the sandbox, so they need their own sign-in there. `setup --anthropic-key-file` stores an
-Anthropic key, but the current build does not copy it into the sandbox yet (`new` prints a note saying
-so). Until it does, sign the agent in inside the Session. Open a terminal in the cloud Session from Pane
-desktop, install Claude Code if `claude` isn't there yet (`sudo npm i -g @anthropic-ai/claude-code`), and
-run `claude` once to log in. The sign-in lives on the sandbox disk and survives sleep and wake.
+Agents run inside the sandbox, so they need their own sign-in there. Save one with `runpane cloud setup`:
+`--anthropic-key-file <file|->` (an Anthropic API key) or `--claude-token-file <file|->` (a Claude
+subscription token from `claude setup-token`). Every later `new` writes it into the sandbox as a 0600
+environment file for the Pane daemon (never on a command line) and pre-answers Claude Code's first-run
+prompts, so a Claude panel works right away. Without either, open a terminal in the cloud Session and run
+`claude` once to log in; that sign-in lives on the sandbox disk and survives sleep and wake.
 
 ## 5. Sleep and wake
 
@@ -195,24 +196,53 @@ The coordinator is a small always-on service on its own boat `small` sandbox in 
   can't reach panels, shells or the event stream.
 
 <!-- coordinator-deploy:start -->
-The one-command `runpane cloud coordinator deploy` is not in this build yet. The manual steps are in
-[RUNPANE_CLOUD_COORDINATOR.md > Setting it up](RUNPANE_CLOUD_COORDINATOR.md#setting-it-up). After them,
-`~/.config/runpane-cloud/coordinator.json` points the CLI at it, and `new`, `destroy` and `sync` keep its
-directory up to date. Turn on a coordinator client for new Sessions with `runpane cloud setup --coordinator`.
-
-Once it runs, from the laptop:
+Deploy it once from the laptop (one boat start; about 20 s):
 
 ```bash
-runpane cloud coordinator status "api work"     # without waking it
+runpane cloud coordinator deploy --yes
+```
+
+It creates a `small` sandbox named `<name-prefix>-coord` from your golden image, joins it to the tailnet
+as `tag:rp-session` (Tailscale SSH off; over the tailnet it accepts only its API port, 47300), mints a
+boat key scoped to `sandbox.read`, `sandbox.stop` and `sandbox.resume` (it can't outlive your account
+key, so the CLI picks the longest lifetime boat accepts and prints it), installs the service from this
+CLI's own package, and writes `~/.config/runpane-cloud/coordinator.json` (your caller token, 0600). From
+then on:
+
+- every `runpane cloud new` adds the coordinator's scoped client to the Session and writes the Session's
+  peers list (`~/.config/runpane-cloud/peers.json` in the sandbox) naming the coordinator;
+- `new`, `destroy` and `sync` push the directory, and `runpane cloud wake` wakes through the coordinator
+  (so the pinned version and the idle-stop grace after a wake apply);
+- Sessions created before the deploy have no coordinator client, so idle-stop skips them (deploy lists
+  them).
+
+It manages sandboxes named `<name-prefix>-*` and nothing else. Its reconciler stops (never deletes)
+running sandboxes with that prefix that are not in your directory after 30 minutes, so give your cloud
+Sessions a prefix no other tooling uses (`runpane cloud setup --name-prefix ...`).
+
+```bash
+runpane cloud coordinator status                # the coordinator itself: sandbox, service, version
+runpane cloud coordinator stop --yes            # pause idle-stop and wake-on-submit (billing stops)
+runpane cloud coordinator start                 # bring it back (one boat start)
+runpane cloud coordinator deploy --yes          # run again to update it in place; no new sandbox
+runpane cloud coordinator destroy --yes         # device and sandbox; Sessions untouched (see below for the key)
+
+runpane cloud coordinator status "api work"     # its view of one Session, without waking it
 runpane cloud coordinator wake "api work"
 runpane cloud coordinator idle-check --dry-run  # what idle-stop would stop now
 runpane cloud coordinator reconcile --dry-run
 runpane cloud coordinator alerts
 ```
 
-To take it down or bring it back, run `systemctl --user stop|start runpane-cloud-coordinator` on the
-coordinator sandbox. While it is down, idle Sessions just stay awake and nothing can wake a sleeping one
-except `runpane cloud wake`.
+Deploy options: `--idle-check-seconds <n>` (default 300; a Session is stopped after two safe answers in a
+row) and `--wake-grace-seconds <n>` (default 600) are kept across redeploys; `--no-reconcile` turns the
+reconciler off; `--pin-version <v> --pin-deb-url <url> --pin-deb-sha256 <hex>` pins the Pane version, and
+every Session the coordinator wakes is upgraded to it before it counts as awake (`--no-pin` removes the
+pin). While the coordinator is stopped, idle Sessions just stay awake and only `runpane cloud wake` wakes
+a sleeping one.
+
+boat only lets its dashboard revoke API keys, so `destroy` can't revoke the coordinator's scoped key: it
+prints the key id, and you revoke it under API Keys in boat's dashboard (it also expires on its own).
 <!-- coordinator-deploy:end -->
 
 ## 7. Let one Session message another (peers)
@@ -223,27 +253,29 @@ sees `[peer message from <A's label>] <text>`, at most 10 messages a minute. A t
 B's orchestrator agent, so allow only Sessions you would let type into it.
 
 <!-- peers:start -->
-The commands run on B's daemon. In this build, run them in a terminal inside Session B (Pane desktop
-connected to B, or `runpane cloud pair` plus the phone app):
+From the laptop, with both Sessions set up by `runpane cloud new`:
 
 ```bash
-runpane peers mint --name "Session A" --yes --json            # data.connectionCode is a secret for A only
-runpane peers allow --peer "Session A" --session "<B's Session name>" --yes
-runpane peers list
-runpane peers revoke --peer "Session A" --yes                  # stops working on the next request
+runpane cloud peers allow <A> <B>      # A may message B's orchestrator; B must be awake
+runpane cloud peers list
+runpane cloud peers revoke <A> <B>     # B deletes the record: the token stops working at once
 ```
 
-In a terminal in Session A, save the code to a file only you can read (`umask 077`) and use it as the
-host:
+`allow` mints a peer record on B, allowlisted to one Pane Session on B: the only one you created, or
+`--session <name>` when B has several (B needs one; create it in Pane desktop or with
+`runpane --host <B> sessions create`). The token goes only into A's peers list in A's sandbox (0600); it is
+never printed. The grant is one-way; run `allow B A` too for replies. If A is asleep, the grant is saved
+and A's list is written when you next `runpane cloud wake A`.
+
+An agent in Session A then uses B by its host name:
 
 ```bash
-runpane --host ~/b.peer panels list
-runpane --host ~/b.peer panels submit --panel orchestrator --text "..." --yes
+runpane --host <B> panels list
+runpane --host <B> panels submit --panel orchestrator --text "..." --yes
 ```
 
-`runpane peers deny` removes one Session from a peer's allowlist and keeps the record. Waking a
-sleeping B from A also needs the coordinator in A's `~/.config/runpane-cloud/peers.json`; this build
-does not write that file for you.
+With a coordinator, that submit wakes B if it is asleep and delivers once; `panels list` and `watch`
+never wake it.
 <!-- peers:end -->
 
 ## 8. Destroy
@@ -306,8 +338,9 @@ for your other devices.
 | `setup` says a Tailscale key is invalid (401) | Wrong client id or secret, or the OAuth client lacks `auth_keys` for `tag:rp-session` |
 | `new` fails at `tailscale-join` or the /health wait | Check the tailnet policy has `tag:rp-session`. `new` has already cleaned up; rerun with `--keep-on-failure` to look inside |
 | `new` failed and `runpane cloud list` shows nothing for it | Rarely, boat creates the sandbox but naming it fails, and the CLI loses track of it. Look in boat's console for a sandbox without an `rp-` name created at that time and delete it there |
-| The desktop says "Connection failed" for a cloud host | The Session is probably asleep: `runpane cloud status <host>`, then `runpane cloud wake <host>`. If it is awake, check `tailscale status` on the laptop |
+| The desktop says "Connection failed" for a cloud host | The Session is probably asleep. The host switcher says so for cloud hosts ("Cloud host asleep or unreachable", with a Copy wake command item); run `runpane cloud wake <host>`, then pick it again. If it is awake, check `tailscale status` on the laptop |
 | The phone app can't connect | The phone must be on the same tailnet (Tailscale app signed in and connected) |
+| After a wake the Session (or the coordinator) doesn't answer; `tailscale status` in the sandbox says "Logged out" | boat sometimes restores a stopped sandbox with an empty Tailscale state file. `runpane cloud wake <host>` (or `runpane cloud coordinator start`) detects it and re-enrols the node under the same name; the pairing keeps working |
 | `status` says `daemon-down` | The sandbox runs but the Pane daemon doesn't answer. Wake it again (`stop --yes`, then `wake`), or open the sandbox in boat's console and run `systemctl --user status pane-remote-daemon` |
 | `status` says `lost` | The sandbox is gone on boat's side. `runpane cloud destroy <host> --yes` removes the tailnet device and the local record |
 | A tailnet host name got a `-1` suffix | A device with that name already existed. `destroy` deletes the device first; if you re-enrol a node by hand, delete the old device in the Tailscale admin console first |

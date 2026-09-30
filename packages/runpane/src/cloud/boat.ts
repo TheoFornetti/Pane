@@ -10,6 +10,7 @@ import {
   type CreateSandboxRequest,
   type SandboxCommandResult,
   type SandboxHandle,
+  type ScopedKeyRequest,
 } from './provider';
 
 /**
@@ -46,6 +47,7 @@ type BoatRequestBody =
   | { path: string; content: string; encoding: 'base64' }
   | { command: string; timeoutSeconds: number }
   | { type?: CloudSize }
+  | ScopedKeyRequest
   | Record<string, never>;
 
 interface BoatRequest {
@@ -95,6 +97,11 @@ const accountFields = {
   id: optionalText,
 };
 const meSchema = boundary.object({ ...accountFields, user: boundary.optional(boundary.object(accountFields)) });
+
+const scopedKeySchema = boundary.object({
+  apiKey: boundary.object({ id: boundary.nonEmptyString }),
+  secret: boundary.nonEmptyString,
+});
 
 const errorFields = { code: boundary.optional(boundary.string), message: boundary.optional(boundary.string) };
 const errorSchema = boundary.object({ ...errorFields, error: boundary.optional(boundary.object(errorFields)) });
@@ -264,6 +271,15 @@ export function createBoatProvider(options: BoatProviderOptions): CloudProvider 
       );
     },
     handle,
+    async createScopedKey(keyRequest) {
+      // Not retried: a resend after a lost response would mint a second key.
+      const request: BoatRequest = { method: 'POST', path: '/api-keys/scoped', body: keyRequest };
+      const created = decode(await call(request, [200, 201]), scopedKeySchema, request);
+      return { id: created.apiKey.id, secret: created.secret };
+    },
+    async revokeKey(keyId) {
+      await call({ method: 'DELETE', path: `/api-keys/${encodeURIComponent(keyId)}` }, [200, 202, 204, 404]);
+    },
   };
 }
 

@@ -12,7 +12,7 @@
 . "$E2E_LIB/provision.sh"; . "$E2E_LIB/fixtures.sh"; . "$E2E_LIB/cli.sh"
 export E2E_DAEMON_DEB_URL="${E2E_DAEMON_DEB_URL-$(dist_url deb)}"
 e2e_init M4-coordinator
-wait_start_budget 4
+wait_start_budget $([ "${E2E_M4_SKIP_RECONCILE:-0}" = 1 ] && echo 2 || echo 3)
 cli_resolve || { rec cli BLOCKED "runpane CLI under test not installable"; exit 1; }
 E2E_TARGET="${E2E_TARGET_OVERRIDE:-${E2E_CLI_SOURCE##*/}}"; export E2E_TARGET
 
@@ -43,7 +43,7 @@ rec coordinator-scope INFO "gate runs the coordinator with the loop's unscoped b
 # ---- fixtures: one Session with a daemon, one orphan (bare sandbox, same managed prefix)
 provision_manual m4-s small || exit 1
 S_ID=$SB_ID; S_HOST=$SB_HOST; S_PAIR=$SB_PAIRING; S_BASE=$SB_BASE
-O_ID=$(sb_create "m4-orphan-$(date -u +%H%M%S)" small) && cl boat wait "$O_ID" idle,ready,running --timeout 120 >/dev/null
+if [ "${E2E_M4_SKIP_RECONCILE:-0}" != 1 ]; then O_ID=$(sb_create "m4-orphan-$(date -u +%H%M%S)" small) && cl boat wait "$O_ID" idle,ready,running --timeout 120 >/dev/null; fi
 fx=$(fixture_shell_pane "$S_ID" m4shell | tail -1); SHELL_PANEL=$(jget 'd["panelId"]' <<<"$fx")
 TOKEN_JSON=$(python3 -c 'import sys;sys.path.insert(0,sys.argv[2]);import cloudlab,json;print(json.dumps(cloudlab.read_pairing(sys.argv[1])["token"]))' "$S_PAIR" "$E2E_LIB")
 write_dir() {  # write_dir <json-sessions-array>
@@ -53,6 +53,7 @@ S_ENTRY="[{\"sessionId\":\"$S_HOST\",\"label\":\"$S_HOST\",\"provider\":\"boat\"
 both_running() { local a b; a=$(cl boat get "$S_ID" --field state); b=$(cl boat get "$O_ID" --field state)
   [[ "$a" =~ ^(idle|ready|running)$ && "$b" =~ ^(idle|ready|running)$ ]] && echo yes || echo "no(S=$a,O=$b)"; }
 
+if [ "${E2E_M4_SKIP_RECONCILE:-0}" != 1 ]; then
 # ---- reconciler safety
 rm -f "$CH/directory.json"
 r=$(coord reconcile 2>>"$E2E_RUN_DIR/coord-stderr.log"); printf '%s\n' "$r" | ev reconcile-missing.json >/dev/null
@@ -77,6 +78,8 @@ os=$(cl boat get "$O_ID" --field state); ss_=$(cl boat get "$S_ID" --field state
 [ "$os" = archived ] && [[ "$ss_" =~ ^(idle|ready|running)$ ]] \
   && rec reconcile.orphan-stop-only PASS "orphan $O_ID stopped (state=$os, still exists: not deleted); listed Session untouched ($ss_)" "$E2E_RUN_DIR/reconcile-orphan.json" \
   || rec reconcile.orphan-stop-only FAIL "orphan=$os session=$ss_" "$E2E_RUN_DIR/reconcile-orphan.json"
+
+else rec reconcile SKIP "E2E_M4_SKIP_RECONCILE=1 (already gated on this head)"; fi
 
 # ---- the always-on part: one `serve` process runs the idle-stop loop and the HTTP API (its streak and resume
 #      counts live in that process, as in production). Short interval; runaway guard at 1 resume/hour.

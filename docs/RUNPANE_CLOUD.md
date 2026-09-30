@@ -25,12 +25,14 @@ client: it lists cloud Sessions next to your other remote hosts and never create
 
 ## 1. Install the CLI
 
-Runpane Cloud is not in the npm release of `runpane` yet. Install the build from the fork's latest
-prerelease (https://github.com/jamari-morrison/Pane/releases; take the `runpane-*.tgz` asset of the newest
-`rc-*` release):
+Runpane Cloud is not in the npm release of `runpane` yet. Install the build from the fork's prereleases
+(https://github.com/jamari-morrison/Pane/releases). Take the newest `rc-*` release whose notes say
+`branch rc/integration` (others are test builds of work branches); its notes carry the exact install line:
 
 ```bash
-npm i -g https://github.com/jamari-morrison/Pane/releases/download/<rc-tag>/runpane-<version>.tgz
+gh release list -R jamari-morrison/Pane --limit 5      # newest first
+gh release view rc-<sha> -R jamari-morrison/Pane       # check "branch rc/integration", copy the npm line
+npm i -g https://github.com/jamari-morrison/Pane/releases/download/rc-<sha>/runpane-<version>.tgz
 runpane version          # 2.4.141-rc.<date>.g<commit>
 runpane cloud --help     # lists setup, new, list, status, stop, wake, destroy, pair, sync, coordinator
 ```
@@ -221,8 +223,17 @@ runpane peers list
 runpane peers revoke --peer "Session A" --yes                  # stops working on the next request
 ```
 
-Session A uses the code as a host: `runpane --host <code or file> panels submit --panel orchestrator
---text "..." --yes`. `runpane peers deny` removes one Session from a peer's allowlist and keeps the record.
+In a terminal in Session A, save the code to a file only you can read (`umask 077`) and use it as the
+host:
+
+```bash
+runpane --host ~/b.peer panels list
+runpane --host ~/b.peer panels submit --panel orchestrator --text "..." --yes
+```
+
+`runpane peers deny` removes one Session from a peer's allowlist and keeps the record. Waking a
+sleeping B from A also needs the coordinator in A's `~/.config/runpane-cloud/peers.json`; this build
+does not write that file for you.
 <!-- peers:end -->
 
 ## 8. Destroy
@@ -263,6 +274,7 @@ with boat's message; the CLI does not retry. Wait and run it again.
 | `new` or `wake` fails with `429` / "60 sandbox starts per hour" | boat's start limit (see [Costs](#costs)). Wait, then rerun. Prefer stopping and waking over creating new Sessions |
 | `setup` says a Tailscale key is invalid (401) | Wrong client id or secret, or the OAuth client lacks `auth_keys` for `tag:rp-session` |
 | `new` fails at `tailscale-join` or the /health wait | Check the tailnet policy has `tag:rp-session`. `new` has already cleaned up; rerun with `--keep-on-failure` to look inside |
+| `new` failed and `runpane cloud list` shows nothing for it | Rarely, boat creates the sandbox but naming it fails, and the CLI loses track of it. Look in boat's console for a sandbox without an `rp-` name created at that time and delete it there |
 | The desktop says "Connection failed" for a cloud host | The Session is probably asleep: `runpane cloud status <host>`, then `runpane cloud wake <host>`. If it is awake, check `tailscale status` on the laptop |
 | The phone app can't connect | The phone must be on the same tailnet (Tailscale app signed in and connected) |
 | `status` says `daemon-down` | The sandbox runs but the Pane daemon doesn't answer. Wake it again (`stop --yes`, then `wake`), or open the sandbox in boat's console and run `systemctl --user status pane-remote-daemon` |

@@ -72,7 +72,7 @@ nohup timeout 25 /home/user/rcl/rp watch --follow >/home/user/rcl/watch.log 2>&1
 sleep 2; echo started
 SH
 expect cond.watcher-active watch watcher-active
-expect_clear clear.watcher-active watch-after watcher-active 75
+expect_clear clear.watcher-active watch-after watcher-active 180   # abandoned long-poll stays in flight until its server timeout, then 30 s grace
 
 # ---- 4. agent-working (Claude runs a slow tool call)
 if claude_available; then
@@ -112,12 +112,18 @@ prs=""; end=$(( $(date +%s) + 90 ))
 until [ "$(date +%s)" -ge "$end" ]; do g=$(ss pr); [[ ",$g," == *",pr-checks-pending,"* ]] && { prs=1; break; }; sleep 5; done
 [ -n "$prs" ] && rec cond.pr-checks-pending PASS "refused with pr-checks-pending (fake gh: PR #4242 IN_PROGRESS; pane in Session $SESSION)" "$E2E_RUN_DIR/ss-pr.json" \
   || rec cond.pr-checks-pending FAIL "pr-checks-pending never reported (last: $g); see fake-gh.txt" "$E2E_RUN_DIR/ss-pr.json"
+sbx "$SB_ID" 60 <<'SH' | ev pr-diagnostics.txt >/dev/null
+echo "== daemon PATH: $(tr '\0' '\n' < /proc/$(pgrep -u user -f 'pane.*remote' | head -1)/environ 2>/dev/null | grep '^PATH=')"
+echo "== which gh: $(command -v gh)"; echo "== worktree branch: $(git -C /home/user/e2e-repo/worktrees/m2sshell branch --show-current)"
+echo "== overview:"; /home/user/rcl/rp sessions overview --session e2e-prs --json 2>&1 | head -c 1500; echo
+echo "== daemon log (PR monitor / gh):"; journalctl --user -u pane-remote-daemon --no-pager 2>/dev/null | grep -iE 'PrMonitor|gh pr|github' | tail -20
+SH
 sbx "$SB_ID" 30 <<<'sudo rm -f /usr/local/bin/gh' >/dev/null
 rp_in "$SB_ID" sessions detach --session "$SESSION" --pane "$PANE" --json >/dev/null
 
 # ---- 6. flush then immediate power-off: a DB write made just before safe-to-stop survives
 NEWNAME="e2e-renamed-$RANDOM"
-rp_in "$SB_ID" panes rename --pane "$PANE" --name "$NEWNAME" --json | ev rename.json >/dev/null
+rp_in "$SB_ID" panes rename --pane "$PANE" --name "$NEWNAME" --yes --json | ev rename.json >/dev/null
 fl=$(cl remote invoke "$SB_PAIRING" runpane:cloud:safe-to-stop '[{"flush":"always"}]'); printf '%s\n' "$fl" | ev flush.json >/dev/null
 cl boat stop "$SB_ID" >/dev/null   # immediately: M0 snapshot point is ~3.6-4.7 s after this call
 flushed=$(jget 'bool(d["body"]["result"].get("flush"))' <<<"$fl" 2>/dev/null)
@@ -137,6 +143,6 @@ expect cond.user-client-attached.invoke invoke user-client-attached
 g=$(ss window '[{"flush":"never","recentOutputMs":10000,"clientWindowMs":1}]')
 [[ ",$g," != *",user-client-attached,"* ]] && rec user-client-window PASS "outside the client window the user client no longer blocks (now: $g)" "$E2E_RUN_DIR/ss-window.json" \
   || rec user-client-window FAIL "still blocked with clientWindowMs=1" "$E2E_RUN_DIR/ss-window.json"
-cli=$(sbx "$SB_ID" 60 <<<'/home/user/rcl/rp cloud safe-to-stop --flush never --json; echo "exit=$?"'); printf '%s\n' "$cli" | ev cli-safe-to-stop.txt >/dev/null
+cli=$(sbx "$SB_ID" 60 <<<'/home/user/rcl/rp cloud safe-to-stop --flush never --json 2>&1; echo "exit=$?"'); printf '%s\n' "$cli" | ev cli-safe-to-stop.txt >/dev/null
 if grep -q '^exit=3' <<<"$cli" && grep -q '"safe": *false' <<<"$cli"; then rec cli-exit-code PASS "in-sandbox 'runpane cloud safe-to-stop' exit 3 with safe:false while blocked" "$E2E_RUN_DIR/cli-safe-to-stop.txt"
 else rec cli-exit-code FAIL "unexpected CLI result: $(tail -c 200 <<<"$cli")" "$E2E_RUN_DIR/cli-safe-to-stop.txt"; fi

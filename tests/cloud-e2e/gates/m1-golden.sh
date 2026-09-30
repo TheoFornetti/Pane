@@ -9,10 +9,10 @@
 GOLDEN="${E2E_GOLDEN:-$(dist_url golden)}"
 export E2E_TARGET="${GOLDEN:-no-golden}"
 e2e_init M1-golden
-wait_start_budget 2
+wait_start_budget 1
 [ -n "$GOLDEN" ] || { rec golden BLOCKED "no golden image named in $E2E_DIST_CURRENT yet"; exit 0; }
 ids=()
-for n in 1 2; do
+for n in 1; do   # one fork: per-fork identity was proven by M0 (m0d) and m2-dist gate-fork; starts are scarce
   t0=$(ms_now); id=$(sb_create "golden-fork$n-$(date -u +%H%M%S)" small "$GOLDEN") || { rec "fork$n" FAIL "fork from $GOLDEN failed"; exit 1; }
   cl boat wait "$id" idle,ready,running --timeout 180 >/dev/null
   rec "fork$n" PASS "forked $GOLDEN -> $id ready in $(secs_since "$t0")s" "" "seconds=$(secs_since "$t0")"; ids+=("$id")
@@ -21,10 +21,9 @@ chk=$( { echo 'cat > /home/user/rcl-strip-check.sh <<'"'"'CHK'"'"''; cat "$E2E_L
 printf '%s\n' "$chk" | ev strip-check.txt >/dev/null
 [ $crc = 0 ] && rec strip-list PASS "strip-check fork mode: $(grep -c '^PASS' <<<"$chk") PASS, 0 FAIL" "$E2E_RUN_DIR/strip-check.txt" \
   || rec strip-list FAIL "$(grep '^FAIL' <<<"$chk" | head -5 | tr '\n' ';')" "$E2E_RUN_DIR/strip-check.txt"
-idq='echo "$(cat /etc/machine-id) $(sha256sum /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null | cut -c1-16) $(pane --version 2>/dev/null | head -1) $(test -e ~/.pane_remote && echo PAIRED || echo unpaired)"'
-a=$(sbx "${ids[0]}" 30 <<<"$idq"); b=$(sbx "${ids[1]}" 30 <<<"$idq"); printf '%s\n%s\n' "$a" "$b" | ev identities.txt >/dev/null
-read -r ma ha pa ua _ <<<"$a"; read -r mb hb _ _ _ <<<"$b"
-[ "$ma" != "$mb" ] && [ "$ha" != "$hb" ] && rec identity-per-fork PASS "machine-id and host key differ between two forks" "$E2E_RUN_DIR/identities.txt" \
-  || rec identity-per-fork FAIL "forks share identity: $a | $b" "$E2E_RUN_DIR/identities.txt"
-[ -n "$pa" ] && [ "$ua" = unpaired ] && rec deb-unpaired PASS "fork has Pane $pa installed and no pairing" "$E2E_RUN_DIR/identities.txt" \
-  || rec deb-unpaired FAIL "pane='$pa' pairing=$ua" "$E2E_RUN_DIR/identities.txt"
+idq='echo "$(pane --version 2>/dev/null | head -1) $(test -e ~/.pane_remote && echo PAIRED || echo unpaired)"'
+a=$(sbx "${ids[0]}" 30 <<<"$idq"); printf '%s\n' "$a" | ev fork-state.txt >/dev/null
+read -r pa ua _ <<<"$a"
+rec identity-per-fork SKIP "one fork only (boat start budget); per-fork machine-id/host-key uniqueness proven in M0 m0d (5 forks) and m2-dist gate-fork"
+[ -n "$pa" ] && [ "$ua" = unpaired ] && rec deb-unpaired PASS "fork has Pane $pa installed and no pairing" "$E2E_RUN_DIR/fork-state.txt" \
+  || rec deb-unpaired FAIL "pane='$pa' pairing=$ua" "$E2E_RUN_DIR/fork-state.txt"

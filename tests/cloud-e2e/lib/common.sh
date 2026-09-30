@@ -9,7 +9,7 @@
 
 set -o pipefail
 
-E2E_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+E2E_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; export E2E_LIB
 E2E_ROOT="$(cd "$E2E_LIB/.." && pwd)"
 E2E_EVIDENCE_ROOT="${E2E_EVIDENCE_ROOT:-$HOME/rc-loop/evidence/e2e-gates}"
 E2E_MATRIX="${E2E_MATRIX:-$HOME/rc-loop/results/e2e-matrix.md}"
@@ -117,14 +117,29 @@ e2e_finish() {
   log "done rc=$rc; results: $E2E_RUN_DIR/results.jsonl; matrix: $E2E_MATRIX"
 }
 
-# wait_start_budget <starts-needed> : block until the loop's logged boat starts (create/fork/resume) in the last
-# hour leave room under boat's 60/h account limit. Heuristic: only calls logged in the mutation log count.
+# wait_start_budget <starts-needed> : respect boat's account-wide START limit (create/fork/resume: 60/h, 200/day).
+# Reads GET /limits (the same counter as ~/rc-loop/bin/starts-left.sh). Hour exhausted or too few left -> wait.
+# Day remaining below the reserve (E2E_DAY_RESERVE, default 25) -> record BLOCKED, file a request, exit 0.
 wait_start_budget() {
-  local need="${1:-4}" log="${CLOUDLAB_MUTATION_LOG:-$HOME/rc-loop/mutations.log}" used
-  [ -f "$log" ] || return 0
+  local need="${1:-2}" out h d
+  [ -x "$HOME/rc-loop/bin/starts-left.sh" ] || return 0   # only the build loop shares one boat account
   while :; do
-    used=$(awk -v t="$(date -u -d '-60 min' +%FT%T)" '$1>t && ($0 ~ /POST \/sandboxes ->|\/resume ->|\/fork ->/)' "$log" | wc -l)
-    [ $((used + need)) -le "${E2E_START_BUDGET:-55}" ] && return 0
-    log "boat start budget: $used used in the last hour, need $need; waiting 60 s"; sleep 60
+    out=$(python3 - <<'PY'
+import sys; sys.path.insert(0, __import__("os").environ["E2E_LIB"])
+import cloudlab
+st, p = cloudlab.boat("GET", "/limits")
+s = (p or {}).get("starts", {}) if isinstance(p, dict) else {}
+print(s.get("hour", {}).get("remaining", -1), s.get("day", {}).get("remaining", -1))
+PY
+)
+    read -r h d <<<"$out"
+    [ -z "$h" ] || [ "$h" = -1 ] && { log "boat /limits unreadable; proceeding"; return 0; }
+    if [ "$d" -lt $(( ${E2E_DAY_RESERVE:-25} + need )) ]; then
+      rec start-budget BLOCKED "boat day start budget too low (remaining $d, need $need + reserve ${E2E_DAY_RESERVE:-25}); not started"
+      [ -d "$HOME/rc-loop/ledger" ] && echo "- $(date -u +%FT%TZ) e2e-gates $E2E_GATE needs $need starts (day remaining $d)" >> "$HOME/rc-loop/ledger/start-requests.md"
+      exit 0
+    fi
+    [ "$h" -ge "$need" ] && { log "boat starts: hour remaining $h, day remaining $d; need $need"; return 0; }
+    log "boat start budget: hour remaining $h (need $need), day remaining $d; waiting 5 min"; sleep 300
   done
 }

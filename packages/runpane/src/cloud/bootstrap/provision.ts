@@ -388,7 +388,7 @@ export function writeSecretFile(filePath: string, content: string): void {
   fs.renameSync(temporary, filePath);
 }
 
-export function shellQuote(value: string): string {
+function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 

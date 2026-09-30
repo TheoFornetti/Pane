@@ -44,7 +44,8 @@ export type ProvisionStepName =
   | 'pairing'
   | 'extra-clients'
   | 'clone'
-  | 'health';
+  | 'health'
+  | 'register-repo';
 
 export interface ProvisionStep {
   step: ProvisionStepName;

@@ -21,23 +21,23 @@ export const PEER_MANAGEMENT_CHANNELS = [
   'runpane:peers:revoke',
 ] as const;
 
-export interface PeerMintResult {
+interface PeerMintResult {
   ok: true;
   peer: PeerSummary;
   connectionCode: string;
 }
 
-export interface PeerListResult {
+interface PeerListResult {
   ok: true;
   peers: PeerSummary[];
 }
 
-export interface PeerUpdateResult {
+interface PeerUpdateResult {
   ok: true;
   peer: PeerSummary;
 }
 
-export interface PeerRevokeResult {
+interface PeerRevokeResult {
   ok: true;
   revoked: true;
   peerId: string;

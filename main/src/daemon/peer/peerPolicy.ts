@@ -27,14 +27,14 @@ export interface PeerSessionInfo {
   orchestratorPanelId: string;
 }
 
-export interface PeerDenial {
+interface PeerDenial {
   ok: false;
   statusCode: number;
   code: string;
   message: string;
 }
 
-export interface PeerGrant {
+interface PeerGrant {
   ok: true;
   args: JsonValue[];
   /** Filters a panels:list result down to what the peer may see. */

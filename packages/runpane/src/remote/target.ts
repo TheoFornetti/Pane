@@ -280,8 +280,15 @@ async function resolveOrchestratorPanel(
   try {
     panels = decodeBoundary(await invoke('runpane:panels:list', [{}]), panelListSchema).panels;
   } catch (error) {
-    if (!(error instanceof RemoteRequestError)) throw error;
-    const { sessions } = decodeBoundary(await invoke('runpane:sessions:list', []), sessionListSchema);
+    // The daemon answers a full client's pane-less panels:list with an error (a 500, retried as a read).
+    if (error instanceof RemoteConnectError || error instanceof RemoteAuthError) throw error;
+    let listed: JsonValue | undefined;
+    try {
+      listed = await invoke('runpane:sessions:list', []);
+    } catch {
+      throw error;
+    }
+    const { sessions } = decodeBoundary(listed, sessionListSchema);
     panels = sessions.flatMap((session) => {
       if (session.archived === true || !session.agent || !session.panelIds) return [];
       try {

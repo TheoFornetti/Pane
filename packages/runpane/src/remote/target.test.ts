@@ -197,7 +197,7 @@ describe('invokeRemote wake policy', () => {
       const body = decodeBoundary(JSON.parse(request.body ?? '{}'), boundary.object({ channel: boundary.string, args: boundary.array(boundary.json) }));
       delivered.push(body);
       if (body.channel === 'runpane:panels:list') {
-        return { status: 400, body: JSON.stringify({ ok: false, error: { message: 'Panel list request must include paneId' } }) };
+        return { status: 500, body: JSON.stringify({ ok: false, error: { message: 'Panel list request must include paneId' } }) };
       }
       if (body.channel === 'runpane:sessions:list') {
         return { status: 200, body: JSON.stringify({ ok: true, result: { ok: true, sessions: [

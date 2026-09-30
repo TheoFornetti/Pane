@@ -398,6 +398,14 @@ Tighten the policy too, so the tailnet enforces the same thing. With grants:
 `tcp:47300` is only for the coordinator (section 6). Drop it if you don't run one. Keep your own rules
 for your other devices.
 
+## Repair a Session in place
+
+`runpane cloud repair <host>` brings an awake Session up to date without stopping it: it re-enrols a tailnet
+node that came back logged out, installs the guards newer CLIs add at `new` (a boot-time restore of
+`tailscaled.state`, and of the Tailscale Serve config recorded in `/etc/rp-cloud/serve.json`), re-applies a
+Serve config that a sleep/wake lost, and checks `/health`. It is safe to run any time; it refuses a sleeping
+Session (wake it first). Run it once on Sessions created with an older `runpane`.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |

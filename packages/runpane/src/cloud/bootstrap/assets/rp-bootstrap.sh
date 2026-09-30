@@ -208,6 +208,70 @@ UNIT
   sudo /usr/local/sbin/rp-tailscale-state backup >/dev/null
 }
 
+# Serve guard. Tailscale keeps its Serve config inside tailscaled.state, and a resume has brought back a
+# valid but STALE state without it (rp-red-ck4vp7ki: Running, same node, cert cached, "No serve config",
+# so the daemon was unreachable). The desired config lives in /etc/rp-cloud/serve.json (written in place)
+# and rp-serve-restore re-applies it on every boot, and on demand, when `tailscale serve status` lacks it.
+install_serve_guard() {
+  local transport="$1" port
+  case "$transport" in https|http) ;; *) fail "serve guard: transport must be https or http" ;; esac
+  port="$(pane_listen_port)"
+  sudo mkdir -p /etc/rp-cloud /var/lib/rp-cloud
+  printf '{"transport":"%s","port":%s}\n' "$transport" "$port" | sudo tee /etc/rp-cloud/serve.json >/dev/null
+  sudo tee /usr/local/sbin/rp-serve-restore >/dev/null <<'GUARD'
+#!/bin/sh
+# rp-serve-restore: re-apply this cloud Session's Tailscale Serve config when it is missing.
+CONF="${RP_SERVE_CONF:-/etc/rp-cloud/serve.json}"
+LOG="${RP_SERVE_LOG:-/var/lib/rp-cloud/serve-events.log}"
+say() { echo "rp-serve-restore: $*"; mkdir -p "$(dirname "$LOG")" && echo "$(date -u +%FT%TZ) boot=$(cut -c1-8 /proc/sys/kernel/random/boot_id) $*" >> "$LOG"; }
+[ -f "$CONF" ] || { say "no $CONF; nothing to restore"; exit 0; }
+transport=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["transport"])' "$CONF") || exit 1
+port=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["port"])' "$CONF") || exit 1
+if [ "$transport" = http ]; then want="$port"; else want=443; fi
+i=0
+until [ "$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys;print(json.load(sys.stdin).get("BackendState"))' 2>/dev/null)" = Running ]; do
+  i=$((i+1)); [ "$i" -ge 90 ] && { say "tailscale not Running after 90 s; serve not checked"; exit 0; }
+  sleep 1
+done
+if tailscale serve status --json 2>/dev/null | python3 -c 'import json,sys;d=json.load(sys.stdin) or {};sys.exit(0 if sys.argv[1] in (d.get("TCP") or {}) else 1)' "$want" 2>/dev/null; then
+  say "serve ok ($transport :$want)"; exit 0
+fi
+if [ "$transport" = http ]; then
+  tailscale serve --bg --tcp="$port" "tcp://127.0.0.1:$port" >/dev/null 2>&1 || { say "FAILED to re-apply http serve :$port"; exit 1; }
+else
+  tailscale serve --bg --tls-terminated-tcp=443 "tcp://127.0.0.1:$port" >/dev/null 2>&1 || { say "FAILED to re-apply https serve"; exit 1; }
+fi
+say "RE-APPLIED missing serve config ($transport :$want -> 127.0.0.1:$port)"
+GUARD
+  sudo chmod 755 /usr/local/sbin/rp-serve-restore
+  sudo tee /etc/systemd/system/rp-serve-restore.service >/dev/null <<'UNIT'
+[Unit]
+Description=Runpane Cloud: re-apply the Session's Tailscale Serve config if a resume lost it
+Wants=network-online.target tailscaled.service
+After=network-online.target tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/rp-serve-restore
+TimeoutStartSec=150
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  sudo systemctl daemon-reload
+  sudo systemctl enable rp-serve-restore.service >/dev/null 2>&1 || fail "could not enable rp-serve-restore.service"
+}
+
+# serve-guard <https|http>: record the desired Serve config, install the boot-time restore, and apply it now if
+# it is missing. Idempotent; safe on a live Session (it never stops anything).
+step_serve_guard() {
+  local out applied=false
+  install_serve_guard "$1"
+  out="$(sudo /usr/local/sbin/rp-serve-restore 2>&1 | tail -1 || true)"
+  case "$out" in *RE-APPLIED*) applied=true ;; *FAILED*|*"not Running"*) fail "$out" ;; esac
+  result "$(python3 -c 'import json,sys;print(json.dumps({"ok":True,"applied":sys.argv[1]=="true","detail":sys.argv[2]}))' "$applied" "$out")"
+}
+
 # ts-guard: (re)install the tailscaled.state guard on a node that is already joined (idempotent).
 step_ts_guard() {
   install_ts_state_guard
@@ -292,6 +356,7 @@ step_serve_http() {
   sudo tailscale serve --bg --tcp="$port" "tcp://127.0.0.1:$port" >"$RP_STATE/serve-http.log" 2>&1 \
     || fail "tailscale serve --tcp failed: $(tail -3 "$RP_STATE/serve-http.log" | tr '\n' ' ')"
   base="http://$fqdn:$port"
+  install_serve_guard http
   systemctl --user stop pane-remote-daemon.service
   python3 - "$HOME/.pane_remote/config.json" "$base" "$port" <<'PY' || fail "could not record the http access URL"
 import datetime, json, os, sys
@@ -511,5 +576,6 @@ case "$step" in
   ts-guard) step_ts_guard ;;
   cert-status) step_cert_status "$@" ;;
   serve-http) step_serve_http ;;
+  serve-guard) step_serve_guard "$@" ;;
   *) fail "unknown step '$step'" ;;
 esac

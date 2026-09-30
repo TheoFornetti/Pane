@@ -99,6 +99,7 @@ export async function runCloudCommand(args: CloudArgs, deps: CloudDeps): Promise
     case 'status': return runStatus(args, deps);
     case 'stop': return runStop(args, deps);
     case 'wake': return runWake(args, deps);
+    case 'repair': return runRepair(args, deps);
     case 'destroy': return runDestroy(args, deps);
     case 'pair': return runPair(args, deps);
     case 'sync': return runSync(args, deps);
@@ -614,6 +615,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
   });
   timings.healthMs = deps.now() - started;
   let repaired: { previousBackendState: string; oldNodeId: string; nodeId: string } | null = null;
+  let serveRepaired = false;
   if (!health.ok) {
     // A resume can bring the node back logged out (tailscaled.state lost); re-enrol under the same name.
     const repair = await deps.bootstrap.repairTailnet(provider.handle(sandboxId), { hostname, oldNodeId: record.profile.cloud.nodeId }, tailnetCredentials);
@@ -627,6 +629,12 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
       health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: 90_000, intervalMs: 500 });
       timings.repairedHealthMs = deps.now() - started;
     } else {
+      // Logged in but unreachable: a resume can bring back a stale tailscaled.state without the Serve config.
+      const serve = await deps.bootstrap.repairServe(provider.handle(sandboxId), { transport: hostTransport(record) ?? 'https' });
+      if (serve.serveApplied) {
+        serveRepaired = true;
+        if (!args.json) deps.stdout(`runpane cloud: ${hostname} came back without its Tailscale Serve config; re-applied it.`);
+      }
       health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: remaining(), intervalMs: 500 });
       timings.healthMs = deps.now() - started;
     }
@@ -649,6 +657,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     version: health.version ?? null,
     coordinator,
     repaired,
+    serveRepaired,
     peersFile,
     timings,
   };
@@ -659,6 +668,54 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     health.ok
       ? `${hostname} is awake at ${record.profile.baseUrl} (${((deps.now() - started) / 1000).toFixed(1)} s${repaired ? ', re-enrolled tailnet node' : sameNode ? ', same tailnet node' : ', TAILNET NODE CHANGED'}).`
       : `${hostname} is running but its daemon did not answer /health within ${Math.round(timeoutMs / 1000)} s.`,
+  );
+  return health.ok ? 0 : 1;
+}
+
+/**
+ * `runpane cloud repair <host>`: brings an awake Session up to date without stopping it. Re-enrols a
+ * logged-out node, installs the tailscaled.state and Serve guards (Sessions made by older CLIs lack
+ * them) and re-applies a Tailscale Serve config a resume lost. Idempotent; never starts or stops a sandbox.
+ */
+async function runRepair(args: CloudArgs, deps: CloudDeps): Promise<number> {
+  const { provider, tailnetCredentials } = await loadCloudWithTailnet(deps);
+  const record = findHost(await deps.store.listHosts(), requiredHost(args));
+  const { sandboxId, hostname } = record.profile.cloud;
+  const sandbox = await provider.get(sandboxId);
+  if (sandbox.state !== 'running') {
+    throw new Error(`${hostname} is ${sandbox.state === 'stopped' ? 'asleep' : sandbox.providerState}; repair only works on an awake Session and never starts one. Wake it first: runpane cloud wake ${hostname}`);
+  }
+  const handle = provider.handle(sandboxId);
+  const tailnetRepair = await deps.bootstrap.repairTailnet(handle, { hostname, oldNodeId: record.profile.cloud.nodeId }, tailnetCredentials);
+  if (tailnetRepair.reenrolled) {
+    record.profile.cloud = { ...record.profile.cloud, nodeId: tailnetRepair.nodeId, version: record.profile.cloud.version + 1 };
+    await deps.store.writeHost(record);
+    await importIntoDesktop(args, deps, [record.profile]);
+    await pushDirectory(deps);
+  }
+  const transport = hostTransport(record) ?? 'https';
+  const serve = await deps.bootstrap.repairServe(handle, { transport });
+  const health = record.profile.baseUrl
+    ? await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: 60_000, intervalMs: 1_000 })
+    : { ok: false, elapsedMs: 0 };
+  const done = [
+    tailnetRepair.reenrolled ? `re-enrolled the tailnet node as ${tailnetRepair.nodeId}` : 'tailnet node ok',
+    serve.serveApplied ? `re-applied the missing ${transport} Serve config` : `${transport} Serve config ok`,
+    'tailscaled.state and Serve guards installed',
+  ];
+  report(
+    args,
+    deps,
+    {
+      ok: health.ok,
+      host: hostname,
+      transport,
+      reenrolled: tailnetRepair.reenrolled,
+      serveApplied: serve.serveApplied,
+      guards: 'installed',
+      health: { ok: health.ok, status: health.status ?? null, version: health.version ?? null },
+    },
+    `${hostname}: ${done.join('; ')}. /health ${health.ok ? 'answers' : 'does NOT answer'} at ${record.profile.baseUrl}.`,
   );
   return health.ok ? 0 : 1;
 }

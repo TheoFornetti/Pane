@@ -40,6 +40,8 @@ interface FakeWorld {
   createdByKey: Map<string, string>;
   /** Hosts whose tailnet node comes back logged out after a resume (healthy again once repaired). */
   loggedOut: Set<string>;
+  /** Hosts whose Tailscale Serve config a resume lost (Running, but /health unreachable until re-applied). */
+  serveLost: Set<string>;
   /** When true, a coordinator is configured and `wake` goes through it. */
   coordinatorWakes?: boolean;
   /** When set, scoped keys longer than this many days are refused like boat does. */
@@ -59,7 +61,7 @@ export interface FakeDaemon {
 function createFakeWorld(): FakeWorld {
   return {
     sandboxes: new Map(), devices: [], calls: [], scripts: [], healthy: new Set(),
-    files: new Map(), daemons: new Map(), coordinatorHealthy: true, sandboxCounter: 0, createdByKey: new Map(), loggedOut: new Set(),
+    files: new Map(), daemons: new Map(), coordinatorHealthy: true, sandboxCounter: 0, createdByKey: new Map(), loggedOut: new Set(), serveLost: new Set(),
   };
 }
 
@@ -180,6 +182,12 @@ function createFakeBootstrap(world: FakeWorld): BootstrapPort {
   return {
     cloudHostname: (sessionId, prefix) => `${prefix}-${sessionId.slice(0, 8)}`,
     createTailnet: () => createFakeTailnet(world),
+    async repairServe(sandbox, request) {
+      world.calls.push(`repair-serve ${sandbox.id} ${request.transport}`);
+      const host = [...world.sandboxes.values()].find((candidate) => candidate.id === sandbox.id)?.name ?? '';
+      const serveApplied = world.serveLost.delete(host);
+      return { backendState: 'Running', serveApplied, detail: serveApplied ? 'RE-APPLIED' : 'serve ok' };
+    },
     async repairTailnet(sandbox, request) {
       world.calls.push(`repair ${sandbox.id} ${request.hostname}`);
       if (!world.loggedOut.has(request.hostname)) return { reenrolled: false, backendState: 'Running' };
@@ -200,7 +208,7 @@ function createFakeBootstrap(world: FakeWorld): BootstrapPort {
     async waitForDaemonHealth(baseUrl) {
       const host = new URL(baseUrl).hostname.split('.')[0];
       const sandbox = [...world.sandboxes.values()].find((candidate) => candidate.name === host);
-      const ok = world.healthy.has(host) && !world.loggedOut.has(host) && sandbox?.state === 'running';
+      const ok = world.healthy.has(host) && !world.loggedOut.has(host) && !world.serveLost.has(host) && sandbox?.state === 'running';
       return ok ? { ok, elapsedMs: 1, status: 200, version: '2.4.141' } : { ok, elapsedMs: 1 };
     },
     async provision(sandbox: SandboxHandle, request: ProvisionRequest) {

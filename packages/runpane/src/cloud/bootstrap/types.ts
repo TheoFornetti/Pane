@@ -48,6 +48,7 @@ export type ProvisionStepName =
   | 'health'
   | 'cert-check'
   | 'serve-http'
+  | 'serve-guard'
   | 'register-repo';
 
 export interface ProvisionStep {

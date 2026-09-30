@@ -1357,6 +1357,18 @@
       ]
     },
     {
+      "name": "cloud repair",
+      "summary": "Bring an awake cloud host up to date in place: re-enrol a logged-out node, install the tailscaled.state and Serve guards, and re-apply a Tailscale Serve config a resume lost. Never starts or stops the sandbox.",
+      "usage": [
+        "runpane cloud repair <host> [--json]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
       "name": "cloud destroy",
       "summary": "Delete a cloud host: its tailnet device first, then the sandbox and its disk, then the saved remote host.",
       "usage": [
@@ -3272,6 +3284,16 @@
         "  --timeout-ms <milliseconds>    How long to wait for the daemon /health.",
         "  --json                         Print machine-readable output."
       ],
+      "cloud repair": [
+        "Usage:",
+        "  runpane cloud repair <host> [--json]",
+        "",
+        "Bring an awake cloud host up to date in place: re-enrol a logged-out node, install the tailscaled.state and Serve guards, and re-apply a Tailscale Serve config a resume lost. Never starts or stops the sandbox.",
+        "",
+        "Options:",
+        "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --json                         Print machine-readable output."
+      ],
       "cloud destroy": [
         "Usage:",
         "  runpane cloud destroy <host> [--desktop-dir <path>|--no-import] --yes [--json]",
@@ -4572,6 +4594,13 @@
         "",
         "`runpane cloud wake` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud wake"
+      ],
+      "cloud repair": [
+        "Usage:",
+        "  runpane cloud repair <host> [--json]",
+        "",
+        "`runpane cloud repair` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud repair"
       ],
       "cloud destroy": [
         "Usage:",
@@ -14438,6 +14467,31 @@
         ],
         "examples": [
           "runpane cloud wake rp-abc12345"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud repair": {
+        "name": "cloud repair",
+        "summary": "Bring an awake cloud host up to date in place: re-enrol a logged-out node, install the tailscaled.state and Serve guards, and re-apply a Tailscale Serve config a resume lost. Never starts or stops the sandbox.",
+        "details": "Over the provider exec API: re-enrols the node under the same name if it is logged out, installs rp-tailscale-state and rp-serve-restore (Sessions made by older CLIs lack them), re-applies the recorded https or http Serve config when tailscale serve status lacks it, then checks /health. Refuses a sleeping Session.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud repair rp-red-ck4vp7ki --json"
         ],
         "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."

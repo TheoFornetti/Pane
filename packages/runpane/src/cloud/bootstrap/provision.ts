@@ -222,6 +222,10 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
       (value) => `${value.elapsedMs} ms over plain HTTP inside the tailnet`);
   }
 
+  // Serve lives in tailscaled.state, which a resume has brought back stale; keep a desired copy that a boot unit re-applies.
+  await step('serve-guard', () => runner.run('serve-guard', [transport], serveGuardStepSchema, { timeoutSeconds: 180 }),
+    () => `${transport} Serve re-applied on boot if lost`);
+
   if (repoDir && repoName) {
     const dir = repoDir;
     // A clone alone is invisible to Pane: register it so `panes create --repo <name>` works. Idempotent on re-run.
@@ -403,6 +407,35 @@ export async function repairTailnetIfLoggedOut(sandbox: SandboxHandle, options: 
   return { reenrolled: true, previousBackendState: backendState, ...result };
 }
 
+interface ServeRepairOptions {
+  transport: 'https' | 'http';
+  sandboxHome?: string;
+}
+
+interface ServeRepairResult {
+  backendState: string;
+  /** True when the Serve config was missing and got re-applied. */
+  serveApplied: boolean;
+  detail: string;
+}
+
+/**
+ * For a running Session: installs the tailscaled.state and Serve guards (Sessions made by older CLIs lack
+ * them) and re-applies Serve if it is missing. Never stops or restarts anything. A node that is not
+ * Running is left to repairTailnetIfLoggedOut.
+ */
+export async function repairServeAndGuards(sandbox: SandboxHandle, options: ServeRepairOptions): Promise<ServeRepairResult> {
+  const home = options.sandboxHome ?? DEFAULT_SANDBOX_HOME;
+  await uploadScripts(sandbox, home);
+  const runner = new StepRunner(sandbox, home);
+  const current = await runner.run('tailnet-identity', [], tailnetStepSchema);
+  const backendState = current.backendState ?? 'unknown';
+  if (backendState !== 'Running') return { backendState, serveApplied: false, detail: 'tailscale is not Running' };
+  await runner.run('ts-guard', [], envelopeSchema, { timeoutSeconds: 120 });
+  const serve = await runner.run('serve-guard', [options.transport], serveGuardStepSchema, { timeoutSeconds: 180 });
+  return { backendState, serveApplied: serve.applied === true, detail: serve.detail ?? '' };
+}
+
 async function registerRepo(pairingCode: string, dir: string, name: string, transport?: RemoteHttpTransport): Promise<void> {
   const pairing = decodePairingCode(pairingCode);
   const client = new RemoteDaemonClient({
@@ -487,6 +520,10 @@ const certStatusStepSchema = boundary.object({
   detail: boundary.optional(boundary.nullable(boundary.string)),
 });
 const serveHttpStepSchema = boundary.object({ baseUrl: boundary.nonEmptyString });
+const serveGuardStepSchema = boundary.object({
+  applied: boundary.optional(boundary.boolean),
+  detail: boundary.optional(boundary.string),
+});
 
 /** auto transport: HTTPS gets this long before the certificate is checked. */
 const AUTO_HTTPS_WAIT_MS = 45_000;

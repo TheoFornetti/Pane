@@ -365,6 +365,22 @@ export function isLoopbackRemoteDaemonHost(host: string): boolean {
   return normalizedHost === '127.0.0.1' || normalizedHost === '::1' || normalizedHost === 'localhost';
 }
 
+/**
+ * A host on the tailnet: a MagicDNS name (*.ts.net) or a Tailscale address (100.64.0.0/10,
+ * fd7a:115c:a1e0::/48). WireGuard encrypts that traffic end to end, so plain HTTP is acceptable there:
+ * a cloud Session whose Tailscale Serve can't get a TLS certificate serves TCP instead.
+ */
+export function isTailnetRemoteDaemonHost(host: string): boolean {
+  const normalizedHost = host.trim().toLowerCase().replace(/^\[(.*)\]$/, '$1');
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$/.test(normalizedHost)) return true;
+  const ipv4 = /^100\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(normalizedHost);
+  if (ipv4) {
+    const second = Number(ipv4[1]);
+    return second >= 64 && second <= 127 && [ipv4[2], ipv4[3]].every(part => Number(part) <= 255);
+  }
+  return normalizedHost.startsWith('fd7a:115c:a1e0:');
+}
+
 export function getRemoteDaemonHostConfigValidationError(config: RemoteDaemonHostConfig): string | null {
   if (!config.enabled) {
     return null;
@@ -757,8 +773,8 @@ function normalizeRemoteImportBaseUrl(value: string): string {
 
   if (url.protocol === 'http:') {
     const normalizedHostname = url.hostname.replace(/^\[(.*)\]$/, '$1');
-    if (!isLoopbackRemoteDaemonHost(normalizedHostname)) {
-      throw new Error('HTTP remote base URLs must use a loopback host; use HTTPS for Tailscale or reverse-proxy endpoints');
+    if (!isLoopbackRemoteDaemonHost(normalizedHostname) && !isTailnetRemoteDaemonHost(normalizedHostname)) {
+      throw new Error('HTTP remote base URLs must use a loopback or Tailscale host; use HTTPS for reverse-proxy endpoints');
     }
   } else if (url.protocol !== 'https:') {
     throw new Error('Remote base URL must use http or https');

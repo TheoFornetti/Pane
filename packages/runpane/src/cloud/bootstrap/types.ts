@@ -46,6 +46,8 @@ export type ProvisionStepName =
   | 'extra-clients'
   | 'clone'
   | 'health'
+  | 'cert-check'
+  | 'serve-http'
   | 'register-repo';
 
 export interface ProvisionStep {

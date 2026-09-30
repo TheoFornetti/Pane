@@ -148,6 +148,7 @@ async function runSetup(args: CloudArgs, deps: CloudDeps): Promise<number> {
   if (args.golden) nextSettings.goldenSnapshot = args.golden;
   if (args.noGolden) delete nextSettings.goldenSnapshot;
   if (args.size) nextSettings.size = args.size;
+  if (args.transport) nextSettings.transport = args.transport;
   if (args.namePrefix) nextSettings.namePrefix = args.namePrefix;
   if (args.maxLive) nextSettings.maxLiveSandboxes = args.maxLive;
   if (args.coordinator !== undefined) nextSettings.coordinator = { enabled: args.coordinator };
@@ -292,6 +293,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       hostname,
       paneSource,
       repo: record.meta.repo,
+      transport: args.transport ?? settings.transport ?? 'auto',
       pairingOutputPath: record.meta.pairingPath,
       extraClients: coordinatorEnabled
         ? [{ label: 'runpane-cloud-coordinator', outputPath: deps.store.coordinatorPairingPath(hostname), scope: 'coordinator' }]
@@ -362,6 +364,9 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     deps.stdout(`runpane cloud: ${hostname} is ready at ${record.profile.baseUrl} (${Math.round(timings.totalMs / 1000)} s).`);
     deps.stdout(`  sandbox: ${sandbox.id}   tailnet node: ${record.profile.cloud.nodeId}`);
     deps.stdout(`  pairing code saved to ${record.meta.pairingPath} (0600; not printed).`);
+    if (hostTransport(record) === 'http') {
+      deps.stdout(`  transport: ${HTTP_TRANSPORT_NOTE}. Let's Encrypt refused this node's certificate (50 per week per tailnet).`);
+    }
     printDesktopOutcome(deps, desktop, hostname);
     printCoordinatorOutcome(deps, coordinator);
     const agents = agentCredentialsSummary(credentials);
@@ -459,6 +464,7 @@ async function runStatus(args: CloudArgs, deps: CloudDeps): Promise<number> {
   } else {
     deps.stdout(`${record.profile.cloud.hostname}: ${report.status}`);
     deps.stdout(`  sandbox ${record.profile.cloud.sandboxId}: ${report.sandbox.providerState}${report.sandbox.size ? ` (${report.sandbox.size})` : ''}`);
+    deps.stdout(`  transport: ${hostTransport(record) === 'http' ? HTTP_TRANSPORT_NOTE : 'https (Tailscale Serve)'}`);
     const device = report.tailnet.devices[0];
     deps.stdout(`  tailnet: ${device ? describeDevice(device) : 'no device'}${report.tailnet.sameNode === false ? ' (node id changed!)' : ''}`);
     deps.stdout(`  daemon: ${report.health ? `${report.health.ok ? 'healthy' : `not answering${report.health.status ? ` (HTTP ${report.health.status})` : ''}`}${report.health.version ? `, version ${report.health.version}` : ''}` : 'not checked (sandbox not running)'}`);
@@ -818,10 +824,19 @@ function hostSummary(record: CloudHostRecord) {
     sandboxId: record.profile.cloud.sandboxId,
     nodeId: record.profile.cloud.nodeId,
     baseUrl: record.profile.baseUrl,
+    transport: hostTransport(record),
     provider: record.profile.cloud.provider,
     createdAt: record.meta.createdAt,
   };
 }
+
+/** https: Tailscale Serve with a TLS certificate. http: plain TCP Serve inside the tailnet (no certificate). */
+function hostTransport(record: CloudHostRecord): 'https' | 'http' | undefined {
+  if (record.profile.baseUrl.startsWith('https://')) return 'https';
+  return record.profile.baseUrl.startsWith('http://') ? 'http' : undefined;
+}
+
+const HTTP_TRANSPORT_NOTE = 'plain HTTP inside the tailnet (WireGuard-encrypted; no TLS certificate, so the phone app at runpane.com/app cannot connect)';
 
 /** A command's `--json` result; every one carries `ok`. */
 interface CloudJsonResult {

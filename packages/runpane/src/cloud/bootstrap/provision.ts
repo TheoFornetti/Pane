@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { boundary, decodeBoundary, type BoundarySchema, type JsonObject } from '../../boundaryDecoder';
 import { RemoteDaemonClient, type RemoteHttpTransport } from '../../remote/remoteDaemonClient';
-import { decodePairingCode } from '../pairing';
+import { decodePairingCode, encodePairingCode } from '../pairing';
 import { CLOUD_SESSION_TAG, type TailscaleApi } from '../tailscale';
 import { cloudBootstrapAssets, type CloudBootstrapAssetName } from './generated/assets';
 import { waitForDaemonHealth } from './health';
@@ -44,6 +44,15 @@ interface ProvisionOptions {
    * firewall narrows that. A coordinator box adds its API port.
    */
   tailnetTcpPorts?: number[];
+  /**
+   * How clients reach the daemon. `https` (Tailscale Serve with a Let's Encrypt certificate) is the
+   * default; `http` serves plain TCP inside the tailnet (WireGuard encrypts it; the phone PWA can't use
+   * it). `auto` (default) tries HTTPS and switches to `http` when Let's Encrypt refuses the certificate:
+   * it issues at most 50 per week for the tailnet's domain and every new node name needs one.
+   */
+  transport?: CloudTransportMode;
+  /** auto: how long HTTPS gets before the certificate is checked (default 45 s). */
+  autoHttpsWaitMs?: number;
   healthTimeoutMs?: number;
   sandboxHome?: string;
   fetchImpl?: typeof fetch;
@@ -52,8 +61,12 @@ interface ProvisionOptions {
   onStep?: (step: ProvisionStep) => void;
 }
 
+type CloudTransportMode = 'auto' | 'https' | 'http';
+
 interface ProvisionResult extends TailnetIdentity {
   baseUrl: string;
+  /** What `auto` settled on. */
+  transport: 'https' | 'http';
   pairingPath: string;
   extraClientPaths: string[];
   daemonVersion?: string;
@@ -129,7 +142,7 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     options.label,
   ], installStepSchema, { timeoutSeconds: 600 }), (value) => value.version ?? 'installed');
 
-  const pairingCode = await step('pairing', async () => {
+  let pairingCode = await step('pairing', async () => {
     const pairing = await runner.run('pairing-read', [], pairingStepSchema);
     const code = requirePairingCode(pairing.code);
     writeSecretFile(options.pairingOutputPath, code);
@@ -159,19 +172,55 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     repoDir = dir;
   }
 
-  const baseUrl = `https://${tailnet.magicDnsName}`;
-  const health = await step('health', async () => {
-    const result = await waitForDaemonHealth(baseUrl, {
-      timeoutMs: options.healthTimeoutMs ?? 120_000,
-      fetchImpl: options.fetchImpl,
-    });
-    if (!result.ok) {
-      const local = await runner.run('health-local', [], envelopeSchema, { allowFailure: true });
-      throw new BootstrapError('health', `${baseUrl}/health not ready after ${result.elapsedMs} ms `
-        + `(last HTTP ${result.status ?? 'none'}; in-sandbox loopback check ${local.ok ? 'ok' : 'failed'})`);
+  const transportMode = options.transport ?? 'auto';
+  const healthTimeoutMs = options.healthTimeoutMs ?? 120_000;
+  let baseUrl = `https://${tailnet.magicDnsName}`;
+  let transport: 'https' | 'http' = 'https';
+  const requireHealthy = async (result: DaemonHealthResult): Promise<DaemonHealthResult> => {
+    if (result.ok) return result;
+    const local = await runner.run('health-local', [], envelopeSchema, { allowFailure: true });
+    throw new BootstrapError('health', `${baseUrl}/health not ready after ${result.elapsedMs} ms `
+      + `(last HTTP ${result.status ?? 'none'}; in-sandbox loopback check ${local.ok ? 'ok' : 'failed'})`);
+  };
+  const waitHealth = (timeoutMs: number) => waitForDaemonHealth(baseUrl, { timeoutMs, fetchImpl: options.fetchImpl });
+
+  let health: DaemonHealthResult | undefined;
+  if (transportMode !== 'http') {
+    const firstWaitMs = transportMode === 'auto' ? Math.min(options.autoHttpsWaitMs ?? AUTO_HTTPS_WAIT_MS, healthTimeoutMs) : healthTimeoutMs;
+    const first = await waitHealth(firstWaitMs);
+    if (first.ok || transportMode === 'https') {
+      health = await step('health', () => requireHealthy(first), (value) => `${value.elapsedMs} ms`);
+    } else {
+      const cert = await step('cert-check', () => runner.run('cert-status', [tailnet.magicDnsName], certStatusStepSchema, { timeoutSeconds: 60 }),
+        (value) => (value.rateLimited ? `Let's Encrypt rate limit: ${value.detail ?? 'refused'}` : 'no rate limit in tailscaled\'s log'));
+      // Without a logged refusal, HTTPS gets one more window (a first certificate can take ~30 s).
+      const second = cert.rateLimited ? undefined : await waitHealth(Math.max(Math.min(healthTimeoutMs - first.elapsedMs, firstWaitMs), 1_000));
+      if (second?.ok) {
+        health = await step('health', () => requireHealthy(second), (value) => `${value.elapsedMs + first.elapsedMs} ms`);
+      } else {
+        // HTTPS is down. If the daemon answers on loopback, the problem is Serve's certificate: switch.
+        // If it doesn't, the daemon itself is broken and plain HTTP wouldn't help.
+        const local = await runner.run('health-local', [], envelopeSchema, { allowFailure: true });
+        if (!local.ok) {
+          throw new BootstrapError('health', `${baseUrl}/health not ready after ${first.elapsedMs + (second?.elapsedMs ?? 0)} ms `
+            + `(last HTTP ${(second ?? first).status ?? 'none'}; in-sandbox loopback check failed)`);
+        }
+      }
     }
-    return result;
-  }, (value) => `${value.elapsedMs} ms`);
+  }
+  if (!health) {
+    const served = await step('serve-http', () => runner.run('serve-http', [], serveHttpStepSchema, { timeoutSeconds: 180 }),
+      (value) => value.baseUrl);
+    baseUrl = served.baseUrl;
+    transport = 'http';
+    pairingCode = withBaseUrl(pairingCode, baseUrl);
+    writeSecretFile(options.pairingOutputPath, pairingCode);
+    for (const clientPath of extraClientPaths) {
+      writeSecretFile(clientPath, withBaseUrl(fs.readFileSync(clientPath, 'utf8'), baseUrl));
+    }
+    health = await step('health', async () => requireHealthy(await waitHealth(healthTimeoutMs)),
+      (value) => `${value.elapsedMs} ms over plain HTTP inside the tailnet`);
+  }
 
   if (repoDir && repoName) {
     const dir = repoDir;
@@ -183,6 +232,7 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
   return {
     ...tailnet,
     baseUrl,
+    transport,
     pairingPath: options.pairingOutputPath,
     extraClientPaths,
     daemonVersion: health.version ?? install.version ?? undefined,
@@ -432,6 +482,19 @@ const checkStepSchema = boundary.object({
 const installStepSchema = boundary.object({ version: boundary.optional(boundary.nullable(boundary.string)) });
 const pairingStepSchema = boundary.object({ code: boundary.nonEmptyString });
 const cloneStepSchema = boundary.object({ head: boundary.optional(boundary.string) });
+const certStatusStepSchema = boundary.object({
+  rateLimited: boundary.boolean,
+  detail: boundary.optional(boundary.nullable(boundary.string)),
+});
+const serveHttpStepSchema = boundary.object({ baseUrl: boundary.nonEmptyString });
+
+/** auto transport: HTTPS gets this long before the certificate is checked. */
+const AUTO_HTTPS_WAIT_MS = 45_000;
+
+/** The same pairing (same token) pointed at another address of the same daemon. */
+function withBaseUrl(code: string, baseUrl: string): string {
+  return encodePairingCode({ ...decodePairingCode(code), baseUrl });
+}
 const firewallStepSchema = boundary.object({ allowedTcp: boundary.optional(boundary.array(boundary.number)) });
 
 type TailnetStepResult = ReturnType<typeof tailnetStepSchema.decode>;

@@ -1,3 +1,4 @@
+import type { CloudTransport } from './args';
 import type { SandboxHandle } from './provider';
 import type { CloudCredentials, PaneSource } from './store';
 
@@ -28,6 +29,7 @@ export interface ProvisionRequest {
   hostname: string;
   paneSource: PaneSource;
   repo?: { url: string; ref?: string };
+  transport?: CloudTransport;
   /** Local 0600 file that receives the pane-remote:// code. */
   pairingOutputPath: string;
   extraClients?: { label: string; outputPath: string; scope?: 'coordinator' }[];
@@ -40,6 +42,7 @@ interface ProvisionOutcome {
   magicDnsName: string;
   nodeId: string;
   baseUrl: string;
+  transport?: 'https' | 'http';
   pairingPath: string;
   daemonVersion?: string;
   timings: Partial<Record<string, number>>;

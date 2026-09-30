@@ -251,9 +251,69 @@ step_tailscale_reset() {
 step_serve_restore() {
   local port
   port="$(pane_listen_port)"
-  sudo tailscale serve --bg --tls-terminated-tcp=443 "$port" >"$RP_STATE/serve.log" 2>&1 \
-    || fail "tailscale serve failed: $(tail -3 "$RP_STATE/serve.log" | tr '\n' ' ')"
+  if pane_access_base_url | grep -q '^http://'; then
+    # This host serves plain TCP inside the tailnet (no TLS certificate): restore that, not HTTPS.
+    sudo tailscale serve --bg --tcp="$port" "tcp://127.0.0.1:$port" >"$RP_STATE/serve.log" 2>&1 \
+      || fail "tailscale serve --tcp failed: $(tail -3 "$RP_STATE/serve.log" | tr '\n' ' ')"
+  else
+    sudo tailscale serve --bg --tls-terminated-tcp=443 "$port" >"$RP_STATE/serve.log" 2>&1 \
+      || fail "tailscale serve failed: $(tail -3 "$RP_STATE/serve.log" | tr '\n' ' ')"
+  fi
   result "$(python3 -c 'import json,sys;print(json.dumps({"ok":True,"listenPort":int(sys.argv[1])}))' "$port")"
+}
+
+pane_access_base_url() {
+  python3 - "$HOME/.pane_remote/config.json" <<'PY' 2>/dev/null
+import json, sys
+d = json.load(open(sys.argv[1]))
+print((((d.get("remoteDaemon") or {}).get("host") or {}).get("access") or {}).get("baseUrl") or "")
+PY
+}
+
+# cert-status <fqdn>: did Let's Encrypt refuse this tailnet's Serve certificate (50 per registered domain per
+# week; every new node name needs one)? Informational: `auto` switches whenever HTTPS stays down while the
+# daemon answers on loopback, and this names the reason. tailscaled logs the ACME error when a TLS client
+# (the health probe) asks for the certificate; this boot only (a node is young when this runs).
+step_cert_status() {
+  local fqdn="$1" hit=""
+  # set -o pipefail: a grep with no match must not end the step.
+  hit="$(sudo journalctl -b -u tailscaled --no-pager -o cat 2>/dev/null | grep -iE 'rateLimited|too many certificates|acme.*429' | tail -1 || true)"
+  result "$(python3 -c 'import json,sys;print(json.dumps({"ok":True,"rateLimited":bool(sys.argv[1]),"detail":sys.argv[1][:300] or None}))' "$hit")"
+}
+
+# serve-http: plain HTTP inside the tailnet (WireGuard encrypts it) when no TLS certificate can be had.
+# Tailscale Serve forwards tcp :<port> on the node to the daemon on loopback; the daemon's advertised
+# access URL becomes http://<fqdn>:<port> so peer codes it mints point there too.
+step_serve_http() {
+  local port fqdn base
+  port="$(pane_listen_port)"
+  fqdn="$(tailscale status --json | python3 -c 'import json,sys;print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')" \
+    || fail "could not read this node's MagicDNS name"
+  sudo tailscale serve --bg --tcp="$port" "tcp://127.0.0.1:$port" >"$RP_STATE/serve-http.log" 2>&1 \
+    || fail "tailscale serve --tcp failed: $(tail -3 "$RP_STATE/serve-http.log" | tr '\n' ' ')"
+  base="http://$fqdn:$port"
+  systemctl --user stop pane-remote-daemon.service
+  python3 - "$HOME/.pane_remote/config.json" "$base" "$port" <<'PY' || fail "could not record the http access URL"
+import datetime, json, os, sys
+path, base, port = sys.argv[1:4]
+d = json.load(open(path))
+host = d.setdefault("remoteDaemon", {}).setdefault("host", {})
+host["access"] = {
+  "baseUrl": base,
+  "tunnel": {"kind": "tailscale", "selected": True,
+             "note": f"Tailscale Serve TCP on :{port}, plain HTTP inside the tailnet (no TLS certificate available)"},
+  "updatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+}
+# In place, not temp+rename: boat snapshots have lost renamed files (the tailscaled.state P0). The daemon is stopped.
+with open(path, "r+") as out:
+    out.seek(0)
+    json.dump(d, out, indent=2)
+    out.truncate()
+    out.flush()
+    os.fsync(out.fileno())
+PY
+  systemctl --user start pane-remote-daemon.service
+  result "$(python3 -c 'import json,sys;print(json.dumps({"ok":True,"baseUrl":sys.argv[1]}))' "$base")"
 }
 
 # install-pane <mode> <debUrl> <debSha256> <runpaneSpec> <label>
@@ -449,5 +509,7 @@ case "$step" in
   clone) step_clone "$@" ;;
   firewall) step_firewall "$@" ;;
   ts-guard) step_ts_guard ;;
+  cert-status) step_cert_status "$@" ;;
+  serve-http) step_serve_http ;;
   *) fail "unknown step '$step'" ;;
 esac

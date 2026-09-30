@@ -17,14 +17,19 @@ function terminalPanel(id: string, sessionId: string, customState: TerminalPanel
 const CLAUDE_ID = '4135d392-c6c6-462d-a214-c339474ef77b';
 
 /** In-memory panels and PTYs; startTerminal records what a real launch would read. */
-function harness(sessions: PanelResumeSession[], panels: ToolPanel[], options: { transcript?: boolean } = {}) {
+function harness(
+  sessions: PanelResumeSession[],
+  panels: ToolPanel[],
+  options: { transcript?: boolean; hidden?: PanelResumeSession[] } = {},
+) {
+  const withHidden = [...sessions, ...(options.hidden ?? [])];
   const running = new Set<string>();
   const launches: Array<{ panelId: string; cwd: string; state: TerminalPanelState }> = [];
   const byId = new Map(panels.map(panel => [panel.id, panel]));
   const deps: PanelResumeDeps = {
     listSessions: () => sessions,
-    listSessionsForRecovery: () => sessions,
-    getSession: id => sessions.find(session => session.id === id),
+    listSessionsForRecovery: () => withHidden,
+    getSession: id => withHidden.find(session => session.id === id),
     getPanelsForSession: id => [...byId.values()].filter(panel => panel.sessionId === id),
     getPanel: id => byId.get(id),
     updateCustomState: async (panel, customState) => {
@@ -100,6 +105,23 @@ describe('PanelResume.resumeInterruptedAgents', () => {
     expect(status.panels.map(panel => [panel.panelId, panel.state])).toEqual([['claude', 'running'], ['codex', 'running']]);
     // The launch resolver turns these into `claude --resume <id>` and `codex resume <id>`.
     expect(h.launches[0]?.state).toMatchObject({ wasInterrupted: true, hasClaudeSessionId: true });
+  });
+
+  it('also resumes the orchestrator of a live Session, whose Pane is hidden, but no other hidden Pane', async () => {
+    const orchestratorPane: PanelResumeSession = { id: '__orchestration_session_s1__terminal__', worktreePath: '/home/user/.pane_remote/sessions/s1', archived: false };
+    const reservePane: PanelResumeSession = { id: 'reserve', worktreePath: '/repo/worktrees/_reserve', archived: false };
+    const panels = [
+      terminalPanel('orchestrator', orchestratorPane.id, { initialCommand: 'claude', agentType: 'claude', wasInterrupted: true, hasClaudeSessionId: true, agentSessionId: CLAUDE_ID }),
+      terminalPanel('reserve-claude', reservePane.id, { initialCommand: 'claude', wasInterrupted: true }),
+    ];
+    const h = harness([pane], panels, { transcript: true, hidden: [orchestratorPane, reservePane] });
+    const resume = new PanelResume(h.deps);
+    resume.alsoResumePanes(() => [orchestratorPane.id, 'gone-pane']);
+
+    const status = await resume.resumeInterruptedAgents();
+
+    expect(h.launches.map(launch => [launch.panelId, launch.cwd])).toEqual([['orchestrator', orchestratorPane.worktreePath]]);
+    expect(status.panels.map(panel => panel.panelId)).toEqual(['orchestrator']);
   });
 
   it('reports resuming, then done, to phase listeners', async () => {

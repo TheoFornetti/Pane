@@ -22,7 +22,7 @@ import type { ManifestEntry } from './manifest';
  * the audit records who, from which node, which manifest and which names.
  */
 
-export type PolicyMode = 'default' | 'allow-all' | 'custom';
+type PolicyMode = 'default' | 'allow-all' | 'custom';
 
 export interface SecretsSettings {
   apiBaseUrl: string;
@@ -33,7 +33,7 @@ export interface SecretsSettings {
 }
 
 /** Reads a repository file for the coordinator (the GitHub broker's credential, contents:read). */
-export interface ManifestSource {
+interface ManifestSource {
   readRepoFile(repo: string, filePath: string, ref: string | null): Promise<RepoFile | null>;
 }
 

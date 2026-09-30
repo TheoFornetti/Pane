@@ -26,7 +26,7 @@ const BOOT_RETRY_FOR_MS = 180_000;
 const FETCH_TIMEOUT_MS = 30_000;
 const REFUSED = 'not available in a runpane cloud Session (the doppler stand-in serves run, secrets get/download, refresh and status)';
 
-export const DOPPLER_USAGE = `doppler (runpane cloud stand-in): Doppler secrets for this Session, delivered by the runpane cloud coordinator.
+const DOPPLER_USAGE = `doppler (runpane cloud stand-in): Doppler secrets for this Session, delivered by the runpane cloud coordinator.
   doppler run [-p <project>] [-c <config>] [--preserve-env] -- <command> [args...]
   doppler run [-p <project>] [-c <config>] --command "<shell command>"
   doppler secrets [--only-names] [--json]              names only

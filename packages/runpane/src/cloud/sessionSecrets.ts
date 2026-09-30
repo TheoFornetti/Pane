@@ -21,7 +21,7 @@ const NOTES_START = '<!-- runpane-cloud-secrets:start -->';
 const NOTES_END = '<!-- runpane-cloud-secrets:end -->';
 const OK_MARKER = 'RP_DOPPLER';
 
-export function secretsAgentNotes(): string {
+function secretsAgentNotes(): string {
   return `${NOTES_START}
 ## Secrets (Doppler) in this runpane cloud Session
 

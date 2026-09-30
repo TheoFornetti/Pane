@@ -8,7 +8,6 @@ import type { FetchLike } from '../github/rest';
  */
 
 const TIMEOUT_MS = 20_000;
-export const DEFAULT_DOPPLER_API = 'https://api.doppler.com';
 
 export class DopplerError extends Error {
   override name = 'DopplerError';

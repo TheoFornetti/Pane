@@ -376,7 +376,13 @@
               "minLength": 1
             },
             "args": {
-              "$ref": "#/$defs/stringList"
+              "description": "Flags whose values become the channel's positional arguments; empty for a channel that takes none.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
             }
           },
           "additionalProperties": false
@@ -506,6 +512,12 @@
         "sessions associate",
         "sessions detach",
         "sessions overview",
+        "peers",
+        "peers list",
+        "peers mint",
+        "peers allow",
+        "peers deny",
+        "peers revoke",
         "lock",
         "lock acquire",
         "lock release",
@@ -728,6 +740,24 @@
           "$ref": "#/$defs/helpLines"
         },
         "sessions overview": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers mint": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers allow": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers deny": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers revoke": {
           "$ref": "#/$defs/helpLines"
         },
         "lock": {

@@ -501,8 +501,8 @@ export const RUNPANE_CONTRACT = {
       "name": "panels submit",
       "summary": "Send and submit text to a terminal panel, including idle agent composers.",
       "usage": [
-        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json] [--pane-dir <path>]",
-        "runpane panels submit (--host <target>|--thread <cloud-session>) --panel <panel-id|orchestrator> (--text <text>|--input-file <path|->) --yes [--json]"
+        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--idempotency-key <key>] --yes [--json] [--pane-dir <path>]",
+        "runpane panels submit (--host <target>|--thread <cloud-session>) --panel <panel-id|orchestrator> (--text <text>|--input-file <path|->) [--idempotency-key <key>] --yes [--json]"
       ],
       "mutates": true,
       "toolsets": [
@@ -1151,6 +1151,91 @@ export const RUNPANE_CONTRACT = {
       ]
     },
     {
+      "name": "peers list",
+      "summary": "List peer records on this host: other Sessions that may message a Session here, and which Sessions allowlist each.",
+      "usage": [
+        "runpane peers list [--json] [--pane-dir <path>]"
+      ],
+      "daemonAction": {
+        "channel": "runpane:peers:list",
+        "args": []
+      },
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "peers mint",
+      "summary": "Create a peer record for another Session and return its pane-remote:// code. The peer can reach nothing until a Session allowlists it.",
+      "usage": [
+        "runpane peers mint --name <sender-session-label> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "daemonAction": {
+        "channel": "runpane:peers:mint",
+        "args": [
+          "--name"
+        ]
+      },
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "peers allow",
+      "summary": "Let a peer submit to a Session's orchestrator panel and wait on that Session.",
+      "usage": [
+        "runpane peers allow --peer <id|label> --session <id|name> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "daemonAction": {
+        "channel": "runpane:peers:allow",
+        "args": [
+          "--peer",
+          "--session"
+        ]
+      },
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "peers deny",
+      "summary": "Remove a Session from a peer's allowlist.",
+      "usage": [
+        "runpane peers deny --peer <id|label> --session <id|name> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "daemonAction": {
+        "channel": "runpane:peers:deny",
+        "args": [
+          "--peer",
+          "--session"
+        ]
+      },
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "peers revoke",
+      "summary": "Delete a peer record; its token stops working immediately.",
+      "usage": [
+        "runpane peers revoke --peer <id|label> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "daemonAction": {
+        "channel": "runpane:peers:revoke",
+        "args": [
+          "--peer"
+        ]
+      },
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
       "name": "lock acquire",
       "summary": "Acquire a named lock on a resource shared between agents, such as one test account, optionally waiting for it.",
       "usage": [
@@ -1634,6 +1719,16 @@ export const RUNPANE_CONTRACT = {
         "description": "Named orchestration Session id or exact name."
       },
       {
+        "name": "--peer",
+        "value": "<id|label>",
+        "description": "Peer record id or exact label."
+      },
+      {
+        "name": "--idempotency-key",
+        "value": "<key>",
+        "description": "Repeat-safe key for panels submit: the same key within 10 minutes returns the first result instead of sending again."
+      },
+      {
         "name": "--ttl",
         "value": "<duration>",
         "description": "How long a named lock is held before it expires: a number with ms, s, m, or h (such as 30m); a bare number is milliseconds. At least 1s, at most 24h."
@@ -1839,6 +1934,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
         "  runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]",
+        "  runpane peers <list|mint|allow|deny|revoke> [options]",
         "  runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]",
@@ -2373,7 +2469,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "panels submit": [
         "Usage:",
-        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json]",
+        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--idempotency-key <key>] --yes [--json]",
         "",
         "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
         "",
@@ -2551,6 +2647,42 @@ export const RUNPANE_CONTRACT = {
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
         "  --agent <codex|claude|cursor>  Agent terminal to use.",
         "  --json                       Print JSON output."
+      ],
+      "peers": [
+        "Usage:",
+        "  runpane peers <list|mint|allow|deny|revoke> [options]",
+        "",
+        "A peer is another Pane Session (usually a Runpane Cloud Session) holding a narrow pairing to this host. It may submit only to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session. It cannot read terminals, open /events, or report. Allowlists start empty."
+      ],
+      "peers list": [
+        "Usage:",
+        "  runpane peers list [--json]",
+        "",
+        "Lists peer records and the Session ids each may reach. Tokens are never shown."
+      ],
+      "peers mint": [
+        "Usage:",
+        "  runpane peers mint --name <sender-session-label> --yes [--json]",
+        "",
+        "Creates a peer record and prints its pane-remote:// code in data.connectionCode. Give the code only to the sending Session and treat it as a secret. The label frames every message the peer sends: [peer message from <label>]. Then run runpane peers allow."
+      ],
+      "peers allow": [
+        "Usage:",
+        "  runpane peers allow --peer <id|label> --session <id|name> --yes [--json]",
+        "",
+        "Adds a Session to the peer's allowlist."
+      ],
+      "peers deny": [
+        "Usage:",
+        "  runpane peers deny --peer <id|label> --session <id|name> --yes [--json]",
+        "",
+        "Removes a Session from the peer's allowlist."
+      ],
+      "peers revoke": [
+        "Usage:",
+        "  runpane peers revoke --peer <id|label> --yes [--json]",
+        "",
+        "Deletes the peer record."
       ],
       "panes git-status": [
         "Usage:",
@@ -3138,6 +3270,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane peers <list|mint|allow|deny|revoke> [options]",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -3609,7 +3742,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "panels submit": [
         "Usage:",
-        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json]",
+        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--idempotency-key <key>] --yes [--json]",
         "",
         "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
         "",
@@ -3787,6 +3920,42 @@ export const RUNPANE_CONTRACT = {
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
         "  --agent <codex|claude|cursor>  Agent terminal to use.",
         "  --json                       Print JSON output."
+      ],
+      "peers": [
+        "Usage:",
+        "  runpane peers <list|mint|allow|deny|revoke> [options]",
+        "",
+        "A peer is another Pane Session (usually a Runpane Cloud Session) holding a narrow pairing to this host. It may submit only to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session. It cannot read terminals, open /events, or report. Allowlists start empty."
+      ],
+      "peers list": [
+        "Usage:",
+        "  runpane peers list [--json]",
+        "",
+        "Lists peer records and the Session ids each may reach. Tokens are never shown."
+      ],
+      "peers mint": [
+        "Usage:",
+        "  runpane peers mint --name <sender-session-label> --yes [--json]",
+        "",
+        "Creates a peer record and prints its pane-remote:// code in data.connectionCode. Give the code only to the sending Session and treat it as a secret. The label frames every message the peer sends: [peer message from <label>]. Then run runpane peers allow."
+      ],
+      "peers allow": [
+        "Usage:",
+        "  runpane peers allow --peer <id|label> --session <id|name> --yes [--json]",
+        "",
+        "Adds a Session to the peer's allowlist."
+      ],
+      "peers deny": [
+        "Usage:",
+        "  runpane peers deny --peer <id|label> --session <id|name> --yes [--json]",
+        "",
+        "Removes a Session from the peer's allowlist."
+      ],
+      "peers revoke": [
+        "Usage:",
+        "  runpane peers revoke --peer <id|label> --yes [--json]",
+        "",
+        "Deletes the peer record."
       ],
       "panes git-status": [
         "Usage:",
@@ -8064,6 +8233,12 @@ export const RUNPANE_CONTRACT = {
         },
         "asFilePointer": {
           "type": "boolean"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "agentOnly": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -8177,6 +8352,9 @@ export const RUNPANE_CONTRACT = {
             "observed",
             "unverifiable"
           ]
+        },
+        "deduplicated": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -11310,6 +11488,12 @@ export const RUNPANE_CONTRACT = {
             "description": "Write the prompt or text to a private file under the Pane directory and send the one line `Read and follow <path>` instead."
           },
           {
+            "name": "--idempotency-key",
+            "value": "<key>",
+            "required": false,
+            "description": "Repeat-safe key (1-256 of A-Z a-z 0-9 . _ : -). The same key within 10 minutes returns the first result with `deduplicated: true` and sends nothing. Retry with the same key only when the first attempt never reached Pane."
+          },
+          {
             "name": "--yes",
             "required": false,
             "description": "Skip confirmation for this mutating command."
@@ -13193,6 +13377,212 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "The result includes `locks`: named locks scoped to the Session or held by its Panes (see `runpane lock`)."
+        ]
+      },
+      "peers list": {
+        "name": "peers list",
+        "summary": "List peer records and the Sessions that allowlist each.",
+        "details": "Use this to audit which other Sessions can message Sessions on this host. Tokens are never shown.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane peers list --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Peers are paired client records with scope peer. A peer may only submit to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session; /events, WebSocket upgrades and every other channel answer 403.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "peers mint": {
+        "name": "peers mint",
+        "summary": "Create a peer record for another Session and return its pane-remote:// code.",
+        "details": "Run on the receiving host. The label is the sending Session's name; it frames each message the peer sends as `[peer message from <label>]`. The new peer's allowlist is empty until `peers allow`. data.connectionCode carries a secret token: hand it only to the sending Session.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--name",
+            "value": "<sender-session-label>",
+            "required": true,
+            "description": "The sending Session's label."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane peers mint --name \"Session A\" --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Peers are paired client records with scope peer. A peer may only submit to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session; /events, WebSocket upgrades and every other channel answer 403.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "peers allow": {
+        "name": "peers allow",
+        "summary": "Let a peer reach a Session's orchestrator panel.",
+        "details": "Adds the Session to the peer's allowlist.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--peer",
+            "value": "<id|label>",
+            "required": true,
+            "description": "Peer record id or exact label from peers list."
+          },
+          {
+            "name": "--session",
+            "value": "<id|name>",
+            "required": true,
+            "description": "Session id or exact name on this host."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane peers allow --peer \"Session A\" --session \"Session B\" --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Peers are paired client records with scope peer. A peer may only submit to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session; /events, WebSocket upgrades and every other channel answer 403.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "peers deny": {
+        "name": "peers deny",
+        "summary": "Remove a Session from a peer's allowlist.",
+        "details": "The peer keeps its record but can no longer reach that Session.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--peer",
+            "value": "<id|label>",
+            "required": true,
+            "description": "Peer record id or exact label from peers list."
+          },
+          {
+            "name": "--session",
+            "value": "<id|name>",
+            "required": true,
+            "description": "Session id or exact name on this host."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane peers deny --peer \"Session A\" --session \"Session B\" --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Peers are paired client records with scope peer. A peer may only submit to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session; /events, WebSocket upgrades and every other channel answer 403.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "peers revoke": {
+        "name": "peers revoke",
+        "summary": "Delete a peer record.",
+        "details": "Its token stops working on the next request.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--peer",
+            "value": "<id|label>",
+            "required": true,
+            "description": "Peer record id or exact label from peers list."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane peers revoke --peer \"Session A\" --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Peers are paired client records with scope peer. A peer may only submit to the orchestrator panel of a Session that allowlists it, list that panel, and wait on that Session; /events, WebSocket upgrades and every other channel answer 403.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
         ]
       },
       "lock acquire": {

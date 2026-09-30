@@ -365,6 +365,8 @@ These flags are consumed by local daemon-control commands:
 --min-interval <milliseconds>
 --body-file <path|->
 --session <id|name>
+--peer <id|label>
+--idempotency-key <key>
 --ttl <duration>
 --wait <milliseconds>
 --note <text>

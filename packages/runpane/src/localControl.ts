@@ -685,6 +685,7 @@ interface PanelInputRequest {
   input: string;
   /** panels submit only: send `Read and follow <prompt file>` in place of the text. */
   asFilePointer?: boolean;
+  idempotencyKey?: string;
 }
 
 interface PanelInputResult {
@@ -764,6 +765,7 @@ interface PanelSubmitResult {
   promptFile?: string;
   warnings?: PromptWarning[];
   nextCommand?: string;
+  deduplicated?: boolean;
 }
 
 interface PanelSubmitComposerResult {
@@ -1564,6 +1566,7 @@ export const panelSubmitResultSchema: BoundarySchema<PanelSubmitResult> = bounda
   promptFile: boundary.optional(boundary.string),
   warnings: promptWarningsSchema,
   nextCommand: boundary.optional(boundary.string),
+  deduplicated: boundary.optional(boundary.boolean),
 });
 const panelSubmitComposerResultSchema: BoundarySchema<PanelSubmitComposerResult> = boundary.object({
   ok: boundary.boolean,
@@ -2691,6 +2694,9 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
     const verified = result.verifiedSubmitted ? ' verified' : ' unverified';
     console.log(`${verb} ${result.inputBytes} byte${result.inputBytes === 1 ? '' : 's'} via ${result.sequenceName} to panel ${result.panelId}.${verified}`);
     printDelivery(result.delivery);
+    if (result.deduplicated) {
+      console.log('This idempotency key was already used; Pane returned the first result and sent nothing again.');
+    }
     if (result.blocked) {
       console.log(`Blocked: ${result.blocked.message}`);
     }
@@ -2843,11 +2849,15 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
   if (parsed.asFilePointer && command !== 'submit') {
     throw new Error('--as-file-pointer is for panels submit; panels input sends exact bytes.');
   }
+  if (parsed.idempotencyKey !== undefined && command !== 'submit') {
+    throw new Error('--idempotency-key is for panels submit.');
+  }
 
   return {
     panelId: parsed.panelId,
     input: parsed.keys ? keysToBytes(parsed.keys) : parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
     asFilePointer: parsed.asFilePointer || undefined,
+    idempotencyKey: parsed.idempotencyKey,
   };
 }
 

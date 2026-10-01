@@ -45,6 +45,8 @@ export interface CloudSettings {
   secretsDenyList?: string[];
   /** The boat wallet new sandboxes bill (`setup --boat-org`); unset, boat's active wallet applies. */
   boatOrg?: BoatOrg;
+  /** Your guardrails for agents in every cloud Session (`runpane cloud notes`; none by default). */
+  agentNotes?: { guardrails?: string[] };
 }
 
 /** The coordinator sandbox `runpane cloud coordinator deploy` created (final-plan S2). */

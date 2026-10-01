@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import type { CloudArgs } from './args';
 import type { JsonObject, JsonValue } from '../boundaryDecoder';
 import { placeAgentCredentials } from './agentCredentials';
+import { configuredGuardrails, pushAgentNotes, runCloudNotesCommand, type AgentNotesPushResult } from './agentNotes';
 import { COORDINATOR_LIFECYCLE_USAGE, isCoordinatorLifecycleCommand, runCoordinatorLifecycle } from './coordinatorDeploy';
 import { COORDINATOR_DOPPLER_USAGE, runCoordinatorDoppler } from './coordinatorDoppler';
 import { COORDINATOR_GITHUB_USAGE, runCoordinatorGitHub } from './coordinatorGithub';
@@ -149,6 +150,7 @@ export async function runCloudCommand(args: CloudArgs, deps: CloudDeps): Promise
     case 'port': return runCloudPortCommand(args.passthrough, deps);
     case 'github': return runGitHubCommand(args.passthrough, deps);
     case 'git': return runGitCommand(args.passthrough, deps);
+    case 'notes': return runCloudNotesCommand(args.passthrough, deps);
   }
 }
 
@@ -314,6 +316,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const label = args.label ?? hostname;
   const started = deps.now();
   const timings: Record<string, number> = {};
+  let agentNotes: AgentNotesPushResult | null = null;
 
   progress(`runpane cloud: creating ${size} sandbox ${hostname}${fromSnapshot ? ` from ${fromSnapshot}` : ''}...`);
   const sandbox = await provider.create({
@@ -422,6 +425,13 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     if (outcome.daemonVersion) record.meta.daemonVersion = outcome.daemonVersion;
     if (coordinatorEnabled) record.meta.coordinatorPairingPath = deps.store.coordinatorPairingPath(hostname);
     await deps.store.writeHost(record);
+    // The user's guardrails (settings agentNotes.guardrails): the daemon keeps them and rewrites them at every wake.
+    const guardrails = configuredGuardrails(settings);
+    if (guardrails?.length) {
+      agentNotes = await pushAgentNotes(record, guardrails, deps);
+      if (agentNotes.pushed) progress(`  - agent-notes done: ${guardrails.length} guardrail${guardrails.length === 1 ? '' : 's'} in ${agentNotes.changedFiles.join(', ') || 'the notes'}`);
+      else deps.stderr(`runpane cloud: the Session's agent guardrails were not written (${agentNotes.reason}). Retry with: runpane cloud notes push ${hostname}`);
+    }
     if (githubRepo && brokerMode) {
       const repo = record.meta.github?.[0]?.repo ?? githubRepo;
       const enabled = await enableBroker(record, provider.handle(sandbox.id), deps, { repo, mode: brokerMode });
@@ -478,6 +488,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       desktop: desktopSummary(desktop),
       coordinator,
       peersFile,
+      agentNotes,
       githubBroker: record.meta.brokerRepos ? { repos: record.meta.brokerRepos, mode: record.meta.brokerMode ?? 'app' } : null,
       agentCredentials: agentCredentialsSummary(credentials),
       timings,
@@ -782,6 +793,10 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const peersFile = health.ok && (record.meta.peers?.length || settings.coordinator?.deployment)
     ? await pushPeersFile(record, await deps.store.listHosts(), deps, provider)
     : null;
+  // So do guardrails changed while it slept (an empty list clears them).
+  const guardrails = configuredGuardrails(settings);
+  const agentNotes = health.ok && guardrails ? await pushAgentNotes(record, guardrails, deps) : null;
+  if (agentNotes && !agentNotes.pushed && !args.json) deps.stderr(`runpane cloud: ${hostname}'s agent guardrails were not updated (${agentNotes.reason}).`);
   const summary = {
     ok: health.ok,
     host: hostname,
@@ -795,6 +810,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     repaired,
     serveRepaired,
     peersFile,
+    agentNotes,
     timings,
   };
   report(

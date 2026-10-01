@@ -232,6 +232,21 @@ in `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` (between `<!-- runpane-cloud-p
 server and give me the link" and you get a link that opens on your laptop and phone (see
 [Reach a service in your Session](#reach-a-service-in-your-session-ports)).
 
+Your own rules for agents go in the same files, in every Session. Pane ships none; you add them once on
+your machine:
+
+```bash
+runpane cloud notes add "Ask me before deleting data, running migrations or deploying anything."
+runpane cloud notes list
+runpane cloud notes remove 1
+runpane cloud notes push [<host>]    # hand the current list to a Session (default: all) now
+```
+
+The list is `agentNotes.guardrails` in `~/.config/runpane-cloud/settings.json`. `add` and `remove` push it to
+every awake Session, `new` and `wake` push it, and an asleep Session keeps its previous list until then.
+Each Session's daemon keeps the copy it was given (`~/.runpane-cloud/agent-notes.json`) and writes it as a
+`runpane-cloud-guardrails` block at every boot and wake, so an agent that edits those files gets it back.
+
 ### Secrets from Doppler, with no laptop in the path (`.runpane/secrets.json`)
 
 If your team keeps secrets in Doppler, let the coordinator hold **read-only Doppler service tokens** and let
@@ -1020,12 +1035,12 @@ readiness (`readiness.state`: `starting`, `ready` or `degraded`).
 | Path | What |
 |---|---|
 | `~/.config/runpane-cloud/credentials.json` | boat key, Tailscale OAuth client, Anthropic key (0600). Override the directory with `RUNPANE_CLOUD_DIR` |
-| `~/.config/runpane-cloud/settings.json` | golden image, default size, name prefix, runaway guard, `secretsDenyList`, `boatOrg` (the wallet new sandboxes bill) |
+| `~/.config/runpane-cloud/settings.json` | golden image, default size, name prefix, runaway guard, `secretsDenyList`, `boatOrg` (the wallet new sandboxes bill), `agentNotes.guardrails` (your rules for agents in every Session) |
 | `~/.runpane-cloud/secrets.env`, `secrets.json` (in the sandbox) | agent secrets from `runpane cloud secrets` (0600); loaded by a block at the top of `~/.bashrc` and `~/.zshenv` |
 | `~/.runpane-cloud/doppler/secrets.json` (in the sandbox) | the Doppler set the coordinator delivered for the repository's `.runpane/secrets.json` (0600, 0700 dir); read by the `doppler` stand-in (`~/.local/bin/doppler`) and refreshed by the user unit `runpane-cloud-secrets.service` at every boot and wake |
 | `.runpane/secrets.json` (in your repository) | which Doppler configs and names Sessions on the repository get; names only, safe to commit |
 | `~/.runpane-cloud/ports.json` (in the sandbox) | the Session's published ports (0600); the Pane daemon owns it and re-applies it to Tailscale Serve at every boot and wake |
-| `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` (in the sandbox) | notes for agents in the Session, in marked blocks: `runpane-cloud-ports` (written by the Pane daemon), `runpane-cloud-github` and `runpane-cloud-secrets` (written by the CLI when those are set up) |
+| `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` (in the sandbox) | notes for agents in the Session, in marked blocks: `runpane-cloud-ports` and `runpane-cloud-guardrails` (written by the Pane daemon; the guardrails from `~/.runpane-cloud/agent-notes.json`), `runpane-cloud-github` and `runpane-cloud-secrets` (written by the CLI when those are set up) |
 | `.runpane/ports.json` (in your repository) | the services Sessions on the repository publish automatically; see [ports](#reach-a-service-in-your-session-ports) |
 | `~/.config/runpane-cloud/hosts/<host>.json`, `.pairing` | one saved cloud Session and its pairing code (0600) |
 | `~/.config/runpane-cloud/coordinator.json` | the coordinator's address and your caller token (0600) |

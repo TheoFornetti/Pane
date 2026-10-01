@@ -57,7 +57,7 @@ import { cloudDaemonHealth } from './cloud/readiness';
 import { userClientActivity } from './cloud/clientActivity';
 import { readBuildCommit, registerCloudDaemonHandlers } from './cloud/cloudDaemon';
 import { registerSessionPortsHandlers } from './cloud/ports/registerPorts';
-import { writeSessionAgentNotes } from './cloud/sessionAgentNotes';
+import { registerAgentNotesHandler, writeSessionAgentNotes } from './cloud/sessionAgentNotes';
 import { remoteHostRuntimeStateStore } from './remoteHostRuntimeState';
 
 interface PaneDaemonHostOptions {
@@ -411,11 +411,12 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     emit: (channel, result) => getPaneEventSink().send(channel, result),
     log: message => logger.info(`[Pane daemon] ${message}`),
   });
+  registerAgentNotesHandler(commandRegistry);
   try {
     const notes = writeSessionAgentNotes();
-    if (notes.length > 0) logger.info(`[Pane daemon] wrote the Session ports notes for agents: ${notes.join(', ')}`);
+    if (notes.length > 0) logger.info(`[Pane daemon] wrote the Session notes for agents: ${notes.join(', ')}`);
   } catch (error) {
-    logger.warn(`[Pane daemon] could not write the Session ports notes for agents: ${error instanceof Error ? error.message : String(error)}`);
+    logger.warn(`[Pane daemon] could not write the Session notes for agents: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   let paneDaemonServer: PaneDaemonServer | null = null;

@@ -943,6 +943,12 @@ export function ArchivedSessions() {
     }
   }, []);
 
+  // Archived Panes belong to the active host; reload them once they've been shown.
+  useEffect(() => {
+    if (!hasLoadedArchived) return;
+    return window.electronAPI?.events?.onRemoteDaemonResyncRequested?.(() => { void loadArchivedSessions(); });
+  }, [hasLoadedArchived, loadArchivedSessions]);
+
   const toggleArchived = useCallback(() => {
     const next = !showArchived;
     if (next && !hasLoadedArchived) {

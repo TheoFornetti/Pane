@@ -98,7 +98,7 @@ export function registerRemoteDaemonHandlers(
   function requestRendererRemoteResync(): void {
     const mainWindow = getMainWindow?.();
     if (mainWindow) {
-      mainWindow.webContents.send('remote-daemon:resync-required');
+      mainWindow.webContents.send('remote-daemon:resync-required', { hostChanged: true });
     }
   }
 

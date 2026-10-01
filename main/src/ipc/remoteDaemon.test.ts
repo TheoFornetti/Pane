@@ -222,7 +222,7 @@ describe('remote daemon IPC', () => {
         mode: 'remote',
       },
     });
-    expect(send).toHaveBeenCalledWith('remote-daemon:resync-required');
+    expect(send).toHaveBeenCalledWith('remote-daemon:resync-required', { hostChanged: true });
 
     await expect(getConfig?.({})).resolves.toEqual({
       success: true,
@@ -512,7 +512,7 @@ describe('remote daemon IPC', () => {
       },
     });
 
-    expect(send).not.toHaveBeenCalledWith('remote-daemon:resync-required');
+    expect(send).not.toHaveBeenCalledWith('remote-daemon:resync-required', { hostChanged: true });
     expect(configManager.getConfig().remoteDaemon?.client).toMatchObject({
       activeProfileId: null,
       mode: 'local',
@@ -694,7 +694,7 @@ describe('remote daemon IPC', () => {
         mode: 'local',
       },
     });
-    expect(send).toHaveBeenCalledWith('remote-daemon:resync-required');
+    expect(send).toHaveBeenCalledWith('remote-daemon:resync-required', { hostChanged: true });
   });
 
   it('does not resync or switch runtime when deleting an inactive connection profile', async () => {
@@ -752,7 +752,7 @@ describe('remote daemon IPC', () => {
       },
     });
     expect(switchToLocalMode).not.toHaveBeenCalled();
-    expect(send).not.toHaveBeenCalledWith('remote-daemon:resync-required');
+    expect(send).not.toHaveBeenCalledWith('remote-daemon:resync-required', { hostChanged: true });
   });
 
   it('switches to local runtime through client state update and resyncs the renderer', async () => {
@@ -807,7 +807,7 @@ describe('remote daemon IPC', () => {
       },
     });
     expect(switchToLocalMode).toHaveBeenCalled();
-    expect(send).toHaveBeenCalledWith('remote-daemon:resync-required');
+    expect(send).toHaveBeenCalledWith('remote-daemon:resync-required', { hostChanged: true });
     expect(configManager.getConfig().remoteDaemon?.client).toMatchObject({
       activeProfileId: null,
       mode: 'local',

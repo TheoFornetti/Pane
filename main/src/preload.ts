@@ -1011,8 +1011,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('window:focus-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('window:focus-changed', wrappedCallback);
     },
-    onRemoteDaemonResyncRequested: (callback: () => void) => {
-      const wrappedCallback = (_event: Electron.IpcRendererEvent) => callback();
+    onRemoteDaemonResyncRequested: (callback: (event: { hostChanged: boolean }) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, payload?: { hostChanged?: boolean }) => callback({ hostChanged: payload?.hostChanged === true });
       ipcRenderer.on('remote-daemon:resync-required', wrappedCallback);
       return () => ipcRenderer.removeListener('remote-daemon:resync-required', wrappedCallback);
     },

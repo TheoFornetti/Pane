@@ -1116,8 +1116,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           pendingPermissions.push(request);
           emit('permission:request', request);
         },
-        emitRemoteDaemonResyncRequested() {
-          emit('remote-daemon:resync-required');
+        emitRemoteDaemonResyncRequested(event: { hostChanged: boolean } = { hostChanged: false }) {
+          emit('remote-daemon:resync-required', event);
         },
         getConfigReadCount() {
           return configGetCount;

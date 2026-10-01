@@ -406,6 +406,11 @@ async function installSessionsFixture(
       getOrchestrationSelectedSessionId: () => selectedSessionId,
       getOrchestrationRecord: (sessionId: string) => clone(sessions.find(session => session.id === sessionId) ?? null),
       failNextOrchestrationUpdate: (message: string) => { nextOrchestrationUpdateError = message; },
+      // Stands in for another host's Sessions: the list changes without an event.
+      replaceOrchestrationSessions: (next: SessionRecord[]) => {
+        sessions = clone(next);
+        selectedSessionId = sessions.find(session => !session.archived)?.id;
+      },
     });
   }, { seed: initialSessions, listDelayMs: fixtureOptions.listDelayMs ?? 0, getDelayMs: fixtureOptions.getDelayMs ?? 0, overviewPanes: fixtureOptions.overviewPanes ?? {} });
 }
@@ -863,6 +868,36 @@ test('Sessions can be pinned, persist across reload, and unpin back to the norma
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationRecord: (sessionId: string) => UiSessionFixture | null } };
     return mockWindow.__paneTestElectronMock.getOrchestrationRecord('alpha')?.isPinned;
   })).toBe(false);
+});
+
+test('switching hosts replaces the Sessions and pinned Sessions in the sidebar', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installSessionsFixture(page, [
+    sessionFixture('local-pinned', 'Local pinned', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z', [], false, true),
+    sessionFixture('local', 'Local', 'Goal.', 'Context.', '2026-09-16T12:01:00.000Z'),
+  ]);
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+  await expect(page.getByTestId('orchestration-pinned-session-local-pinned')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('orchestration-session-local')).toBeVisible();
+
+  await page.evaluate((remoteSessions) => {
+    // SAFETY: installSessionsFixture and installElectronApiMock add these controls before the app loads.
+    const mock = (window as typeof window & { __paneTestElectronMock: {
+      replaceOrchestrationSessions: (sessions: UiSessionFixture[]) => void;
+      emitRemoteDaemonResyncRequested: () => void;
+    } }).__paneTestElectronMock;
+    mock.replaceOrchestrationSessions(remoteSessions);
+    mock.emitRemoteDaemonResyncRequested();
+  }, [
+    sessionFixture('remote-pinned', 'Remote pinned', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z', [], false, true),
+    sessionFixture('remote', 'Remote', 'Goal.', 'Context.', '2026-09-16T12:01:00.000Z'),
+  ]);
+
+  await expect(page.getByTestId('orchestration-pinned-session-remote-pinned')).toBeVisible();
+  await expect(page.getByTestId('orchestration-session-remote')).toBeVisible();
+  await expect(page.getByTestId('orchestration-pinned-session-local-pinned')).toHaveCount(0);
+  await expect(page.getByTestId('orchestration-session-local')).toHaveCount(0);
 });
 
 test('Session rows archive and restore without losing selection or associated Panes', async ({ page }) => {

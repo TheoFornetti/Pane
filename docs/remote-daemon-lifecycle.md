@@ -7,7 +7,8 @@ This is the implementation checklist for Remote Pane setup, teardown, and runtim
 - Host lifecycle is owned by `PaneRemoteTransportController` and `remoteHostRuntimeStateStore`.
 - Client lifecycle is owned by `RemotePaneClientController`.
 - IPC handlers in `main/src/ipc/remoteDaemon.ts` orchestrate config writes and controller calls.
-- Renderer runtime changes are reconciled through `remote-daemon:resync-required`.
+- Renderer runtime changes are reconciled through `remote-daemon:resync-required`. Main sends `{ hostChanged: true }` when the active runtime changes; a reconnect to the same host sends it without a payload.
+- A resync refetches config, Panes, the active Pane's panels, repositories, Sessions and pinned Sessions, pending permission prompts, loaded archived Panes, and an open Usage view. When the host changed, it also leaves an open repository view, since repository ids are per host.
 
 ## Lifecycle Matrix
 

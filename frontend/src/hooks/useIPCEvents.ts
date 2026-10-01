@@ -18,7 +18,12 @@ interface SessionEventData {
 
 type ValidatedEventData = SessionEventData | SessionOutput;
 
-async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => void): Promise<void> {
+async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean): Promise<void> {
+  // Repository ids are per host, so another host's repository view is meaningless.
+  if (hostChanged && useNavigationStore.getState().activeView === 'project') {
+    useNavigationStore.getState().navigateToSessions();
+    await useSessionStore.getState().setActiveSession(null);
+  }
   await useConfigStore.getState().fetchConfig();
 
   const sessionsResponse = await API.sessions.getAll();
@@ -29,8 +34,10 @@ async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
     }));
     loadSessions(sessionsWithJsonMessages);
 
-    const activeSessionId = useSessionStore.getState().activeSessionId;
-    if (activeSessionId && !sessionsWithJsonMessages.some((session: Session) => session.id === activeSessionId)) {
+    // The list leaves out repository Panes, so keep the open repository view's own Pane.
+    const { activeSessionId, activeMainRepoSession } = useSessionStore.getState();
+    if (activeSessionId && activeSessionId !== activeMainRepoSession?.id
+      && !sessionsWithJsonMessages.some((session: Session) => session.id === activeSessionId)) {
       await useSessionStore.getState().setActiveSession(null);
       usePanelStore.getState().setPanels(activeSessionId, []);
     }
@@ -49,6 +56,8 @@ async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
 
   window.dispatchEvent(new Event('project-changed'));
   window.dispatchEvent(new Event('project-sessions-refresh'));
+  // Sessions belong to the host too; adopt the new host's selection.
+  window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { selectionChanged: true } }));
 }
 
 // Frontend validation helpers
@@ -449,10 +458,10 @@ export function useIPCEvents() {
       unsubscribeFunctions.push(unsubscribeSpotlightTamper);
     }
 
-    const unsubscribeRemoteResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(() => {
+    const unsubscribeRemoteResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(({ hostChanged }) => {
       void (async () => {
         try {
-          await resyncRemoteRuntimeState(loadSessions);
+          await resyncRemoteRuntimeState(loadSessions, hostChanged);
         } catch (error) {
           console.error('[useIPCEvents] Failed to resync renderer state after remote reconnect:', error);
         }

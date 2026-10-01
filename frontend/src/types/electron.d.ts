@@ -467,7 +467,7 @@ interface ElectronAPI {
     // Window focus state from BrowserWindow (more reliable than document.hasFocus())
     onAppMenuAction: (callback: (action: 'open-about' | 'open-settings') => void) => () => void;
     onWindowFocusChanged: (callback: (focused: boolean) => void) => () => void;
-    onRemoteDaemonResyncRequested: (callback: () => void) => () => void;
+    onRemoteDaemonResyncRequested: (callback: (event: { hostChanged: boolean }) => void) => () => void;
 
     // Spotlight events
     onSpotlightStatusChanged?: (callback: (data: { sessionId: string; projectId: number; active: boolean }) => void) => () => void;

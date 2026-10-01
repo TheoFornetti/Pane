@@ -709,11 +709,17 @@ function App() {
       void loadNextPendingPermission();
     });
 
+    // Another host has its own prompts, and a reconnect may have missed some.
+    const removeRemoteResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(() => {
+      void loadNextPendingPermission();
+    });
+
     void loadNextPendingPermission();
 
     return () => {
       removePermissionRequest();
       removePermissionResolved();
+      removeRemoteResync?.();
     };
   }, [loadNextPendingPermission]);
 

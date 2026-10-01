@@ -1499,7 +1499,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
                 if (file.size > 50 * 1024 * 1024) {
                   const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
                   if (!disposed && terminal) {
-                    terminal.paste(`[Drop failed] File too large (${sizeMB} MB), max 50 MB\n`);
+                    terminal.paste(`[Upload failed] File too large (${sizeMB} MB), max 50 MB\n`);
                   }
                   continue;
                 }
@@ -1542,12 +1542,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
                     terminal.paste(`${resolvedPath}\n`);
                   }
                 } catch (err) {
-                  console.error('[TerminalPanel] Failed to drop file:', err);
+                  console.error('[TerminalPanel] Failed to upload file:', err);
                   if (!disposed && terminal) {
                     // Strip Electron's IPC wrapper so the user sees the backend reason
                     const raw = err instanceof Error ? err.message : String(err);
                     const reason = raw.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '');
-                    terminal.paste(`[Drop failed] ${reason || 'Unknown error'}\n`);
+                    terminal.paste(`[Upload failed] ${reason || 'Unknown error'}\n`);
                   }
                 }
               }

@@ -21,10 +21,13 @@ say() {
   printf 'R35:%s:%s:/R35\n' "$tag" "$(printf '%s\t%s\t%s' "$1" "$2" "$3" | base64 | tr -d '\n')"
 }
 oneline() { tr '\r\n\t' '   ' | sed 's/  */ /g' | cut -c1-"${1:-300}"; }
+# The runpane of the daemon that owns this terminal: Pane exports it as PANE_RUNPANE_BIN (on Windows a
+# runpane.cmd, which `test -x` doesn't recognize from Git Bash, so it isn't tested). Never another install's.
 runpane_cli() {
+  if [ -n "${PANE_RUNPANE_BIN:-}" ]; then "$PANE_RUNPANE_BIN" "$@"; return; fi
   local candidate
-  for candidate in "${PANE_RUNPANE_BIN:-}" "$HOME/.pane_remote/bin/runpane" "$HOME/.pane/bin/runpane"; do
-    if [ -n "$candidate" ] && [ -x "$candidate" ]; then "$candidate" "$@"; return; fi
+  for candidate in "$HOME/.pane_remote/bin/runpane" "$HOME/.pane/bin/runpane"; do
+    if [ -x "$candidate" ]; then "$candidate" "$@"; return; fi
   done
   runpane "$@"
 }
@@ -154,7 +157,10 @@ broker() {
 cleanup() {
   runpane_cli port close "$name" >/dev/null 2>"$work/close.err"
   [ -f "$work/server.pid" ] && kill "$(cat "$work/server.pid")" 2>/dev/null
-  if runpane_cli port list --json 2>/dev/null | grep -q "\"$name\""; then
+  local listed
+  if ! listed=$(runpane_cli port list --json 2>&1); then
+    say port-closed FAIL "runpane port list failed: $(printf '%s' "$listed" | oneline 200)"
+  elif printf '%s' "$listed" | grep -q "\"$name\""; then
     say port-closed FAIL "$name still listed: $(oneline 200 <"$work/close.err")"
   else
     say port-closed PASS "$name closed, server stopped"

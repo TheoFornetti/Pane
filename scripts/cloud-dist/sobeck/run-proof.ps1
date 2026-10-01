@@ -1,6 +1,7 @@
 # Saves the cloud host from a pairing file into the test build's data dir, then drives the test build
-# (proof.mjs) through the host switcher, a terminal on the cloud host, the Claude "morning" Session and
-# the repo list. The pairing code is only ever read from -PairingFile by seed-profile.cjs: it is never
+# (proof.mjs) through the host switcher, a terminal on the cloud host, the Session's Ports row (the
+# -PortName chip carries -PortUrl and opens it), the Claude "morning" Session and the repo list. The
+# pairing code is only ever read from -PairingFile by seed-profile.cjs: it is never
 # printed, logged, put on a command line or shown in the app. Screenshots are of the app window only.
 #
 #   powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\PaneCloudTest\kit\run-proof.ps1"
@@ -14,8 +15,12 @@ param(
   [string]$HostnamePrefix = 'box-node-',
   [string]$Session = 'morning',
   [string]$OptionalRepo = 'montlakev2',
+  [string]$PortName = 'taste',
+  [string]$PortUrl = '',
+  [switch]$OpenInBrowser,
   [switch]$NoClaudeReply,
-  [switch]$SkipSeed
+  [switch]$SkipSeed,
+  [switch]$CloseRunning
 )
 $ErrorActionPreference = 'Stop'
 $Root = [IO.Path]::GetFullPath($Root)
@@ -31,6 +36,17 @@ foreach ($path in @($exe, (Join-Path $kit 'proof.mjs'), (Join-Path $kit 'node_mo
   if (-not (Test-Path $path)) { throw "Missing $path; run install.ps1 first" }
 }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+
+# The proof starts its own copy of the test build, and a running one would hold the single-instance lock.
+# Someone may be working in it, so it is closed only when asked. Only processes started from this
+# folder: the installed Pane is never touched.
+$running = @(Get-Process -Name Pane -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$Root\", 'OrdinalIgnoreCase') })
+if ($running.Count -gt 0) {
+  if (-not $CloseRunning) { throw "The test build is running ($($running.Count) processes from $Root\app). Close its window, or re-run with -CloseRunning to close it." }
+  Write-Host "Closing the running test build ($($running.Count) processes)"
+  $running | Stop-Process -Force
+  Start-Sleep -Seconds 2
+}
 
 # Runs the test build's Pane.exe as Node. It is a GUI program, so PowerShell only waits for it and sees
 # its output through Start-Process with redirection.
@@ -57,9 +73,6 @@ if (-not $SkipSeed) {
   if ($others.Count -gt 0) {
     Write-Warning "The pairing file is readable by: $(($others | ForEach-Object { $_.IdentityReference.Value }) -join ', ')"
   }
-  # The test build must not be running while its config is written.
-  Get-Process -Name Pane -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$Root\", 'OrdinalIgnoreCase') } | Stop-Process -Force
-  Start-Sleep -Seconds 1
   $code = RunAsNode 'seed' @((Join-Path $kit 'seed-profile.cjs'), $PairingFile, $PaneDir)
   if ($code -ne 0) { throw "seed-profile failed ($code)" }
 }
@@ -73,10 +86,13 @@ $env:HOSTNAME_PREFIX = $HostnamePrefix
 $env:SESSION = $Session
 $env:OPTIONAL_REPO = $OptionalRepo
 $env:CLAUDE_REPLY = $(if ($NoClaudeReply) { '0' } else { '1' })
+$env:PORT_NAME = $PortName
+$env:PORT_URL = $PortUrl
+$env:OPEN_IN_BROWSER = $(if ($OpenInBrowser) { '1' } else { '0' })
 try {
   $code = RunAsNode 'proof' @((Join-Path $kit 'proof.mjs'))
 } finally {
-  foreach ($name in 'PANE_EXE', 'PANE_DIR', 'OUT', 'HOST_LABEL', 'REPO', 'HOSTNAME_PREFIX', 'SESSION', 'OPTIONAL_REPO', 'CLAUDE_REPLY') {
+  foreach ($name in 'PANE_EXE', 'PANE_DIR', 'OUT', 'HOST_LABEL', 'REPO', 'HOSTNAME_PREFIX', 'SESSION', 'OPTIONAL_REPO', 'CLAUDE_REPLY', 'PORT_NAME', 'PORT_URL', 'OPEN_IN_BROWSER') {
     Remove-Item "Env:\$name" -ErrorAction SilentlyContinue
   }
 }

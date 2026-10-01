@@ -72,6 +72,9 @@ Check 'installed-present' (Test-Path $installedExe) $installedExe
 Start-Process -FilePath $installedExe | Out-Null
 $installedUp = WaitFor { HasFiles $installedDir } 180
 Check 'installed-running' ($installedUp -and (Running $installedExe)) "files in $installedDir; $installedExe running"
+# The installed Pane writes openrouter-prices.json itself some seconds after startup (run 36727033473
+# counted it against the test build): take the "before" listing once it is there.
+WaitFor { Test-Path (Join-Path $installedDir 'openrouter-prices.json') } 90 | Out-Null
 Start-Sleep -Seconds 15
 $before = RegistrySnapshot
 $installedEntriesBefore = @(Get-ChildItem -Force $installedDir | ForEach-Object Name | Sort-Object)

@@ -24,6 +24,14 @@ test('a phone creates a Session from the drawer and lands in its agent chat', as
   await expect(page.getByRole('group', { name: 'Sessions' }).getByRole('button', { name: 'Open Session New chat' })).toBeVisible();
 });
 
+test('New Pane without a repository starts in the default repository and keeps the picker', async ({ page }) => {
+  await openConnectedRemotePwa(page);
+  await page.getByRole('button', { name: 'New Pane', exact: true }).click();
+  const sheet = page.getByRole('dialog', { name: 'New Pane' });
+  await expect(sheet.getByRole('combobox', { name: 'Repository' })).toHaveValue('1');
+  await expect(sheet.getByRole('combobox', { name: 'Repository' })).toBeEnabled();
+});
+
 test('a pane opens on the tab that is active on the host', async ({ page }) => {
   await openConnectedRemotePwa(page, { activePanelIndex: 1 });
   await expect(page.getByRole('tab', { name: 'shell', exact: true })).toHaveAttribute('aria-selected', 'true');

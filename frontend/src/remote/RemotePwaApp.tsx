@@ -133,10 +133,14 @@ export function RemotePwaApp() {
     setSidebarOpen(true);
   }, []);
 
-  const openCreateSession = useCallback((project: RemoteProjectWithSessions) => {
+  /** Without a repository, starts in desktop's default one: the active repository, else the first. */
+  const openCreateSession = useCallback((project?: RemoteProjectWithSessions) => {
+    const { projects: hostProjects } = useRemoteSessionStore.getState();
+    const initialProject = project ?? hostProjects.find(candidate => candidate.active) ?? hostProjects[0];
+    if (!initialProject) return;
     createSessionOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSidebarOpen(false);
-    setCreateSessionProject(project);
+    setCreateSessionProject(initialProject);
   }, []);
 
   const openCreateOrchestrationSession = useCallback(() => {
@@ -322,7 +326,6 @@ export function RemotePwaApp() {
   const openRemoteOrchestrationSession = useCallback(async (sessionId: string, runtime: RemoteRuntimeAdapter | null = adapter) => {
     if (!runtime) return;
     const request = ++navigationRequestRef.current;
-    setSidebarOpen(false);
     try {
       const view = await runtime.openOrchestrationSession(sessionId);
       if (runtime !== activeRuntimeRef.current || request !== navigationRequestRef.current) return;
@@ -346,8 +349,11 @@ export function RemotePwaApp() {
       if (!record || record.archived === true) {
         state.selectSession(findFirstSessionId(state.projects));
       } else if (record.agent !== openView.agent) {
-        // Desktop switched the Session's agent; show the new agent's chat.
-        void openRemoteOrchestrationSession(record.id, runtime);
+        // Desktop switched the Session's agent; show the new agent's chat if the Session is still open.
+        void runtime.openOrchestrationSession(record.id).then(view => {
+          const stillOpen = useRemoteSessionStore.getState().openOrchestrationSession?.session.id === record.id;
+          if (runtime === activeRuntimeRef.current && stillOpen) openSession(view);
+        }).catch(() => {});
       }
     } catch (error) {
       if (runtime !== activeRuntimeRef.current) return;
@@ -355,7 +361,7 @@ export function RemotePwaApp() {
       if (message.includes('No Pane daemon command registered')) setOrchestrationFailure('unavailable', null);
       else setOrchestrationFailure('error', message);
     }
-  }, [adapter, openRemoteOrchestrationSession, setOrchestrationFailure, setOrchestrationSessions]);
+  }, [adapter, openSession, setOrchestrationFailure, setOrchestrationSessions]);
 
   const loadArchivedIfShown = useCallback(async (runtime: RemoteRuntimeAdapter) => {
     if (useRemoteSessionStore.getState().archivedProjects !== null) await loadArchived(runtime);
@@ -548,7 +554,10 @@ export function RemotePwaApp() {
       await Promise.all([refreshProjects(runtime), loadArchived(runtime)]);
     }),
     createPane: openCreateSession,
-    openSession: (sessionId) => void openRemoteOrchestrationSession(sessionId),
+    openSession: (sessionId) => {
+      setSidebarOpen(false);
+      void openRemoteOrchestrationSession(sessionId);
+    },
     createSession: openCreateOrchestrationSession,
     toggleSessionPinned: (session) => void runSidebarAction(session.id, 'Failed to update Session pin', async (runtime) => {
       await runtime.updateOrchestrationSession(session.id, { isPinned: session.isPinned !== true });
@@ -823,11 +832,12 @@ export function RemotePwaApp() {
       {createSessionProject && (
         <RemoteCreateSessionDialog
           adapter={adapter}
-          project={createSessionProject}
+          projects={projects}
+          initialProject={createSessionProject}
           restoreFocusRef={createSessionOpenerRef}
           fallbackFocusRef={sidebarOpenerRef}
           onClose={() => setCreateSessionProject(null)}
-          onCreated={(sessionName) => handleRemoteSessionCreated(createSessionProject.id, sessionName)}
+          onCreated={handleRemoteSessionCreated}
         />
       )}
 

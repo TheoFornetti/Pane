@@ -14,7 +14,8 @@ export interface RemoteSidebarActions {
   togglePanePinned: (paneId: string) => void;
   archivePane: (paneId: string) => void;
   restorePane: (paneId: string) => void;
-  createPane: (project: RemoteProjectWithSessions) => void;
+  /** Without a repository, the sheet starts in the default one and lets the person pick. */
+  createPane: (project?: RemoteProjectWithSessions) => void;
   openSession: (sessionId: string) => void;
   createSession: () => void;
   toggleSessionPinned: (session: OrchestrationSessionRecord) => void;
@@ -34,6 +35,7 @@ interface RemoteSidebarProps {
 }
 
 const SECTION_HEADER = 'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-text-tertiary hover:text-text-primary';
+const CREATE_BUTTON = 'flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md bg-interactive px-3 text-sm font-semibold text-text-on-interactive transition-colors hover:bg-interactive-hover disabled:cursor-not-allowed disabled:opacity-50 md:min-h-9';
 const ROW_ACTION = 'inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50';
 
 export function RemoteSidebar({
@@ -170,17 +172,6 @@ export function RemoteSidebar({
           <span className="font-semibold text-text-primary">Remote Pane</span>
         </div>
         <div className="flex items-center gap-1">
-          {sessionsSupported && (
-            <button
-              type="button"
-              onClick={actions.createSession}
-              className="rounded-md p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-              title="New Session"
-              aria-label="New Session"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          )}
           <button
             type="button"
             onClick={actions.refresh}
@@ -202,7 +193,19 @@ export function RemoteSidebar({
         </div>
       </div>
 
-      <div className="shrink-0 border-b border-border-primary p-3">
+      <div className="shrink-0 space-y-2 border-b border-border-primary p-3">
+        <div className="flex gap-2">
+          {sessionsSupported && (
+            <button type="button" onClick={actions.createSession} className={CREATE_BUTTON}>
+              <MessageSquare className="h-4 w-4 shrink-0" aria-hidden="true" />
+              New Session
+            </button>
+          )}
+          <button type="button" onClick={() => actions.createPane()} disabled={projects.length === 0} className={CREATE_BUTTON}>
+            <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
+            New Pane
+          </button>
+        </div>
         <RemoteDesktopLink />
       </div>
 

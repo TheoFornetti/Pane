@@ -346,7 +346,11 @@ jobs:
       run: |
         gh release download $env:INSTALLED_RELEASE --repo greenfield-inc/Pane --pattern "Pane-*-Windows-x64.exe" --dir installed
         Start-Process -FilePath (Get-ChildItem installed\*.exe)[0].FullName -ArgumentList '/S' -Wait
-        Start-Process "$env:LOCALAPPDATA\Programs\Pane\Pane.exe"
+        # The silent installer can return before Pane.exe is in place (run 36794145980).
+        $installedExe = "$env:LOCALAPPDATA\Programs\Pane\Pane.exe"
+        $deadline = (Get-Date).AddSeconds(120)
+        while ((Get-Date) -lt $deadline -and -not (Test-Path $installedExe)) { Start-Sleep 2 }
+        Start-Process $installedExe
         $deadline = (Get-Date).AddSeconds(180)
         while ((Get-Date) -lt $deadline -and -not (Test-Path "$HOME\.pane\openrouter-prices.json")) { Start-Sleep 2 }
         Start-Sleep 15

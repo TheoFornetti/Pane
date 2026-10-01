@@ -59,7 +59,8 @@ class FakeTailscale {
     return 0;
   }
 }
-'@Set-Content -Path (Join-Path $fakeBin 'FakeTailscale.cs') -Value $fakeSource
+'@
+Set-Content -Path (Join-Path $fakeBin 'FakeTailscale.cs') -Value $fakeSource
 & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" -nologo -out:(Join-Path $fakeBin 'tailscale.exe') (Join-Path $fakeBin 'FakeTailscale.cs') | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'could not compile the fake tailscale.exe' }
 Set-Content -Path (Join-Path $fakeBin 'status.json') -Value '{"BackendState":"Running","Self":{"DNSName":"localhost."}}'

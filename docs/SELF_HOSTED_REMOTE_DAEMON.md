@@ -360,6 +360,10 @@ Some actions operate on the local desktop client machine rather than the remote 
 - revealing files in the client OS file manager
 - the native clipboard-image fallback path
 
+### Where does copied terminal text go?
+
+To the clipboard of the machine you are sitting at. In remote mode, dragging to select text in a terminal copies it right away, with no Copy popover. Programs that copy with OSC 52, such as Claude Code, tmux, and vim, also copy to your machine. Programs in the terminal cannot read your clipboard through OSC 52.
+
 ## Current Limitations
 
 - No hosted relay, NAT traversal, or account-based multi-tenant auth

@@ -295,7 +295,7 @@ jobs:
         playwright=$(grep -m1 -oE "^  '@playwright/test@[0-9.]+'" pnpm-lock.yaml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
         kit=kit/relay-kit
         mkdir -p "$kit"
-        cp scripts/cloud-dist/sobeck/{install.ps1,run-proof.ps1,remove.ps1,seed-profile.cjs,proof.mjs} "$kit/"
+        cp scripts/cloud-dist/sobeck/{install.ps1,run-proof.ps1,remove.ps1,seed-profile.cjs,proof.mjs,run-session-proof.ps1,session-proof.mjs,session-checks.sh} "$kit/"
         (cd "$kit" && echo '{"private":true}' > package.json && npm install --no-audit --no-fund --no-package-lock "playwright-core@$playwright")
         (cd kit && zip -qr "../release/Pane-CloudTest-relay-kit-$VERSION.zip" relay-kit)
         cp scripts/cloud-dist/sobeck/install.ps1 release/sobeck-install.ps1
@@ -334,7 +334,9 @@ jobs:
   # upgrades it in place (the pairing and the saved host must survive) and run-proof.ps1 drives the app.
   # The runner has no tailnet, so a real headless Pane daemon of this release on loopback stands in for
   # the cloud Session (ci-fake-host.ps1, with a fake tailscale.exe so its Session ports work) and Claude's
-  # reply is skipped. The released Pane runs throughout and must be left untouched.
+  # reply is skipped. run-session-proof.ps1 (R3.5) then creates a fresh Pane on it and publishes a port from
+  # its terminal (its broker and secrets checks need a real Session). The released Pane runs throughout and
+  # must be left untouched.
   relay-proof:
     name: Relay kit proof (Windows)
     needs: [meta, release]
@@ -463,6 +465,17 @@ jobs:
         if ($LASTEXITCODE -ne 0) { $code = $LASTEXITCODE }
         if (Select-String -Path relay-evidence\proof-rerun\steps.log -Pattern 'terminal: reused tab' -Quiet) { Write-Host 'PASS second run reused the Pane terminal' }
         else { Write-Host 'FAIL second run did not reuse the Pane terminal'; $code = 1 }
+        # R3.5 against the same fake host: a fresh Pane in montlakev2 created in the UI, its terminal (Git Bash
+        # here, bash on a cloud Session), runpane port open -> its chip -> click -> Invoke-WebRequest 200 -> port
+        # closed. A runner has no coordinator and no Doppler stand-in, so the broker and secrets checks SKIP.
+        powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\PaneCloudTest\kit\run-session-proof.ps1" -OutDir "$PWD\relay-evidence\session-proof" -NoGitHub
+        if ($LASTEXITCODE -ne 0) { $code = 1 }
+        $verdicts = @{}
+        if (Test-Path relay-evidence\session-proof\results.json) { (Get-Content -Raw relay-evidence\session-proof\results.json | ConvertFrom-Json).checks | ForEach-Object { $verdicts[$_.name] = $_.verdict } }
+        $expected = [ordered]@{ 'pane-created' = 'PASS'; 'pane-terminal' = 'PASS'; 'script-delivered' = 'PASS'; 'secrets-at-creation' = 'SKIP'; 'port-open' = 'PASS'; 'ports-chip' = 'PASS'; 'ports-chip-opens' = 'PASS'; 'broker' = 'SKIP'; 'port-closed' = 'PASS' }
+        foreach ($name in $expected.Keys) {
+          if ($verdicts[$name] -eq $expected[$name]) { Write-Host "PASS R3.5 $name is $($expected[$name])" } else { Write-Host "FAIL R3.5 $name is '$($verdicts[$name])', expected $($expected[$name])"; $code = 1 }
+        }
         # The pairing token must not appear in anything the proof wrote.
         $token = (Get-Content $config -Raw | ConvertFrom-Json).remoteDaemon.client.profiles[0].token
         if (-not $token) { Write-Error 'no saved profile token to search for'; exit 1 }

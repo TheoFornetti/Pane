@@ -60,7 +60,7 @@ setup() {
   # node, not python: it is on PATH in every Pane terminal (Windows' python3 can be a Store stub).
   local detach=
   command -v setsid >/dev/null 2>&1 && detach=setsid
-  (cd "$work/site" && $detach nohup node -e 'const fs=require("fs");require("http").createServer((q,r)=>r.end(fs.readFileSync("index.html"))).listen(Number(process.argv[1]),"127.0.0.1")' "$port" </dev/null >"$work/server.log" 2>&1 & echo $! >"$work/server.pid")
+  (cd "$work/site" && $detach nohup node -e 'const fs=require("fs");require("http").createServer((q,r)=>(r.setHeader("content-type","text/plain; charset=utf-8"),r.end(fs.readFileSync("index.html")))).listen(Number(process.argv[1]),"127.0.0.1")' "$port" </dev/null >"$work/server.log" 2>&1 & echo $! >"$work/server.pid")
   local i code
   for i in $(seq 1 20); do
     code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/" || true)

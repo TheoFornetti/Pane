@@ -249,11 +249,12 @@ async function waitFor(predicate, timeoutMs) {
   }
 }
 
-// GET from this machine: Invoke-WebRequest on Windows (what the relay would type), fetch elsewhere.
+// GET from this machine: Invoke-WebRequest on Windows (what the relay would type), fetch elsewhere. Windows
+// PowerShell 5.1 hands back Content as bytes when the response isn't typed as text.
 function getFromHere(url) {
   const startedAt = Date.now();
   if (process.platform === 'win32') {
-    const command = `$ProgressPreference='SilentlyContinue'; try { $r = Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 20 -Uri '${url.replace(/'/g, "''")}'; "$($r.StatusCode) $($r.Content)" } catch { "error $($_.Exception.Message)" }`;
+    const command = `$ProgressPreference='SilentlyContinue'; try { $r = Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 20 -Uri '${url.replace(/'/g, "''")}'; $c = $r.Content; if ($c -is [byte[]]) { $c = [Text.Encoding]::UTF8.GetString($c) }; "$($r.StatusCode) $c" } catch { "error $($_.Exception.Message)" }`;
     let text;
     try {
       text = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', timeout: 40_000 }).trim();

@@ -99,7 +99,7 @@ elif check == 'c3':
     wake = (ev / 'c3-wake.txt').read_text() if (ev / 'c3-wake.txt').exists() else ''
     out('is awake' in wake, 'the CLI woke the Session', wake.strip().splitlines()[-2] if wake.strip() else 'no output')
     asleep = jl('c3-while-asleep.jsonl')
-    out(len(asleep) > 0 and all(p.get('status') != 200 for p in asleep), 'URLs do not answer while it is asleep (the proof is not a stale cache)', '; '.join(str(p.get('status', p.get('error', ''))[:40]) for p in asleep))
+    out(len(asleep) > 0 and all(p.get('status') != 200 for p in asleep), 'URLs do not answer while it is asleep (the proof is not a stale cache)', '; '.join(str(p.get('status', p.get('error', '')))[:40] for p in asleep))
     for p in jl('c3-wake-probe.jsonl'):
         out(p.get('status') == 200 and cert_ok(p, host), f"{p['url']} back with no manual action", f"msTo200={p.get('msTo200')} tries={p.get('tries')} body={p.get('body', '')[:80]}")
     before = (ev / 'c3-before-stop.txt').read_text() if (ev / 'c3-before-stop.txt').exists() else ''

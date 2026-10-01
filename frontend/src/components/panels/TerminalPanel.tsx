@@ -20,7 +20,7 @@ import {
   terminalClaimsFineSurfaceScroll,
 } from '../../utils/terminalKeyHandling';
 import { isMac } from '../../utils/platformUtils';
-import { copyTerminalText, isTerminalCopyShortcut } from '../../utils/terminalClipboard';
+import { copyTerminalText, decodeOsc52Write, isTerminalCopyShortcut } from '../../utils/terminalClipboard';
 import { sendTerminalInput } from '../../utils/terminalInput';
 import { FileEdit, FolderOpen } from 'lucide-react';
 import { useTerminalLinks } from '../terminal/hooks/useTerminalLinks';
@@ -251,6 +251,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const webLinksAddonRef = useRef<WebLinksAddon | null>(null);
   const paneLinksAddonRef = useRef<WebLinksAddon | null>(null);
   const serializeAddonRef = useRef<SerializeAddon | null>(null);
+  // Restored output still being parsed. OSC 52 copies in it are history, not new copies.
+  const pendingReplayWritesRef = useRef(0);
   const unicode11AddonRef = useRef<Unicode11Addon | null>(null);
   const imageAddonRef = useRef<ImageAddon | null>(null);
   const isActiveRef = useRef(isActive);
@@ -621,6 +623,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   } = useTerminalLinks(terminalInstance, {
     workingDirectory: workingDirectory || '',
     sessionId: sessionId || panel.sessionId,
+    onCopyError: handleClipboardError,
   });
 
   // Terminal search hook
@@ -776,8 +779,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           ? state.scrollbackBuffer.join('\n')
           : state.scrollbackBuffer;
         if (content) {
+          pendingReplayWritesRef.current += 1;
           await new Promise<void>((resolve, reject) => {
             terminal.write(content, () => {
+              pendingReplayWritesRef.current -= 1;
               void finishRefresh().then(resolve, reject);
             });
           });
@@ -1000,6 +1005,21 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);
         devLog.debug('[TerminalPanel] FitAddon loaded');
+
+        // OSC 52 lets programs in the terminal (Claude Code, tmux, vim over ssh) copy
+        // text. This renderer runs on the machine the user is at, so the text lands on
+        // that clipboard even when the program runs on a remote host.
+        // A disposed terminal never runs its replay callbacks, so start the count fresh.
+        pendingReplayWritesRef.current = 0;
+        terminal.parser.registerOscHandler(52, (data) => {
+          const text = decodeOsc52Write(data);
+          if (text && pendingReplayWritesRef.current === 0) {
+            void copyTerminalText(text).catch(() => {
+              terminalRuntimeRef.current.handleClipboardError();
+            });
+          }
+          return true;
+        });
 
         // Intercept app-level shortcuts before xterm consumes them
         terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
@@ -1336,7 +1356,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             const restore = selectTerminalRestoreContent(terminalStateForThisPanel);
             if (restore) {
               devLog.debug('[TerminalPanel] Restoring', restore.content.length, 'chars from', restore.source);
-              terminal.write(restore.content);
+              pendingReplayWritesRef.current += 1;
+              terminal.write(restore.content, () => {
+                pendingReplayWritesRef.current -= 1;
+              });
             }
             // Force WebGL renderer to redraw after buffer content changes.
             // Without this, macOS WebGL canvas shows stale/stuttered content until

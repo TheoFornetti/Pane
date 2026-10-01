@@ -5,6 +5,7 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
+import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import type { Project } from '../database/models';
 import type { Session } from '../types/session';
 import type { AppServices } from './types';
@@ -5947,13 +5948,28 @@ describe('runpane IPC handlers', () => {
   });
 
   describe('runpane:panes:focus', () => {
+    const sentEvents = vi.fn();
+
+    beforeEach(() => {
+      sentEvents.mockReset();
+      setPaneRuntime({
+        eventSink: { send: sentEvents },
+        getConfigManager: () => { throw new Error('unused'); },
+        getPtyHostRuntime: () => null,
+        getWebviewContextMap: () => new Map(),
+      });
+    });
+
+    afterEach(() => {
+      resetPaneRuntimeForTests();
+    });
+
     function createMockWindow() {
       return {
         isMinimized: vi.fn(() => false),
         restore: vi.fn(),
         show: vi.fn(),
         focus: vi.fn(),
-        webContents: { send: vi.fn() },
       };
     }
 
@@ -5982,7 +5998,7 @@ describe('runpane IPC handlers', () => {
       expect(window.restore).not.toHaveBeenCalled();
       expect(window.show).toHaveBeenCalledTimes(1);
       expect(window.focus).toHaveBeenCalledTimes(1);
-      expect(window.webContents.send).toHaveBeenCalledWith('pane:focus-requested', {
+      expect(sentEvents).toHaveBeenCalledWith('pane:focus-requested', {
         paneId: session.id,
         panelId: undefined,
       });
@@ -6008,7 +6024,7 @@ describe('runpane IPC handlers', () => {
       expect(panelManager.setActivePanel).toHaveBeenCalledWith(session.id, terminalPanel.id);
       expect(window.show).toHaveBeenCalledTimes(1);
       expect(window.focus).toHaveBeenCalledTimes(1);
-      expect(window.webContents.send).toHaveBeenCalledWith('pane:focus-requested', {
+      expect(sentEvents).toHaveBeenCalledWith('pane:focus-requested', {
         paneId: session.id,
         panelId: terminalPanel.id,
       });
@@ -6018,6 +6034,15 @@ describe('runpane IPC handlers', () => {
         panelId: terminalPanel.id,
         focused: true,
       });
+    });
+
+    it('emits the focus event for connected clients when the host has no window', async () => {
+      const registry = createRegistry(createServices({ getMainWindow: () => null }));
+
+      const result = await registry.invoke('runpane:panes:focus', [{ paneId: session.id }]);
+
+      expect(sentEvents).toHaveBeenCalledWith('pane:focus-requested', { paneId: session.id, panelId: undefined });
+      expect(result).toMatchObject({ ok: true, paneId: session.id });
     });
 
     it('refuses to focus an archived pane and never touches the window', async () => {
@@ -6036,7 +6061,7 @@ describe('runpane IPC handlers', () => {
 
       expect(window.show).not.toHaveBeenCalled();
       expect(window.focus).not.toHaveBeenCalled();
-      expect(window.webContents.send).not.toHaveBeenCalled();
+      expect(sentEvents).not.toHaveBeenCalled();
     });
 
     it('rejects focusing an unknown pane id', async () => {
@@ -6054,7 +6079,7 @@ describe('runpane IPC handlers', () => {
       }])).rejects.toThrow(/No Pane pane found/);
 
       expect(window.show).not.toHaveBeenCalled();
-      expect(window.webContents.send).not.toHaveBeenCalled();
+      expect(sentEvents).not.toHaveBeenCalled();
     });
 
     it('rejects a panel that does not belong to the focused pane', async () => {
@@ -6072,7 +6097,7 @@ describe('runpane IPC handlers', () => {
       }])).rejects.toThrow(/does not belong to Pane/);
 
       expect(window.show).not.toHaveBeenCalled();
-      expect(window.webContents.send).not.toHaveBeenCalled();
+      expect(sentEvents).not.toHaveBeenCalled();
     });
   });
 

@@ -24,7 +24,6 @@ import {
   logValidationFailure,
   createValidationError,
 } from '../utils/sessionValidation';
-import type { SerializedArchiveTask } from '../services/archiveProgressManager';
 import { detectProjectConfig } from '../services/projectConfigDetector';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
@@ -59,6 +58,7 @@ const DAEMON_SESSION_CHANNELS = [
   'sessions:get-resumable',
   'sessions:resume-interrupted',
   'sessions:dismiss-interrupted',
+  'archive:get-progress',
 ] as const;
 
 const ACTIVE_SESSION_HINT_CHANNEL = 'sessions:set-active-session';
@@ -1674,26 +1674,10 @@ export function registerSessionHandlers(
     }
   });
 
-  // Archive progress handler
-  ipcMain.handle('archive:get-progress', async () => {
+  commandRegistry.register('archive:get-progress', async () => {
     try {
-      if (!archiveProgressManager) {
-        return { success: true, data: { tasks: [], activeCount: 0, totalCount: 0 } };
-      }
-      
-      const tasks = archiveProgressManager.getActiveTasks();
-      const activeCount = tasks.filter((t: SerializedArchiveTask) => 
-        t.status !== 'completed' && t.status !== 'failed'
-      ).length;
-      
-      return { 
-        success: true, 
-        data: { 
-          tasks, 
-          activeCount, 
-          totalCount: tasks.length 
-        } 
-      };
+      const data = archiveProgressManager?.getProgress() ?? { tasks: [], activeCount: 0, totalCount: 0 };
+      return { success: true, data };
     } catch (error) {
       console.error('Failed to get archive progress:', error);
       return { success: false, error: 'Failed to get archive progress' };

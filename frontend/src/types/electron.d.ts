@@ -1,3 +1,4 @@
+/// <reference types="electron" />
 // Type definitions for Electron preload API
 import type { Session, SessionOutput, GitStatus, VersionInfo, VersionUpdateInfo } from './session';
 import type { Project } from './project';
@@ -51,7 +52,8 @@ import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } 
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
-import type { PaneLinkNavigation } from '../../../shared/types/paneLinks';
+import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
+import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
 import type {
   ProjectDashboardData,
@@ -324,7 +326,6 @@ interface ElectronAPI {
     update: (updates: UpdateConfigRequest) => Promise<IPCResponse<AppConfig>>;
     getSessionPreferences: () => Promise<IPCResponse>;
     updateSessionPreferences: (preferences: SessionCreationPreferences) => Promise<IPCResponse>;
-    getAvailableShells: () => Promise<IPCResponse>;
     getMonospaceFonts: () => Promise<IPCResponse>;
   };
 
@@ -407,7 +408,8 @@ interface ElectronAPI {
     onSessionCreated: (callback: (session: Session) => void) => () => void;
     onSessionUpdated: (callback: (session: Session) => void) => () => void;
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => () => void;
-    onPaneOpenLink: (callback: (target: PaneLinkNavigation) => void) => () => void;
+    onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
+    onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => () => void;
     onSessionDeleted: (callback: (session: Pick<Session, 'id'>) => void) => () => void;
     onSessionsLoaded: (callback: (sessions: Session[]) => void) => () => void;
     onSessionOutput: (callback: (output: SessionOutput) => void) => () => void;

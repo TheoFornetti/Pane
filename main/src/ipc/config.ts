@@ -2,7 +2,7 @@ import { IpcMain } from 'electron';
 import { execFile } from 'child_process';
 import type { AppServices } from './types';
 import type { AppConfig, UpdateConfigRequest } from '../types/config';
-import type { PaneCommandRegistry } from '../daemon/commandRegistry';
+import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import type { RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import { ShellDetector } from '../utils/shellDetector';
@@ -37,6 +37,18 @@ export function registerConfigHandlers(
       };
     });
     commandRegistry.bindChannel(ipcMain, 'remote:pwa-affordances');
+
+    // Terminals spawn on the active host, so a remote client reads and sets the host's shell.
+    commandRegistry.register('terminal:get-shell-settings', () => ({
+      shells: ShellDetector.getAvailableShells(),
+      preferredShell: configManager.getConfig().preferredShell ?? 'auto',
+    }));
+    commandRegistry.register('terminal:set-preferred-shell', async (shell: PaneCommandValue) => {
+      await configManager.updateConfig({
+        preferredShell: decodeBoundary(shell, boundary.enumeration('auto', 'gitbash', 'powershell', 'pwsh', 'cmd')),
+      });
+    });
+    commandRegistry.bindChannels(ipcMain, ['terminal:get-shell-settings', 'terminal:set-preferred-shell']);
   }
 
   ipcMain.handle('config:get', async (): Promise<{ success: boolean; data?: AppConfig; error?: string }> => {
@@ -154,17 +166,6 @@ export function registerConfigHandlers(
     } catch (error) {
       console.error('Failed to update session creation preferences:', error);
       return { success: false, error: 'Failed to update session creation preferences' };
-    }
-  });
-
-  ipcMain.handle('config:get-available-shells', async () => {
-    try {
-      const shells = ShellDetector.getAvailableShells();
-      return { success: true, data: shells };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to get available shells';
-      console.error('Failed to get available shells:', error);
-      return { success: false, error: message };
     }
   });
 

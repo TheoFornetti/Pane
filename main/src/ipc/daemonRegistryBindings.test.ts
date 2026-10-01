@@ -43,6 +43,8 @@ const PROJECT_CHANNELS = [
 
 const CONFIG_CHANNELS = [
   'remote:pwa-affordances',
+  'terminal:get-shell-settings',
+  'terminal:set-preferred-shell',
 ] as const;
 
 const VOICE_CHANNELS = [
@@ -179,6 +181,7 @@ const SESSION_CHANNELS = [
   'sessions:get-resumable',
   'sessions:resume-interrupted',
   'sessions:dismiss-interrupted',
+  'archive:get-progress',
   'panels:get-output',
   'panels:get-conversation-messages',
   'panels:get-json-messages',
@@ -516,13 +519,11 @@ describe('daemon registry IPC bindings', () => {
     expect(registry.listChannels()).toEqual([...SESSION_CHANNELS, 'sessions:set-active-session'].sort());
     expect(ipcMain.boundChannels).toContain('sessions:set-active-session');
     expect(ipcMain.boundChannels).toContain('debug:get-table-structure');
-    expect(ipcMain.boundChannels).toContain('archive:get-progress');
     expect(
       ipcMain.boundChannels.filter(
         channel =>
           channel !== 'sessions:set-active-session' &&
-          channel !== 'debug:get-table-structure' &&
-          channel !== 'archive:get-progress',
+          channel !== 'debug:get-table-structure',
       ).sort(),
     ).toEqual([...SESSION_CHANNELS].sort());
     expect(registry.has('sessions:set-active-session')).toBe(true);

@@ -6,6 +6,7 @@ import { useConfigStore } from '../stores/configStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { panelApi } from '../services/panelApi';
+import { openPaneTarget } from '../components/terminal/openPaneLink';
 import { API } from '../utils/api';
 import { devLog } from '../utils/console';
 import { claimCreatedPane, markAppReady } from '../utils/journeyTimings';
@@ -19,6 +20,11 @@ interface SessionEventData {
 type ValidatedEventData = SessionEventData | SessionOutput;
 
 async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean): Promise<void> {
+  if (hostChanged) {
+    // Main keeps expanded repositories per host; load them before the new host's repositories arrive.
+    const uiState = await window.electronAPI.uiState.getExpanded();
+    useNavigationStore.getState().resetExpandedProjectsForHost(uiState.success ? uiState.data?.expandedProjects ?? [] : []);
+  }
   // Repository ids are per host, so another host's repository view is meaningless.
   if (hostChanged && useNavigationStore.getState().activeView === 'project') {
     useNavigationStore.getState().navigateToSessions();
@@ -242,8 +248,12 @@ export function useIPCEvents() {
     });
     unsubscribeFunctions.push(unsubscribePaneFocusRequested);
 
-    // pane:// links to a repository or Session (pane links arrive as pane:focus-requested).
+    // pane:// links. A host sends Pane links as pane:focus-requested; a remote-mode client sends them here.
     const unsubscribePaneOpenLink = window.electronAPI.events.onPaneOpenLink((target) => {
+      if (target.kind === 'pane') {
+        void openPaneTarget(target).catch(error => console.error('[useIPCEvents] Failed to open Pane link:', error));
+        return;
+      }
       if (target.kind === 'repo') {
         useNavigationStore.getState().navigateToProject(target.repoId);
         return;

@@ -13,6 +13,7 @@ import { terminalPanelManager, type TerminalPanelSnapshot } from '../services/te
 import { databaseService as panelDatabase } from '../services/database';
 import type { PanelBuffers } from '../database/panelBuffers';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
+import { getPaneEventSink } from '../core/runtime';
 import { syncPaneHomeSkill } from '../services/paneHomeSkill';
 import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
 import { assertNewBranchName } from '../services/worktreeManager';
@@ -39,7 +40,8 @@ import {
   stripTrailingNewlines,
   writePromptFile,
 } from '../services/agents/promptDelivery';
-import type { ArchiveProgressManager, SerializedArchiveTask } from '../services/archiveProgressManager';
+import type { ArchiveProgressManager } from '../services/archiveProgressManager';
+import type { ArchiveProgressTask } from '../../../shared/types/archiveProgress';
 import { classifyWorktree } from '../services/worktreeTrash';
 import type { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
@@ -742,26 +744,25 @@ export function registerRunpaneHandlers(
         }
       }
 
-      const window = services.getMainWindow();
-      if (!window) {
-        throw new Error('Pane window is not available to focus');
-      }
-
       if (normalized.panelId) {
         await panelManager.setActivePanel(pane.id, normalized.panelId);
       }
 
-      if (window.isMinimized()) {
-        window.restore();
+      // A headless host has no window; its connected clients still follow the event.
+      const window = services.getMainWindow();
+      if (window) {
+        if (window.isMinimized()) {
+          window.restore();
+        }
+        window.show();
+        window.focus();
       }
-      window.show();
-      window.focus();
 
       const focusEvent: RunpanePaneFocusRequestedEvent = {
         paneId: pane.id,
         panelId: normalized.panelId,
       };
-      window.webContents.send('pane:focus-requested', focusEvent);
+      getPaneEventSink().send('pane:focus-requested', focusEvent);
 
       return {
         ok: true,
@@ -4286,7 +4287,7 @@ function waitForArchiveProgressCompletion(
       resolve(outcome);
     };
 
-    const onProgress = (payload: { tasks: SerializedArchiveTask[] }) => {
+    const onProgress = (payload: { tasks: ArchiveProgressTask[] }) => {
       const task = payload.tasks.find(candidate => candidate.sessionId === paneId);
       if (task?.status === 'completed') {
         finish({ worktreeCleanup: 'completed', trashDeletion: task.trashDeletion });

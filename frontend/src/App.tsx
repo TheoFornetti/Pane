@@ -645,27 +645,32 @@ function App() {
     isWelcomeOpen,
   ]);
 
-  // Check for resumable sessions on startup (auto-resume feature)
+  // Check for resumable sessions on startup and on each host switch (auto-resume feature).
+  // A reconnect to the same host does not prompt again.
   useEffect(() => {
     if (!isLoaded) return;
     let cancelled = false;
 
     const checkResumableSessions = async () => {
+      let sessions: ResumableSession[] = [];
       try {
         const result = await window.electronAPI.sessions.getResumable();
-        if (cancelled) return;
-        if (result.success && result.data && Array.isArray(result.data) && result.data.length > 0) {
-          setResumableSessions(result.data);
-          setIsResumeDialogOpen(true);
-        }
+        if (result.success && Array.isArray(result.data)) sessions = result.data;
       } catch (error) {
         console.error('[App] Failed to check for resumable sessions:', error);
       }
+      if (cancelled) return;
+      setResumableSessions(sessions);
+      setIsResumeDialogOpen(sessions.length > 0);
     };
 
     void checkResumableSessions();
+    const removeRemoteResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(({ hostChanged }) => {
+      if (hostChanged) void checkResumableSessions();
+    });
     return () => {
       cancelled = true;
+      removeRemoteResync?.();
     };
   }, [isLoaded]);
 

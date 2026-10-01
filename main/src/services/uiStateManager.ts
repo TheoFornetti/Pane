@@ -16,15 +16,24 @@ interface ExpandedUiState {
   repositoriesSectionExpanded: boolean;
 }
 
-class UIStateManager {
-  private db: DatabaseService;
+type UiStateStore = Pick<DatabaseService, 'getUIState' | 'setUIState' | 'deleteUIState'>;
 
-  constructor(db: DatabaseService) {
+class UIStateManager {
+  private db: UiStateStore;
+
+  /** `getRemoteHostId` names the active remote host, or returns null for this computer. */
+  constructor(db: UiStateStore, private readonly getRemoteHostId: () => string | null = () => null) {
     this.db = db;
   }
 
+  // Repository ids are per host, so each remote host keeps its own expanded repositories.
+  private expandedProjectsKey(): string {
+    const hostId = this.getRemoteHostId();
+    return hostId ? `treeView.expandedProjects@${hostId}` : 'treeView.expandedProjects';
+  }
+
   getExpandedProjects(): number[] {
-    const value = this.db.getUIState('treeView.expandedProjects');
+    const value = this.db.getUIState(this.expandedProjectsKey());
     if (!value) return [];
     try {
       return JSON.parse(value);
@@ -64,7 +73,7 @@ class UIStateManager {
   }
 
   saveExpandedProjects(projectIds: number[]): void {
-    this.db.setUIState('treeView.expandedProjects', JSON.stringify(projectIds));
+    this.db.setUIState(this.expandedProjectsKey(), JSON.stringify(projectIds));
   }
 
   saveExpandedFolders(folderIds: string[]): void {

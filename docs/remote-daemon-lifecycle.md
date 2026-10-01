@@ -8,7 +8,11 @@ This is the implementation checklist for Remote Pane setup, teardown, and runtim
 - Client lifecycle is owned by `RemotePaneClientController`.
 - IPC handlers in `main/src/ipc/remoteDaemon.ts` orchestrate config writes and controller calls.
 - Renderer runtime changes are reconciled through `remote-daemon:resync-required`. Main sends `{ hostChanged: true }` when the active runtime changes; a reconnect to the same host sends it without a payload.
-- A resync refetches config, Panes, the active Pane's panels, repositories, Sessions and pinned Sessions, pending permission prompts, loaded archived Panes, and an open Usage view. When the host changed, it also leaves an open repository view, since repository ids are per host.
+- A resync refetches config, Panes, the active Pane's panels, repositories, Sessions and pinned Sessions, pending permission prompts, loaded archived Panes, archive progress, the host's terminal shells, and an open Usage view. When the host changed, it also leaves an open repository view, since repository ids are per host, loads that host's expanded repositories, and asks again about that host's interrupted Panes.
+- Expanded repositories are saved per host: this computer under `treeView.expandedProjects`, a remote host under `treeView.expandedProjects@<profile id>`.
+- The terminal shell picker reads and writes the active host's shell (`terminal:get-shell-settings`, `terminal:set-preferred-shell`). It appears only when that host runs Windows.
+- `pane:focus-requested` and `pane:open-link` are host events: an agent's `runpane panes focus` on the active host moves the client's view, and one on this computer does not while a remote host is active. A pane:// link opened on a remote-mode client is resolved by its renderer against the active host.
+- Remote terminals ack output with `terminal:ack`. This window's ptyHost port reaches only local terminals.
 
 ## Lifecycle Matrix
 

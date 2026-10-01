@@ -393,15 +393,16 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
 
   // Listen for the ptyHost ptyId assignment. The main process fires this
   // once per spawn when the `usePtyHost` setting is on; fires again on auto-reattach
-  // after a supervisor restart with a new ptyId.
+  // after a supervisor restart with a new ptyId. A remote host's ptyHost is not
+  // behind this window's port, so remote terminals keep acking over `terminal:ack`.
   useEffect(() => {
     const cleanup = window.electronAPI.events.onTerminalPtyReady((data) => {
       if (data.panelId === panel.id) {
-        currentPtyIdRef.current = data.ptyId;
+        currentPtyIdRef.current = isRemoteMode ? null : data.ptyId;
       }
     });
     return cleanup;
-  }, [panel.id]);
+  }, [panel.id, isRemoteMode]);
 
   // Get session data from context using the safe hook
   const sessionContext = useSession();

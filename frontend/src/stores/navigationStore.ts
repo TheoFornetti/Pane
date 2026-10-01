@@ -34,6 +34,8 @@ interface NavigationState {
   // always-mounted session hotkeys so mod+1-9 numbering matches the visible list
   expandedProjects: Set<number>;
   hydrateExpandedProjects: (projectIds: number[]) => void;
+  // After a host switch: adopt that host's saved expansion and auto-expand none of its existing repositories.
+  resetExpandedProjectsForHost: (projectIds: number[]) => void;
   toggleProjectExpanded: (projectId: number) => number[];
   expandProject: (projectId: number) => number[] | null;
   registerProjectIds: (projectIds: number[]) => number[] | null;
@@ -75,6 +77,11 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
   expandedProjects: new Set<number>(),
   hydrateExpandedProjects: (projectIds) => {
+    set({ expandedProjects: new Set(projectIds) });
+  },
+  resetExpandedProjectsForHost: (projectIds) => {
+    knownProjectIds = new Set();
+    hasRegisteredInitialProjectIds = false;
     set({ expandedProjects: new Set(projectIds) });
   },
   toggleProjectExpanded: (projectId) => {

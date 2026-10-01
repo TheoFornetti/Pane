@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import type { ArchiveProgressSnapshot, ArchiveProgressTask } from '../../../shared/types/archiveProgress';
 
 export interface ArchiveTask {
   sessionId: string;
@@ -25,19 +26,6 @@ export interface ArchiveTask {
   /** Once the worktree is removed: whether its files are deleted, or still being deleted in the background. */
   trashDeletion?: 'pending' | 'done';
   executeCallback?: () => Promise<void>;
-}
-
-export interface SerializedArchiveTask {
-  sessionId: string;
-  sessionName: string;
-  worktreeName: string;
-  projectName: string;
-  /** Serialisable mirror of `ArchiveTask.status` — same values, no `executeCallback`. */
-  status: 'pending' | 'queued' | 'running-archive-script' | 'removing-worktree' | 'cleaning-artifacts' | 'completed' | 'failed';
-  startTime: string;
-  endTime?: string;
-  error?: string;
-  trashDeletion?: 'pending' | 'done';
 }
 
 export class ArchiveProgressManager extends EventEmitter {
@@ -141,7 +129,7 @@ export class ArchiveProgressManager extends EventEmitter {
     if (task) task.trashDeletion = trashDeletion;
   }
 
-  getActiveTasks(): SerializedArchiveTask[] {
+  getActiveTasks(): ArchiveProgressTask[] {
     // Return a serializable version without the executeCallback
     return Array.from(this.activeTasks.values()).map(task => ({
       sessionId: task.sessionId,
@@ -172,23 +160,22 @@ export class ArchiveProgressManager extends EventEmitter {
     return this.taskQueue.length;
   }
 
-  private emitProgress(): void {
+  getProgress(): ArchiveProgressSnapshot {
     const tasks = this.getActiveTasks();
-    const activeCount = tasks.filter(t => 
+    const activeCount = tasks.filter(t =>
       t.status !== 'completed' && t.status !== 'failed'
     ).length;
-    
+    return { tasks, activeCount, totalCount: tasks.length };
+  }
+
+  private emitProgress(): void {
+    const progress = this.getProgress();
     console.log('[ArchiveProgressManager] Emitting progress:', {
-      tasks: tasks.length,
-      activeCount,
-      totalCount: tasks.length
+      tasks: progress.totalCount,
+      activeCount: progress.activeCount,
+      totalCount: progress.totalCount
     });
-    
-    this.emit('archive-progress', {
-      tasks,
-      activeCount,
-      totalCount: tasks.length
-    });
+    this.emit('archive-progress', progress);
   }
 
   clearAll(): void {

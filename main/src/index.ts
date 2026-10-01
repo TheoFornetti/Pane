@@ -112,7 +112,7 @@ import { registerLeaderboardHandlers } from './ipc/leaderboard';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
 import { syncAutoStartOnBoot } from './utils/autoStart';
 import { syncPaneMcpForApp } from './services/paneMcpRegistration';
-import { findPaneLinkArg, forwardPaneLinkToRunningPane, OPEN_PANE_LINK_CHANNEL, PANE_LINK_SCHEME } from './services/paneLinks';
+import { findPaneLinkArg, forwardPaneLinkToRunningPane, OPEN_PANE_LINK_CHANNEL, PANE_LINK_SCHEME, parsePaneLink } from './services/paneLinks';
 import { createPaneDaemonHost, type PaneDaemonHost } from './daemon/bootstrap';
 import { remotePaneClientController } from './daemon/client/remotePaneClient';
 import { startHeadlessPaneProcess } from './daemon/startHeadless';
@@ -249,6 +249,17 @@ function openPaneLink(link: string): void {
     return;
   }
   pendingPaneLink = undefined;
+  if (remotePaneClientController.isRemoteModeActive()) {
+    // The link names the active host's Panes, which only the renderer holds in remote mode.
+    try {
+      const target = parsePaneLink(link);
+      showMainWindow();
+      mainWindow?.webContents.send('pane:open-link', target);
+    } catch (error) {
+      console.warn('[Main] Could not open pane link:', error);
+    }
+    return;
+  }
   void paneDaemonHost.commandRegistry.invoke(OPEN_PANE_LINK_CHANNEL, [link]).then((result) => {
     console.log('[Main] Opened pane link:', JSON.stringify(result));
   }).catch((error) => console.warn('[Main] Could not open pane link:', error));

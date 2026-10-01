@@ -35,7 +35,8 @@ import type { AgentUsageSnapshot } from '../../shared/types/agentUsage';
 import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
-import type { PaneLinkNavigation } from '../../shared/types/paneLinks';
+import type { PaneLinkTarget } from '../../shared/types/paneLinks';
+import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type {
   PanePermissionRequest as PermissionRequest,
   PanePermissionResponse as PermissionResponse,
@@ -584,7 +585,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (updates: UpdateConfigRequest): Promise<IPCResponse> => invokeIpc('config:update', updates),
     getSessionPreferences: (): Promise<IPCResponse> => invokeIpc('config:get-session-preferences'),
     updateSessionPreferences: (preferences: AppConfig['sessionCreationPreferences']): Promise<IPCResponse> => invokeIpc('config:update-session-preferences', preferences),
-    getAvailableShells: (): Promise<IPCResponse> => invokeIpc('config:get-available-shells'),
     getMonospaceFonts: (): Promise<IPCResponse> => invokeIpc('config:get-monospace-fonts'),
   },
 
@@ -748,8 +748,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('session:updated', wrappedCallback);
       return () => ipcRenderer.removeListener('session:updated', wrappedCallback);
     },
-    onPaneOpenLink: (callback: (target: PaneLinkNavigation) => void) => {
-      const wrappedCallback = (_event: Electron.IpcRendererEvent, target: PaneLinkNavigation) => callback(target);
+    onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, progress: ArchiveProgressSnapshot) => callback(progress);
+      ipcRenderer.on('archive:progress', wrappedCallback);
+      return () => ipcRenderer.removeListener('archive:progress', wrappedCallback);
+    },
+    onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, target: PaneLinkTarget) => callback(target);
       ipcRenderer.on('pane:open-link', wrappedCallback);
       return () => ipcRenderer.removeListener('pane:open-link', wrappedCallback);
     },

@@ -7,8 +7,11 @@ import { parsePaneLink } from './paneLink';
 
 export async function openPaneLink(uri: string): Promise<void> {
   const target = parsePaneLink(uri);
-  if (!target) return;
+  if (target) await openPaneTarget(target);
+}
 
+/** Opens a Pane, and optionally one of its panels, when the active host has it. */
+export async function openPaneTarget(target: { paneId: string; panelId?: string }): Promise<void> {
   const pane = useSessionStore.getState().sessions.find(session => session.id === target.paneId);
   if (!pane || pane.archived) return;
 

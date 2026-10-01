@@ -19,7 +19,7 @@ const REPO_ID = /^[1-9][0-9]{0,15}$/;
 const ALLOWED_PARAMS = new Set(['pane', 'panel', 'repo', 'session']);
 const MAX_LINK_LENGTH = 2048;
 
-function parsePaneLink(link: string): PaneLinkTarget {
+export function parsePaneLink(link: string): PaneLinkTarget {
   if (link.length > MAX_LINK_LENGTH) throw new Error('Pane link is too long');
   let url: URL;
   try {

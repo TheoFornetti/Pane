@@ -14,6 +14,8 @@ import { formatDistanceToNow, isValidTimestamp } from '../utils/timestampUtils';
 import { getThemeLabel, themeOptionsForSlot } from '../utils/themeOptions';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
+import type { PreferredShell } from '../types/config';
+import { useHostShellSettings } from '../hooks/useHostShellSettings';
 import { capture } from '../services/posthog';
 import { DISCORD_INVITE_URL, DiscordIcon } from './DiscordIcon';
 
@@ -238,9 +240,7 @@ export function HomePage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [showAddProject, setShowAddProject] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
-  const [platform, setPlatform] = useState<string>('');
-  const [availableShells, setAvailableShells] = useState<Array<{ id: string; name: string; path: string }>>([]);
-  const [preferredShell, setPreferredShell] = useState<string>('auto');
+  const { shells: availableShells, preferredShell, setPreferredShell } = useHostShellSettings();
 
   const uiScale = config?.uiScale ?? 1.0;
 
@@ -255,27 +255,6 @@ export function HomePage() {
       // Ignore transient IPC failures on home page
     }
   }, []);
-
-  useEffect(() => {
-    void window.electronAPI
-      .getPlatform()
-      .then(async currentPlatform => {
-        setPlatform(currentPlatform);
-        if (currentPlatform === 'win32') {
-          const shellsResponse = await API.config.getAvailableShells();
-          if (shellsResponse.success) {
-            setAvailableShells(shellsResponse.data);
-          }
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (config?.preferredShell) {
-      setPreferredShell(config.preferredShell);
-    }
-  }, [config?.preferredShell]);
 
   useEffect(() => {
     void loadProjects();
@@ -315,12 +294,8 @@ export function HomePage() {
     }
   };
 
-  const handleShellChange = async (shell: string) => {
-    setPreferredShell(shell);
-    await updateConfig({
-      // SAFETY: The value comes from the adjacent finite domain definition.
-      preferredShell: shell as 'auto' | 'gitbash' | 'powershell' | 'pwsh' | 'cmd',
-    }).catch(() => {});
+  const handleShellChange = async (shell: PreferredShell) => {
+    await setPreferredShell(shell).catch(() => {});
   };
 
   return (
@@ -432,7 +407,7 @@ export function HomePage() {
               />
             </div>
 
-            {platform === 'win32' && (
+            {availableShells.length > 0 && (
               <div className="flex items-center justify-between rounded-lg bg-surface-secondary p-4">
                 <div className="flex items-center gap-2">
                   <Terminal className="w-4 h-4 text-text-secondary" />

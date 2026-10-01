@@ -27,15 +27,8 @@ import type {
   SettingsOpenRequest,
   SettingsSettingId,
 } from '../types/settings';
-import type { PreferredShell } from '../types/config';
 import type { VersionInfo } from '../types/session';
 import { API } from '../utils/api';
-
-interface AvailableShell {
-  id: PreferredShell;
-  name: string;
-  path: string;
-}
 
 /** Whether the host probe found a Codex login; the Usage tab is rendered only when 'available'. */
 type CodexUsageDetection = 'unknown' | 'available' | 'unavailable';
@@ -63,7 +56,6 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     stay,
   } = dirtyForms;
   const [platform, setPlatform] = useState('darwin');
-  const [availableShells, setAvailableShells] = useState<AvailableShell[]>([]);
   const [systemMonoFonts, setSystemMonoFonts] = useState<string[]>([]);
   const [remoteSubview, setRemoteSubview] = useState<RemoteAccessSubviewId | undefined>();
   const [codexUsageDetection, setCodexUsageDetection] = useState<CodexUsageDetection>('unknown');
@@ -73,16 +65,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
 
   useEffect(() => {
     if (!isOpen) return;
-    void window.electronAPI.getPlatform().then(async (currentPlatform) => {
-      setPlatform(currentPlatform);
-      if (currentPlatform === 'win32') {
-        const response = await API.config.getAvailableShells();
-        if (response.success && Array.isArray(response.data)) {
-          // SAFETY: The named IPC/API channel contract establishes this response payload type.
-          setAvailableShells(response.data as AvailableShell[]);
-        }
-      }
-    });
+    void window.electronAPI.getPlatform().then(setPlatform);
     if (!fontsLoadedRef.current) {
       fontsLoadedRef.current = true;
       void window.electronAPI.config.getMonospaceFonts().then((response) => {
@@ -182,7 +165,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       case 'appearance':
         return <AppearanceSettings persistence={persistence} />;
       case 'terminal':
-        return <TerminalSettings persistence={persistence} platform={platform} availableShells={availableShells} systemMonoFonts={systemMonoFonts} />;
+        return <TerminalSettings persistence={persistence} systemMonoFonts={systemMonoFonts} />;
       case 'ai-agents':
         return <AIAgentsSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'usage':

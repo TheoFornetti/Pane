@@ -1,9 +1,13 @@
 import { ipcMain } from 'electron';
 import { UIStateManager } from '../services/uiStateManager';
 import type { AppServices } from './types';
+import { normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 
 export function registerUIStateHandlers(services: AppServices) {
-  const uiStateManager = new UIStateManager(services.databaseService);
+  const uiStateManager = new UIStateManager(services.databaseService, () => {
+    const { client } = normalizeRemoteDaemonConfig(services.configManager.getConfig().remoteDaemon);
+    return client.mode === 'remote' ? client.activeProfileId : null;
+  });
 
   ipcMain.handle('ui-state:get-expanded', async () => {
     try {

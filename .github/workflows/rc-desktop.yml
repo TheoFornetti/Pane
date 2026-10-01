@@ -415,6 +415,8 @@ jobs:
         powershell -NoProfile -ExecutionPolicy Bypass -File sobeck-install.ps1 -Tag $env:TAG -Repo $env:REPO `
           -AppSha256 (Sum '-Windows-x64\.zip') -KitSha256 (Sum 'relay-kit') | Tee-Object -Variable installOutput | Out-Host
         if ($LASTEXITCODE -ne 0) { exit 1 }
+        # A proof_tag rerun tests this commit's kit scripts against the release's app.
+        if ('${{ inputs.proof_tag }}') { Copy-Item "$kit\*" "$HOME\PaneCloudTest\kit\" -Force -Exclude ci-fake-host.ps1 }
         if ($env:UPGRADE_FROM) {
           $after = SavedHosts
           if (($after -join "`n") -ne ($before -join "`n")) { Write-Error "saved host changed by the upgrade: [$before] -> [$after]"; exit 1 }

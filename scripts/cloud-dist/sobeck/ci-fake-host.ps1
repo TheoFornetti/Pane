@@ -86,7 +86,8 @@ Write-Host "fake host config: enabled=$($hostConfig.enabled) listen=$($hostConfi
 $daemonCmd = "`"$Exe`" --daemon-headless --pane-dir `"$HostDir`" > `"$HostDir\daemon.out.txt`" 2> `"$HostDir\daemon.err.txt`""
 $pathBefore = $env:PATH
 $env:PATH = "$fakeBin;$pathBefore"
-try { Start-Process -FilePath cmd.exe -ArgumentList '/d', '/c', $daemonCmd -WindowStyle Hidden | Out-Null } finally { $env:PATH = $pathBefore }
+# cmd /c strips the first and last quote of a line that starts with one: wrap it in one more pair.
+try { Start-Process -FilePath cmd.exe -ArgumentList '/d', '/s', '/c', "`"$daemonCmd`"" -WindowStyle Hidden | Out-Null } finally { $env:PATH = $pathBefore }
 $deadline = (Get-Date).AddSeconds(120)
 $healthy = $false
 while (-not $healthy -and (Get-Date) -lt $deadline) {

@@ -157,10 +157,13 @@ async function typeLine(text) {
 }
 
 // One "R35:<tag>:<base64 of check TAB verdict TAB detail>:/R35" line per check from session-checks.sh (it
-// also prints a readable line), read from the terminal stream with ALL whitespace removed: ConPTY (the
-// Windows CI fake host) wraps and pads long lines at the terminal width. Acks and the script's sha256 are
-// matched the same way; the typed commands have a quote between "R35" and the tag, so they never match.
-const compactStream = async () => (await streamText()).replace(/\s+/g, '');
+// also prints a readable line). It is looked for with ALL whitespace removed in two places: the raw terminal
+// stream (exact from a Linux pty, e.g. Scratch), and the rows xterm has on screen, joined (exact where the
+// stream isn't: ConPTY on the Windows CI fake host repeats a row's last character after each soft wrap).
+// Acks and the script's sha256 are matched the same way; the typed commands have a quote between "R35" and
+// the tag, so they never match. Matches are kept as they are seen, so output that scrolls away still counts.
+const compact = (text) => text.replace(/\s+/g, '');
+const compactStream = async () => `${compact(await streamText())}\u0000${compact(await domText())}`;
 const LINE = new RegExp(`R35:${tag}:([A-Za-z0-9+/=]+):/R35`, 'g');
 const seen = new Set();
 const sessionLines = async () => [...(await compactStream()).matchAll(LINE)].map(([, encoded]) => {
@@ -170,23 +173,23 @@ const sessionLines = async () => [...(await compactStream()).matchAll(LINE)].map
 async function runPhase(phase, timeoutMs) {
   await typeLine(`bash "$R35" ${phase} ${tag} ${port} ${github}`);
   const deadline = Date.now() + timeoutMs;
+  const results = [];
   for (;;) {
     const lines = await sessionLines();
     for (const line of lines) {
-      const key = `${line.name}|${line.verdict}|${line.detail}`;
-      if (line.name === 'phase-done' || seen.has(key) || seen.has(line.name)) continue;
-      seen.add(key);
+      if (line.name === 'phase-done' || seen.has(line.name)) continue;
       seen.add(line.name);
+      results.push(line);
       fs.appendFileSync(path.join(out, 'session-lines.txt'), `${redact(`${line.name} ${line.verdict} ${line.detail}`)}\n`);
       if (line.verdict === 'INFO') log('session', line.name, line.detail);
       else check(line.name, line.verdict, line.detail);
     }
-    if (lines.some((line) => line.name === 'phase-done' && line.detail === phase)) return lines;
+    if (lines.some((line) => line.name === 'phase-done' && line.detail === phase)) return results;
     if (Date.now() > deadline) {
       check(`phase-${phase}`, 'FAIL', `no "phase-done ${phase}" from the Session within ${timeoutMs / 1000} s`);
-      return lines;
+      return results;
     }
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(300);
   }
 }
 
@@ -222,7 +225,7 @@ async function waitFor(predicate, timeoutMs) {
   for (;;) {
     if (await predicate()) return true;
     if (Date.now() > deadline) return false;
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(300);
   }
 }
 

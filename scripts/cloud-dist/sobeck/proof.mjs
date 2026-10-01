@@ -172,13 +172,65 @@ async function waitForText(predicate, timeoutMs) {
     await page.waitForTimeout(1000);
   }
 }
-async function typeInLastTerminal(text) {
-  const terminal = page.locator('.xterm').last();
-  await terminal.waitFor({ timeout: 60_000 });
+// The terminal on screen. Hidden tabs keep their xterm in the DOM, so never "the last one".
+const visibleTerminal = () => page.locator('.xterm:visible').last();
+async function typeInVisibleTerminal(text, timeout = 60_000) {
+  const terminal = visibleTerminal();
+  await terminal.waitFor({ timeout });
   await page.waitForTimeout(2000);
   await terminal.click();
   await page.keyboard.type(text, { delay: 20 });
   await page.keyboard.press('Enter');
+}
+
+// What the terminal attach was still waiting for, for the FAIL detail.
+async function terminalDiagnostic() {
+  const tabs = await page.getByRole('tab', { name: /^Terminal\b/ }).evaluateAll((nodes) =>
+    nodes.map((node) => `${node.getAttribute('aria-label')}${node.getAttribute('aria-selected') === 'true' ? '*' : ''}`)).catch(() => []);
+  const all = await page.locator('.xterm').count().catch(() => -1);
+  const visible = await page.locator('.xterm:visible').count().catch(() => -1);
+  const stream = (await streamText()).length;
+  const emptyStage = await page.getByRole('button', { name: /^Terminal Ctrl\+Alt\+1/ }).isVisible().catch(() => false);
+  return `terminal tabs ${JSON.stringify(tabs)} (* = selected); xterm elements ${all}, visible ${visible}; terminal stream ${stream} chars so far; empty "Open" stage ${emptyStage ? 'shown' : 'not shown'}`;
+}
+
+// Attaches to a terminal in the open Pane. Its panels load asynchronously, and until they do the view
+// shows the empty "Open: Terminal" stage; clicking that too early created a new terminal on every run
+// (Terminal 2..5 on Scratch) while the view restored the earlier active tab, and the proof then waited on
+// a hidden one (SOBECK run 3, try 1). So: wait for the panels, reuse a Terminal tab if there is one,
+// create one only when the stage stays empty, then wait for the visible terminal (the first attach after
+// an upgrade or a cold Session can be slow), re-select it once, and say what was pending on failure.
+async function attachPaneTerminal() {
+  const tabs = page.getByRole('tab', { name: /^Terminal\b/ });
+  const addTerminal = page.getByRole('button', { name: /^Terminal Ctrl\+Alt\+1/ });
+  const started = Date.now();
+  let emptySince = 0;
+  for (;;) {
+    if (await tabs.count() > 0) break;
+    const empty = await addTerminal.isVisible().catch(() => false);
+    emptySince = empty ? (emptySince || Date.now()) : 0;
+    if (empty && Date.now() - emptySince >= 8000) break;
+    if (Date.now() - started > 90_000) break;
+    await page.waitForTimeout(500);
+  }
+  let how;
+  if (await tabs.count() > 0) {
+    const selected = page.getByRole('tab', { name: /^Terminal\b/, selected: true });
+    const tab = await selected.count() > 0 ? selected.first() : tabs.first();
+    how = `reused tab "${await tab.getAttribute('aria-label')}"`;
+    await tab.click();
+  } else {
+    await addTerminal.click({ timeout: 30_000 });
+    how = 'created a terminal (the Pane had none)';
+  }
+  log(`terminal: ${how} after ${Date.now() - started} ms`);
+  if (await visibleTerminal().waitFor({ timeout: 90_000 }).then(() => true, () => false)) return how;
+  log(`terminal: nothing on screen after 90 s (${await terminalDiagnostic()}); re-selecting once`);
+  await shot('terminal-pending');
+  const retry = page.getByRole('tab', { name: /^Terminal\b/ }).first();
+  if (await retry.count() > 0) await retry.click().catch(() => undefined);
+  if (await visibleTerminal().waitFor({ timeout: 45_000 }).then(() => true, () => false)) return `${how}, after one re-select`;
+  throw new Error(`terminal never attached within 135 s: ${await terminalDiagnostic()}`);
 }
 
 try {
@@ -227,20 +279,28 @@ try {
     await dialog.getByRole('textbox', { name: 'Enter a name for your pane' }).fill(paneName);
     await dialog.getByRole('button', { name: /^Create/ }).click();
   }
-  await page.getByRole('button', { name: /^Terminal Ctrl\+Alt\+1/ }).click({ timeout: 60_000 });
-  const domBefore = (await domText().catch(() => '')).length;
-  const streamBefore = (await streamText()).length;
-  await typeInLastTerminal('hostname');
-  const hasPrefix = (text) => text.toLowerCase().split('hostname').slice(1).some((after) => after.includes(hostnamePrefix));
-  const printed = await waitForText(
-    (dom, stream) => hasPrefix(dom.slice(Math.max(0, domBefore - 200))) || hasPrefix(stream.slice(streamBefore)),
-    30_000,
-  );
-  const text = (await streamText()).slice(streamBefore) || (await domText().catch(() => ''));
-  const after = text.slice(text.toLowerCase().lastIndexOf('hostname')).slice(0, 160).replace(/\s+/g, ' ');
-  fs.writeFileSync(path.join(out, 'terminal-output.txt'), `${after}\n`);
-  pass('terminal-hostname', printed, `${after} (expected "${hostnamePrefix}…"; this machine is ${os.hostname()})`);
-  await shot('terminal-hostname');
+  let attached;
+  try {
+    attached = await attachPaneTerminal();
+  } catch (error) {
+    pass('terminal-hostname', false, error instanceof Error ? error.message : String(error));
+    await shot('terminal-hostname');
+  }
+  if (attached) {
+    const domBefore = (await domText().catch(() => '')).length;
+    const streamBefore = (await streamText()).length;
+    await typeInVisibleTerminal('hostname');
+    const hasPrefix = (text) => text.toLowerCase().split('hostname').slice(1).some((after) => after.includes(hostnamePrefix));
+    const printed = await waitForText(
+      (dom, stream) => hasPrefix(dom.slice(Math.max(0, domBefore - 200))) || hasPrefix(stream.slice(streamBefore)),
+      30_000,
+    );
+    const text = (await streamText()).slice(streamBefore) || (await domText().catch(() => ''));
+    const after = text.slice(text.toLowerCase().lastIndexOf('hostname')).slice(0, 160).replace(/\s+/g, ' ');
+    fs.writeFileSync(path.join(out, 'terminal-output.txt'), `${after}\n`);
+    pass('terminal-hostname', printed, `${after} (expected "${hostnamePrefix}…"; this machine is ${os.hostname()}; ${attached})`);
+    await shot('terminal-hostname');
+  }
 
   // 4. The Session's Ports row (tailnet HTTPS links): the port's chip carries its URL, and a click opens it.
   if (portName) {
@@ -304,7 +364,7 @@ try {
     const b = 100 + Math.floor(Math.random() * 800);
     const expected = `SUM=${a + b}`;
     const streamStart = (await streamText()).length;
-    await typeInLastTerminal(`Compute ${a}+${b} and reply with only SUM= followed by the result, nothing else.`);
+    await typeInVisibleTerminal(`Compute ${a}+${b} and reply with only SUM= followed by the result, nothing else.`);
     log(`prompt submitted to "${sessionName}"; expecting ${expected}`);
     if (waitForReply) {
       // The prompt itself contains "SUM=" but never the sum.

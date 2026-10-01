@@ -433,6 +433,13 @@ jobs:
         if ($env:UPGRADE_FROM) { $proofArgs += '-SkipSeed' }
         powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\PaneCloudTest\kit\run-proof.ps1" @proofArgs
         $code = $LASTEXITCODE
+        # Again, as on every later SOBECK run: the Pane now has a terminal, which must be reused, not
+        # joined by another one (SOBECK run 3 try 1 waited on a hidden new terminal).
+        $rerunArgs = @('-OutDir', "$PWD\relay-evidence\proof-rerun", '-NoClaudeReply', '-HostnamePrefix', $env:COMPUTERNAME, '-PortUrl', 'http://localhost:8443/', '-SkipSeed')
+        powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\PaneCloudTest\kit\run-proof.ps1" @rerunArgs
+        if ($LASTEXITCODE -ne 0) { $code = $LASTEXITCODE }
+        if (Select-String -Path relay-evidence\proof-rerun\steps.log -Pattern 'terminal: reused tab' -Quiet) { Write-Host 'PASS second run reused the Pane terminal' }
+        else { Write-Host 'FAIL second run did not reuse the Pane terminal'; $code = 1 }
         # The pairing token must not appear in anything the proof wrote.
         $token = (Get-Content $config -Raw | ConvertFrom-Json).remoteDaemon.client.profiles[0].token
         if (-not $token) { Write-Error 'no saved profile token to search for'; exit 1 }

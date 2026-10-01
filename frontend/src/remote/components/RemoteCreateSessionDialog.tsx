@@ -244,7 +244,7 @@ export function RemoteCreateSessionDialog({
             <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
         <div className="flex shrink-0 items-center justify-between border-b border-border-primary px-5 py-4">
           <Dialog.Title asChild>
-            <h2 className="min-w-0 truncate text-lg font-semibold text-text-primary">New Pane</h2>
+            <h2 className="min-w-0 truncate text-lg font-semibold text-text-primary">New Pane in {project.name}</h2>
           </Dialog.Title>
           <button
             type="button"

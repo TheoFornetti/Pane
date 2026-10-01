@@ -157,13 +157,33 @@ async function typeLine(text) {
 }
 
 // One "R35:<tag>:<base64 of check TAB verdict TAB detail>:/R35" line per check from session-checks.sh (it
-// also prints a readable line). It is looked for with ALL whitespace removed in two places: the raw terminal
-// stream (exact from a Linux pty, e.g. Scratch), and the rows xterm has on screen, joined (exact where the
-// stream isn't: ConPTY on the Windows CI fake host repeats a row's last character after each soft wrap).
-// Acks and the script's sha256 are matched the same way; the typed commands have a quote between "R35" and
-// the tag, so they never match. Matches are kept as they are seen, so output that scrolls away still counts.
+// also prints a readable line), looked for with ALL whitespace removed in the raw terminal stream (exact from
+// a Linux pty such as Scratch's), in that stream with ConPTY's wraps undone, and in the rows xterm renders
+// when it uses its DOM renderer. Acks and the script's sha256 are matched the same way; the typed commands
+// have a quote between "R35" and the tag, so they never match. Matches are kept as they are seen.
+//
+// ConPTY (a Windows host such as the CI fake host; the Windows app also draws with WebGL, so there are no DOM
+// rows) hard-wraps at the terminal width and starts each continuation row with the previous row's last
+// character again: "…0117aa9\n9d7b…". The width is the most common row length; a row of that length (or
+// one less) whose successor starts with its last character is joined to it without the repeat.
+function unwrapConpty(text) {
+  const rows = text.split(/\r?\n/);
+  const counts = new Map();
+  for (const row of rows) if (row.length > 0) counts.set(row.length, (counts.get(row.length) ?? 0) + 1);
+  const width = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0;
+  let joined = rows[0] ?? '';
+  for (let i = 1; i < rows.length; i++) {
+    const previous = rows[i - 1];
+    const wrapped = previous.length >= width - 1 && previous.length <= width && rows[i][0] === previous.at(-1);
+    joined += wrapped ? rows[i].slice(1) : `\n${rows[i]}`;
+  }
+  return joined;
+}
 const compact = (text) => text.replace(/\s+/g, '');
-const compactStream = async () => `${compact(await streamText())}\u0000${compact(await domText())}`;
+const compactStream = async () => {
+  const stream = await streamText();
+  return [compact(stream), compact(unwrapConpty(stream)), compact(await domText())].join('\u0000');
+};
 const LINE = new RegExp(`R35:${tag}:([A-Za-z0-9+/=]+):/R35`, 'g');
 const seen = new Set();
 const sessionLines = async () => [...(await compactStream()).matchAll(LINE)].map(([, encoded]) => {

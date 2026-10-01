@@ -4,6 +4,7 @@
 usage: judge.py <check> <evidence dir> <args...>   (called by acceptance.sh)
 Every line: "<time> <check>.<n> PASS|FAIL <assertion> :: <observed>". Exit 1 if any FAIL.
 """
+import hashlib
 import json
 import re
 import sys
@@ -141,9 +142,14 @@ elif check == 'c5':
         # Informational: the design only reserves 443 and the daemon's port; recorded as observed.
         print(f"{time.strftime('%H:%M:%SZ', time.gmtime())} {check}.info {label}: exit={rc} :: {b.strip().splitlines()[-1][:200] if b != 'missing' else ''}")
     st = lambda name: (ev / name).read_text() if (ev / name).exists() else ''
-    sha = lambda s: (re.search(r'nft ruleset sha256.*\n(\w+)', s) or [None, '?'])[1]
+    # The rp_tailnet table without packet counters (the drop rule counts packets, so a raw hash always moves).
+    def sha(s):
+        if '### nft rp tables' not in s:
+            return '?'
+        table = re.sub(r'counter packets \d+ bytes \d+', 'counter', s.split('### nft rp tables')[1].split('### ~')[0])
+        return hashlib.sha256(table.encode()).hexdigest()[:16] if 'rp_tailnet' in table else '?'
     s0, s1, s2 = st('c5-state-before.txt'), st('c5-state-after-tries.txt'), st('c5-state-after-close.txt')
-    out(sha(s0) == sha(s1) == sha(s2) and sha(s0) != '?', 'the Session firewall (nft ruleset) is unchanged by open/close', f'{sha(s0)} {sha(s1)} {sha(s2)}')
+    out(sha(s0) == sha(s1) == sha(s2) and sha(s0) != '?', 'the Session firewall (nft rp_tailnet table, counters aside) is unchanged by open/close', f'{sha(s0)} {sha(s1)} {sha(s2)}')
     serve = lambda s: s.split('### tailscale serve status --json')[1].split('### tailscale funnel status')[0].strip() if '### tailscale serve status --json' in s else '?'
     try:
         w0, w2 = json.loads(serve(s0)).get('TCP', {}), json.loads(serve(s2)).get('TCP', {})

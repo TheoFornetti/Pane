@@ -20,6 +20,7 @@ import { useMainRepoGitActions } from '../hooks/useMainRepoGitActions';
 import { useProjectViewActionsStore } from '../stores/projectViewActionsStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { PANEL_CAPABILITIES } from '../../../shared/types/panels';
+import { shouldActivateReopenedPanel } from '../utils/panelLayout';
 import type { ProjectEnvironment } from '../../../shared/types/panels';
 
 interface ProjectViewProps {
@@ -380,14 +381,24 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
       }
     };
 
+    // Reopening a file through `runpane panels open` updates its existing tab.
+    const handlePanelUpdated = (panel: ToolPanel) => {
+      if (panel.sessionId !== mainRepoSessionId) return;
+      const previous = usePanelStore.getState().panels[mainRepoSessionId]?.find(p => p.id === panel.id);
+      updatePanelState(panel);
+      if (shouldActivateReopenedPanel(panel, previous)) setActivePanelInStore(mainRepoSessionId, panel.id);
+    };
+
     // Listen for panel events
     const unsubscribeCreated = window.electronAPI?.events?.onPanelCreated?.(handlePanelCreated);
+    const unsubscribeUpdated = window.electronAPI?.events?.onPanelUpdated?.(handlePanelUpdated);
 
     // Cleanup
     return () => {
       unsubscribeCreated?.();
+      unsubscribeUpdated?.();
     };
-  }, [mainRepoSessionId, addPanel]);
+  }, [mainRepoSessionId, addPanel, updatePanelState, setActivePanelInStore]);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg-primary">

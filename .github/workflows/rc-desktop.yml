@@ -472,7 +472,7 @@ jobs:
         if ($LASTEXITCODE -ne 0) { $code = 1 }
         $verdicts = @{}
         if (Test-Path relay-evidence\session-proof\results.json) { (Get-Content -Raw relay-evidence\session-proof\results.json | ConvertFrom-Json).checks | ForEach-Object { $verdicts[$_.name] = $_.verdict } }
-        $expected = [ordered]@{ 'pane-created' = 'PASS'; 'pane-terminal' = 'PASS'; 'script-delivered' = 'PASS'; 'secrets-at-creation' = 'SKIP'; 'port-open' = 'PASS'; 'ports-chip' = 'PASS'; 'ports-chip-opens' = 'PASS'; 'broker' = 'SKIP'; 'port-closed' = 'PASS' }
+        $expected = [ordered]@{ 'pane-created' = 'PASS'; 'pane-terminal' = 'PASS'; 'script-delivered' = 'PASS'; 'secrets-at-creation' = 'SKIP'; 'port-open' = 'PASS'; 'ports-chip' = 'PASS'; 'ports-chip-opens' = 'PASS'; 'broker' = 'SKIP'; 'port-closed' = 'PASS'; 'pane-archived' = 'PASS' }
         foreach ($name in $expected.Keys) {
           if ($verdicts[$name] -eq $expected[$name]) { Write-Host "PASS R3.5 $name is $($expected[$name])" } else { Write-Host "FAIL R3.5 $name is '$($verdicts[$name])', expected $($expected[$name])"; $code = 1 }
         }

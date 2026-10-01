@@ -188,19 +188,31 @@ async function runPhase(phase, timeoutMs) {
   }
 }
 
+// Types one line and waits until the shell has run it: the line ends with an echo whose output (not the
+// typed text, which has a quote in the middle) is looked for. Keys typed while the shell is still busy can be
+// lost (ConPTY + Git Bash on the CI fake host dropped the last of several quick lines), so the next line is
+// only typed after this one's ack.
+let acks = 0;
+async function typeAcked(command, timeoutMs = 30_000) {
+  const ack = `R35 ${tag} ack ${++acks}.`;
+  await typeLine(`${command}; echo "R35 ${tag}" "ack ${acks}."`);
+  return waitFor(async () => (await streamText()).includes(ack), timeoutMs);
+}
+
 // Writes session-checks.sh into the Session through the terminal: base64 in short printf lines (no line
-// near a tty's limits), decoded once, then checked against its sha256 before it runs.
+// near a tty's limits), each acknowledged, decoded once, then checked against its sha256 before it runs.
 async function deliverScript() {
   const sha = (await import('node:crypto')).createHash('sha256').update(sessionScript).digest('hex');
   const b64 = sessionScript.toString('base64');
-  await typeLine(`R35="\${TMPDIR:-/tmp}/runpane-r35-${tag}.sh"; : > "$R35.b64"`);
-  for (let at = 0; at < b64.length; at += 900) {
-    await typeLine(`printf %s '${b64.slice(at, at + 900)}' >> "$R35.b64"`);
-    await page.waitForTimeout(150);
+  let typed = await typeAcked(`R35="\${TMPDIR:-/tmp}/runpane-r35-${tag}.sh"; : > "$R35.b64"`);
+  for (let at = 0; typed && at < b64.length; at += 900) {
+    typed = await typeAcked(`printf %s '${b64.slice(at, at + 900)}' >> "$R35.b64"`);
   }
-  await typeLine(`base64 -d "$R35.b64" > "$R35" && rm -f "$R35.b64" && echo "R35 ${tag}" "script $(sha256sum "$R35" | cut -c1-64)"`);
-  const delivered = await waitFor(async () => (await streamText()).includes(`R35 ${tag} script ${sha}`), 60_000);
-  pass('script-delivered', delivered, delivered ? `session-checks.sh in the Pane (sha256 ${sha.slice(0, 12)}…)` : `sha256 ${sha.slice(0, 12)}… never echoed back within 60 s`);
+  if (typed) await typeLine(`base64 -d "$R35.b64" > "$R35" && rm -f "$R35.b64" && echo "R35 ${tag}" "script $(sha256sum "$R35" | cut -c1-64)"`);
+  const delivered = typed && await waitFor(async () => (await streamText()).includes(`R35 ${tag} script ${sha}`), 60_000);
+  pass('script-delivered', delivered, delivered
+    ? `session-checks.sh in the Pane in ${acks} acknowledged lines (sha256 ${sha.slice(0, 12)}…)`
+    : `${typed ? `sha256 ${sha.slice(0, 12)}… never echoed back within 60 s` : `typed line ${acks} not acknowledged within 30 s`}`);
   return delivered;
 }
 async function waitFor(predicate, timeoutMs) {
@@ -343,6 +355,7 @@ try {
     const archived = await typeLine('"${PANE_RUNPANE_BIN:-runpane}" panes archive --pane "$PANE_SESSION_ID" --force --yes')
       .then(() => paneButton.waitFor({ state: 'detached', timeout: 90_000 })).then(() => true, () => false);
     pass('pane-archived', archived, archived ? `"${paneName}" archived (worktree removed, local branch kept)` : `"${paneName}" still listed 90 s after runpane panes archive`);
+    if (!archived) await shot('archive-failed').catch(() => undefined);
   } else if (paneCreated) {
     check('pane-archived', 'SKIP', `KEEP_PANE=1: "${paneName}" kept`);
   }

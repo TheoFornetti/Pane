@@ -25,6 +25,7 @@
 //   PANE_PREFIX     the new Pane's name is <prefix>-<tag> (default r35)
 //   PORT            port of the tiny server (default 18000 + a random 0..899)
 //   GITHUB          1 (default) runs the broker checks; 0 skips them (no coordinator, e.g. CI)
+//   KEEP_PANE       1 keeps the new Pane; by default it is archived at the end (its local branch is kept)
 //   EXTRA_ARGS      extra Electron switches, space separated (e.g. --no-sandbox under xvfb on Linux)
 //   OPEN_IN_BROWSER 1 = the chip click also opens the default browser
 import { _electron as electron } from 'playwright-core';
@@ -61,6 +62,7 @@ const paneName = `${env.PANE_PREFIX || 'r35'}-${tag}`;
 const port = Number(env.PORT || 18000 + Math.floor(Math.random() * 900));
 const github = env.GITHUB === '0' ? '0' : '1';
 const openInBrowser = env.OPEN_IN_BROWSER === '1';
+const keepPane = env.KEEP_PANE === '1';
 const extraArgs = (env.EXTRA_ARGS || '').split(/\s+/).filter(Boolean);
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -231,6 +233,7 @@ function getFromHere(url) {
 
 let scriptReady = false;
 let setupRan = false;
+let paneCreated = false;
 try {
   await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(5000);
@@ -262,6 +265,7 @@ try {
   const created = await paneButton.waitFor({ timeout: 120_000 }).then(() => true, () => false);
   pass('pane-created', created, created ? `"${paneName}" in ${repo} on ${hostLabel}, listed ${Date.now() - createdAt} ms after Create` : `"${paneName}" not listed within 120 s`);
   if (!created) throw new Error('the new Pane never appeared');
+  paneCreated = true;
   await paneButton.click();
 
   // 3. Its terminal: the Pane is new, so open one from its empty stage (or use one it already has).
@@ -331,6 +335,16 @@ try {
   if (setupRan) {
     await runPhase('cleanup', 60_000).catch((error) => check('phase-cleanup', 'FAIL', String(error)));
     await shot('cleanup').catch(() => undefined);
+  }
+  // The Pane was only for this proof: archive it like the UI's Archive (worktree removed, branch kept).
+  // --force: its test commit went to GitHub through the broker, so it has no upstream to count as pushed.
+  if (paneCreated && !keepPane) {
+    const paneButton = page.getByRole('button', { name: paneName, exact: true });
+    const archived = await typeLine('"${PANE_RUNPANE_BIN:-runpane}" panes archive --pane "$PANE_SESSION_ID" --force --yes')
+      .then(() => paneButton.waitFor({ state: 'detached', timeout: 90_000 })).then(() => true, () => false);
+    pass('pane-archived', archived, archived ? `"${paneName}" archived (worktree removed, local branch kept)` : `"${paneName}" still listed 90 s after runpane panes archive`);
+  } else if (paneCreated) {
+    check('pane-archived', 'SKIP', `KEEP_PANE=1: "${paneName}" kept`);
   }
   await app.close().catch(() => undefined);
   const ok = checks.every((entry) => entry.verdict !== 'FAIL');

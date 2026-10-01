@@ -154,7 +154,7 @@ cleanup() {
   else
     say port-closed PASS "$name closed, server stopped"
   fi
-  rm -rf "$work"
+  rm -rf "$work" "$0"
 }
 
 case "$phase" in

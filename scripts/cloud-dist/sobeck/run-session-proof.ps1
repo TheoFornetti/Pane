@@ -16,6 +16,7 @@ param(
   [string]$Repo = 'montlakev2',
   [int]$Port = 0,
   [switch]$NoGitHub,
+  [switch]$KeepPane,
   [switch]$OpenInBrowser,
   [switch]$CloseRunning
 )
@@ -50,6 +51,7 @@ $names = @{
   PANE_EXE = $exe; PANE_DIR = $PaneDir; OUT = $OutDir; HOST_LABEL = $HostLabel; REPO = $Repo
   PORT = $(if ($Port -gt 0) { "$Port" } else { '' })
   GITHUB = $(if ($NoGitHub) { '0' } else { '1' })
+  KEEP_PANE = $(if ($KeepPane) { '1' } else { '0' })
   OPEN_IN_BROWSER = $(if ($OpenInBrowser) { '1' } else { '0' })
   ELECTRON_RUN_AS_NODE = '1'
 }

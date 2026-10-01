@@ -4,6 +4,7 @@ import path from 'path';
 import { boundary, BoundaryDecodeError, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { PaneCommandError } from '../../core/commandError';
 import type { PaneCommandRegistry, PaneCommandValue } from '../commandRegistry';
+import { CLOUD_SERVE_RECORD } from './cloudSessionMarker';
 
 /**
  * Notes for agents in a Runpane Cloud Session, kept by the Session's daemon in the user-level instruction
@@ -14,8 +15,6 @@ import type { PaneCommandRegistry, PaneCommandValue } from '../commandRegistry';
  */
 const NOTES_START = '<!-- runpane-cloud-ports:start -->';
 const NOTES_END = '<!-- runpane-cloud-ports:end -->';
-/** Written by the Session bootstrap on every Runpane Cloud Session (the same marker Session ports use). */
-const CLOUD_SERVE_RECORD = '/etc/rp-cloud/serve.json';
 const GUARDRAILS_START = '<!-- runpane-cloud-guardrails:start -->';
 const GUARDRAILS_END = '<!-- runpane-cloud-guardrails:end -->';
 /**
@@ -120,7 +119,8 @@ interface SessionAgentNotesOptions {
 
 /**
  * Writes the notes on a Runpane Cloud Session (the ports block, and the user's guardrails when there
- * are any); returns the files it changed (none off a Session). Runs at every daemon start.
+ * are any); returns the files it changed (none off a Session). Runs at every daemon start, or when the
+ * bootstrap writes the Session marker on a new Session.
  */
 export function writeSessionAgentNotes(options: SessionAgentNotesOptions = {}): string[] {
   if (!fs.existsSync(options.serveRecordPath ?? CLOUD_SERVE_RECORD)) return [];

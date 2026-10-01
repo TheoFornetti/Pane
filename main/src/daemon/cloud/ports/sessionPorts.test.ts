@@ -342,6 +342,17 @@ describe('SessionPortsService.detect', () => {
     expect(h.events.at(-1)?.suggested).toHaveLength(1);
   });
 
+  it('drops a suggestion as soon as it is opened, before the next detection round', async () => {
+    const h = makeHarness();
+    withPanelServer(h);
+    await h.service.detect();
+    await h.service.open({ port: 5173 });
+    const list = await h.service.list();
+    expect(list.ports.map(port => port.port)).toEqual([5173]);
+    expect(list.suggested).toEqual([]);
+    expect(h.events.at(-1)?.suggested).toEqual([]);
+  });
+
   it('publishes suggestions with autoOpen', async () => {
     const h = makeHarness();
     withPanelServer(h);

@@ -35,6 +35,22 @@ wait_for_tailscaled() {
   return 1
 }
 
+# The state tailscaled settles into. Right after a boot or wake it passes NoState and Starting within its
+# first second (seen live: NoState -> Starting -> Running in 1 s); deciding on those re-enrolled a healthy
+# node. A state still NoState after 30 s is reported as it is (a node that really came back logged out).
+wait_for_settled_tailscaled() {
+  local i state=""
+  for i in $(seq 1 60); do
+    state="$(tailscale_backend_state)"
+    case "$state" in
+      ""|NoState|Starting) sleep 0.5 ;;
+      *) echo "$state"; return 0 ;;
+    esac
+  done
+  [ -n "$state" ] && { echo "$state"; return 0; }
+  return 1
+}
+
 # Tailnet identity as JSON (no secrets): node id, MagicDNS name, IPs, tags, RunSSH.
 tailnet_identity_json() {
   local status prefs
@@ -292,8 +308,10 @@ step_tailscale_up() {
   result "$(tailnet_identity_json)"
 }
 
-# tailnet-identity: current tailnet identity (read-only).
+# tailnet-identity: current tailnet identity (read-only). A wake's repair runs it while the box may still
+# be booting, so it waits for tailscaled to answer and settle (the caller re-enrols anything not Running).
 step_tailnet_identity() {
+  wait_for_settled_tailscaled >/dev/null || fail "tailscaled is not answering"
   result "$(tailnet_identity_json)"
 }
 

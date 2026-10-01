@@ -5,14 +5,13 @@ import { boundary, BoundaryDecodeError, decodeBoundary, decodeOptionalBoundary, 
 import { SESSION_PORTS_CHANGED_EVENT, type SessionPortsListResult } from '../../../../../shared/types/sessionPorts';
 import { PaneCommandError } from '../../../core/commandError';
 import type { PaneCommandRegistry, PaneCommandValue } from '../../commandRegistry';
+import { CLOUD_SERVE_RECORD, whenCloudSession } from '../cloudSessionMarker';
 import { readProcessTable } from '../processTree';
 import { mapSocketOwners, readLocalListeners } from './listeners';
 import { defaultPortsStatePath } from './portsStore';
 import { SessionPortsService, type PanelProcess, type ProbeResult } from './sessionPorts';
 import { createTailscaleServeBackend, type ServeBackend } from './tailscaleServe';
 
-/** Written by the Session bootstrap (serve guard) on every Runpane Cloud Session: `{"transport","port"}`. */
-const CLOUD_SERVE_RECORD = '/etc/rp-cloud/serve.json';
 const DEFAULT_DAEMON_PORT = 42137;
 
 interface SessionPortsWiring {
@@ -25,8 +24,9 @@ interface SessionPortsWiring {
   daemonPort(): number | undefined;
   emit(channel: string, result: SessionPortsListResult): void;
   log(message: string): void;
-  /** Tests: the Session marker file and the Serve backend. */
+  /** Tests: the Session marker file, how often to look for it, and the Serve backend. */
   serveRecordPath?: string;
+  markerPollMs?: number;
   serve?: ServeBackend;
   statePath?: string;
 }
@@ -86,15 +86,18 @@ function readCloudServeRecord(file: string): { port?: number } | undefined {
 
 /**
  * Registers `runpane:ports:list|open|close|configure` and, in a Runpane Cloud Session, starts the
- * boot/wake reconcile and listener detection. Elsewhere the channels answer `available: false`.
+ * boot/wake reconcile and listener detection: at once, or when the bootstrap writes the Session marker
+ * (after the daemon's first start on a new Session). Until then the channels answer `available: false`.
  */
-export function registerSessionPortsHandlers(wiring: SessionPortsWiring): SessionPortsService | undefined {
+export function registerSessionPortsHandlers(wiring: SessionPortsWiring): { service: SessionPortsService; stop(): void } | undefined {
   const serveRecordPath = wiring.serveRecordPath ?? CLOUD_SERVE_RECORD;
-  const record = readCloudServeRecord(serveRecordPath);
+  // Re-read until it exists: on a new Session the bootstrap writes it after this daemon started.
+  let record = readCloudServeRecord(serveRecordPath);
+  const cloudRecord = () => (record ??= readCloudServeRecord(serveRecordPath));
   const service = new SessionPortsService({
     serve: wiring.serve ?? createTailscaleServeBackend(),
     statePath: wiring.statePath ?? defaultPortsStatePath(),
-    reservedPorts: () => [...new Set([wiring.daemonPort() ?? DEFAULT_DAEMON_PORT, record?.port ?? DEFAULT_DAEMON_PORT])],
+    reservedPorts: () => [...new Set([wiring.daemonPort() ?? DEFAULT_DAEMON_PORT, cloudRecord()?.port ?? DEFAULT_DAEMON_PORT])],
     projectPaths: () => wiring.projectPaths(),
     panelProcesses: () => wiring.panelIds().flatMap((panelId): PanelProcess[] => {
       const pid = wiring.panelPid(panelId);
@@ -108,7 +111,6 @@ export function registerSessionPortsHandlers(wiring: SessionPortsWiring): Sessio
     now: Date.now,
     log: wiring.log,
   });
-  const cloud = record !== undefined;
   const notCloud = (): SessionPortsListResult => ({
     ok: true,
     available: false,
@@ -120,12 +122,12 @@ export function registerSessionPortsHandlers(wiring: SessionPortsWiring): Sessio
     manifests: [],
   });
   const requireCloud = () => {
-    if (!cloud) throw new PaneCommandError('Session ports are only for Runpane Cloud Sessions (this daemon is not in one).', 'ERR_PORTS_UNAVAILABLE');
+    if (!cloudRecord()) throw new PaneCommandError('Session ports are only for Runpane Cloud Sessions (this daemon is not in one).', 'ERR_PORTS_UNAVAILABLE');
   };
 
   wiring.commandRegistry.register('runpane:ports:list', async (request: PaneCommandValue = {}) => {
     const { verify } = decodeRequest(request, listRequestSchema);
-    return cloud ? service.list({ verify }) : notCloud();
+    return cloudRecord() ? service.list({ verify }) : notCloud();
   });
   wiring.commandRegistry.register('runpane:ports:open', async (request: PaneCommandValue) => {
     const decoded = decodeRequest(request, openRequestSchema);
@@ -143,7 +145,16 @@ export function registerSessionPortsHandlers(wiring: SessionPortsWiring): Sessio
     return service.configure({ autoOpen });
   });
 
-  if (!cloud || process.platform !== 'linux') return undefined;
-  service.start();
-  return service;
+  if (process.platform !== 'linux') return undefined;
+  const stopWaiting = whenCloudSession(() => {
+    if (!record) wiring.log('ports: this daemon is now in a Runpane Cloud Session (the bootstrap wrote its marker); starting');
+    service.start();
+  }, { path: serveRecordPath, pollMs: wiring.markerPollMs });
+  return {
+    service,
+    stop: () => {
+      stopWaiting();
+      service.stop();
+    },
+  };
 }

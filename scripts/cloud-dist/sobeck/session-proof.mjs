@@ -156,15 +156,17 @@ async function typeLine(text) {
   await page.keyboard.press('Enter');
 }
 
-// One "R35 <tag> <check> <verdict> <detail> /R35" line per check from session-checks.sh, read from the
-// terminal stream with its line breaks removed: ConPTY (the Windows CI fake host) hard-wraps long lines at
-// the terminal width. The commands typed never contain "R35 <tag> <word> <verdict>", so only the script's
-// output matches.
-const joinedStream = async () => (await streamText()).replace(/[\r\n]/g, '');
-const LINE = new RegExp(`R35 ${tag} (\\S+) (PASS|FAIL|SKIP|INFO) ?(.*?) /R35`, 'g');
+// One "R35:<tag>:<base64 of check TAB verdict TAB detail>:/R35" line per check from session-checks.sh (it
+// also prints a readable line), read from the terminal stream with ALL whitespace removed: ConPTY (the
+// Windows CI fake host) wraps and pads long lines at the terminal width. Acks and the script's sha256 are
+// matched the same way; the typed commands have a quote between "R35" and the tag, so they never match.
+const compactStream = async () => (await streamText()).replace(/\s+/g, '');
+const LINE = new RegExp(`R35:${tag}:([A-Za-z0-9+/=]+):/R35`, 'g');
 const seen = new Set();
-const sessionLines = async () => [...(await joinedStream()).matchAll(LINE)]
-  .map(([, name, verdict, detail]) => ({ name, verdict, detail: detail.trim() }));
+const sessionLines = async () => [...(await compactStream()).matchAll(LINE)].map(([, encoded]) => {
+  const [name = '', verdict = '', detail = ''] = Buffer.from(encoded, 'base64').toString('utf8').split('\t');
+  return { name, verdict, detail: detail.trim() };
+}).filter((line) => /^(PASS|FAIL|SKIP|INFO)$/.test(line.verdict));
 async function runPhase(phase, timeoutMs) {
   await typeLine(`bash "$R35" ${phase} ${tag} ${port} ${github}`);
   const deadline = Date.now() + timeoutMs;
@@ -194,9 +196,9 @@ async function runPhase(phase, timeoutMs) {
 // only typed after this one's ack.
 let acks = 0;
 async function typeAcked(command, timeoutMs = 30_000) {
-  const ack = `R35 ${tag} ack ${++acks}.`;
+  const ack = `R35${tag}ack${++acks}.`;
   await typeLine(`${command}; echo "R35 ${tag}" "ack ${acks}."`);
-  return waitFor(async () => (await joinedStream()).includes(ack), timeoutMs);
+  return waitFor(async () => (await compactStream()).includes(ack), timeoutMs);
 }
 
 // Writes session-checks.sh into the Session through the terminal: base64 in short printf lines (no line
@@ -209,7 +211,7 @@ async function deliverScript() {
     typed = await typeAcked(`printf %s '${b64.slice(at, at + 900)}' >> "$R35.b64"`);
   }
   if (typed) await typeLine(`base64 -d "$R35.b64" > "$R35" && rm -f "$R35.b64" && echo "R35 ${tag}" "script $(sha256sum "$R35" | cut -c1-64)"`);
-  const delivered = typed && await waitFor(async () => (await joinedStream()).includes(`R35 ${tag} script ${sha}`), 60_000);
+  const delivered = typed && await waitFor(async () => (await compactStream()).includes(`R35${tag}script${sha}`), 60_000);
   pass('script-delivered', delivered, delivered
     ? `session-checks.sh in the Pane in ${acks} acknowledged lines (sha256 ${sha.slice(0, 12)}…)`
     : `${typed ? `sha256 ${sha.slice(0, 12)}… never echoed back within 60 s` : `typed line ${acks} not acknowledged within 30 s`}`);
@@ -359,6 +361,8 @@ try {
   } else if (paneCreated) {
     check('pane-archived', 'SKIP', `KEEP_PANE=1: "${paneName}" kept`);
   }
+  // What the terminals printed (ANSI stripped; no value of any secret is ever printed there), for diagnosis.
+  fs.writeFileSync(path.join(out, 'terminal-stream.txt'), redact(await streamText().catch(() => '')));
   await app.close().catch(() => undefined);
   const ok = checks.every((entry) => entry.verdict !== 'FAIL');
   const result = { ok, host: hostLabel, repo, pane: paneName, tag, port, seconds: Math.round((Date.now() - started) / 1000), checks };

@@ -2117,6 +2117,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             }}
           />
           <button
+            type="button"
             onClick={() => uploadInputRef.current?.click()}
             className="p-0.5 rounded bg-surface-secondary/60 hover:bg-surface-tertiary/80 text-text-tertiary hover:text-text-secondary transition-colors"
             title="Upload files"

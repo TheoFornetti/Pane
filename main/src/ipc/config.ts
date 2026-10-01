@@ -3,7 +3,7 @@ import { execFile } from 'child_process';
 import type { AppServices } from './types';
 import type { AppConfig, UpdateConfigRequest } from '../types/config';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
-import type { RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
+import type { RemotePwaAffordances, RemotePwaSessionAgents } from '../../../shared/types/remoteDaemon';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import { ShellDetector } from '../utils/shellDetector';
 import { syncAutoStartOnBoot } from '../utils/autoStart';
@@ -12,6 +12,8 @@ import { syncPaneMcpForApp } from '../services/paneMcpRegistration';
 import { isPaneHomeSkillEnabled, syncPaneHomeSkill } from '../services/paneHomeSkill';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { AppearanceValidationError } from '../../../shared/types/appearance';
+import { agentPresetsForPlatform } from '../../../shared/constants/agentLaunchPresets';
+import { normalizePaneChatAgent, type PaneChatAgent } from '../../../shared/types/paneChat';
 
 export function registerConfigHandlers(
   ipcMain: IpcMain,
@@ -34,6 +36,7 @@ export function registerConfigHandlers(
           command: command.command,
         })),
         voiceTranscription: buildRemotePwaVoiceAffordance(config),
+        sessionAgents: buildRemotePwaSessionAgents(config.defaultOrchestratorAgent),
       };
     });
     commandRegistry.bindChannel(ipcMain, 'remote:pwa-affordances');
@@ -267,6 +270,12 @@ export function registerConfigHandlers(
       return { success: false, data: [] };
     }
   });
+}
+
+function buildRemotePwaSessionAgents(configuredAgent: PaneChatAgent | undefined): RemotePwaSessionAgents {
+  const agents = agentPresetsForPlatform(process.platform).map(preset => preset.id);
+  const preferred = normalizePaneChatAgent(configuredAgent);
+  return { agents, defaultAgent: agents.includes(preferred) ? preferred : agents[0] ?? preferred };
 }
 
 function buildRemotePwaVoiceAffordance(config: AppConfig): RemotePwaAffordances['voiceTranscription'] {

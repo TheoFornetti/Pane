@@ -45,6 +45,7 @@ import {
   DEFAULT_PANE_CHAT_AGENT,
   getPaneChatPanelId,
   normalizePaneChatAgent,
+  PANE_CHAT_AGENT_LABELS,
   PANE_CHAT_SESSION_ID,
   type PaneChatAgent,
 } from '../../../shared/types/paneChat';
@@ -58,11 +59,6 @@ import { readPanelAgentReport } from './agentReport';
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
 const LEGACY_AGENT_SESSION_ID_PREFIX = `${LEGACY_ORCHESTRATION_SESSION_ID}-`;
 const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor'];
-const PANE_CHAT_AGENT_LABELS = {
-  claude: 'Claude',
-  codex: 'Codex',
-  cursor: 'Cursor',
-} satisfies Record<PaneChatAgent, string>;
 
 const ORCHESTRATION_SESSION_TITLE = 'Session';
 const ORCHESTRATION_BOOTSTRAP_VERSION = 2;

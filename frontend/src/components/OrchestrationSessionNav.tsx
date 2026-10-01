@@ -11,8 +11,8 @@ import {
 } from '../stores/orchestrationSessionStore';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import type { OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
-import { DEFAULT_PANE_CHAT_AGENT, type PaneChatAgent } from '../../../shared/types/paneChat';
-import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestrationSession';
+import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../shared/types/paneChat';
+import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -56,11 +56,8 @@ function availabilityIsVisible(availability: OrchestrationSessionAvailability): 
   return availability === 'ready' || availability === 'loading' || availability === 'error';
 }
 
-const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = [
-  { id: 'claude', label: 'Claude' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'cursor', label: 'Cursor' },
-];
+const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = (['claude', 'codex', 'cursor'] as const)
+  .map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
 
 function availableSessionAgents(): ReadonlyArray<{ id: PaneChatAgent; label: string }> {
   const visible = new Set(visibleAgentPresets().map(preset => preset.id));
@@ -71,15 +68,6 @@ function supportedSessionAgent(preferred?: PaneChatAgent): PaneChatAgent {
   const options = availableSessionAgents();
   if (preferred && options.some(option => option.id === preferred)) return preferred;
   return options[0]?.id ?? DEFAULT_PANE_CHAT_AGENT;
-}
-
-function nextSessionName(sessions: readonly OrchestrationSessionRecord[]): string {
-  const existingNames = new Set(sessions.map(session => session.name.trim().toLocaleLowerCase()));
-  if (!existingNames.has('new chat')) return 'New chat';
-
-  let suffix = 2;
-  while (existingNames.has(`new chat ${suffix}`)) suffix += 1;
-  return `New chat ${suffix}`;
 }
 
 export function OrchestrationSessionNav({
@@ -121,7 +109,7 @@ export function OrchestrationSessionNav({
 
   const createSession = useCallback(async (agent: PaneChatAgent, requestedName?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null) => {
     await load();
-    const name = requestedName?.trim() || nextSessionName(useOrchestrationSessionStore.getState().sessions);
+    const name = requestedName?.trim() || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
     await create({ name, agent, launchCommand, profile, customResume });
     setShowCreate(false);
     setActiveSession(null);

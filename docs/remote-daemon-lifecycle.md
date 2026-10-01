@@ -13,6 +13,7 @@ This is the implementation checklist for Remote Pane setup, teardown, and runtim
 - The terminal shell picker reads and writes the active host's shell (`terminal:get-shell-settings`, `terminal:set-preferred-shell`). It appears only when that host runs Windows.
 - `pane:focus-requested` and `pane:open-link` are host events: an agent's `runpane panes focus` on the active host moves the client's view, and one on this computer does not while a remote host is active. A pane:// link opened on a remote-mode client is resolved by its renderer against the active host.
 - Remote terminals ack output with `terminal:ack`. This window's ptyHost port reaches only local terminals.
+- The Remote Pane PWA keeps the same rules in the browser. When its event stream returns after a drop (network loss, or the native app resuming), it refetches Panes, the selected Pane's panels, Sessions, and loaded archived Panes. Connecting to a host or disconnecting clears all host-scoped state first: Panes, panels, Sessions, the open Session, archived Panes, open dialogs, and notification settings.
 
 ## Lifecycle Matrix
 

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pencil, RefreshCw, Settings, Terminal, X } from 'lucide-react';
 import { API } from '../utils/api';
 import type { Session } from '../types/session';
-import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
+import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent, type PaneChatState } from '../../../shared/types/paneChat';
 import type {
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
@@ -28,12 +28,6 @@ import {
 } from '../stores/orchestrationSessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
-
-const PANE_CHAT_AGENT_LABELS = {
-  claude: 'Claude',
-  codex: 'Codex',
-  cursor: 'Cursor',
-} satisfies Record<PaneChatAgent, string>;
 
 function responseError(response: { success: boolean; error?: string }, fallback: string): Error | null {
   return response.success ? null : new Error(response.error || fallback);

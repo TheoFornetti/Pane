@@ -3,6 +3,38 @@ import { Loader2, Archive, CheckCircle, AlertCircle } from 'lucide-react';
 import { LiveRegion } from './ui/LiveRegion';
 import type { ArchiveProgressSnapshot, ArchiveProgressTask } from '../../../shared/types/archiveProgress';
 
+function getStatusIcon(status: ArchiveProgressTask['status']) {
+  switch (status) {
+    case 'completed':
+      return <CheckCircle className="w-3 h-3 text-status-success" />;
+    case 'failed':
+      return <AlertCircle className="w-3 h-3 text-status-error" />;
+    case 'queued':
+      return <Archive className="w-3 h-3 text-status-waiting" />;
+    default:
+      return <Loader2 className="w-3 h-3 text-status-info animate-spin" />;
+  }
+}
+
+function getStatusText(status: ArchiveProgressTask['status']) {
+  switch (status) {
+    case 'queued':
+      return 'Queued (waiting for other archives to complete)...';
+    case 'pending':
+      return 'Preparing...';
+    case 'removing-worktree':
+      return 'Removing worktree (this may take a while)...';
+    case 'cleaning-artifacts':
+      return 'Cleaning artifacts...';
+    case 'completed':
+      return 'Completed';
+    case 'failed':
+      return 'Failed';
+    default:
+      return status;
+  }
+}
+
 export function ArchiveProgress() {
   const taskListId = useId();
   const [progress, setProgress] = useState<ArchiveProgressSnapshot | null>(null);
@@ -56,38 +88,6 @@ export function ArchiveProgress() {
   if (!progress || progress.totalCount === 0) {
     return <LiveRegion>{archiveAnnouncement}</LiveRegion>;
   }
-
-  const getStatusIcon = (status: ArchiveProgressTask['status']) => {
-    switch (status) {
-      case 'completed':
-        return <CheckCircle className="w-3 h-3 text-status-success" />;
-      case 'failed':
-        return <AlertCircle className="w-3 h-3 text-status-error" />;
-      case 'queued':
-        return <Archive className="w-3 h-3 text-status-waiting" />;
-      default:
-        return <Loader2 className="w-3 h-3 text-status-info animate-spin" />;
-    }
-  };
-
-  const getStatusText = (status: ArchiveProgressTask['status']) => {
-    switch (status) {
-      case 'queued':
-        return 'Queued (waiting for other archives to complete)...';
-      case 'pending':
-        return 'Preparing...';
-      case 'removing-worktree':
-        return 'Removing worktree (this may take a while)...';
-      case 'cleaning-artifacts':
-        return 'Cleaning artifacts...';
-      case 'completed':
-        return 'Completed';
-      case 'failed':
-        return 'Failed';
-      default:
-        return status;
-    }
-  };
 
   const formatElapsedTime = (startTime: string, endTime?: string) => {
     const start = new Date(startTime).getTime();

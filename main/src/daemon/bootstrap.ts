@@ -57,6 +57,7 @@ import { cloudDaemonHealth } from './cloud/readiness';
 import { userClientActivity } from './cloud/clientActivity';
 import { readBuildCommit, registerCloudDaemonHandlers } from './cloud/cloudDaemon';
 import { registerSessionPortsHandlers } from './cloud/ports/registerPorts';
+import { whenCloudSession } from './cloud/cloudSessionMarker';
 import { registerAgentNotesHandler, writeSessionAgentNotes } from './cloud/sessionAgentNotes';
 import { remoteHostRuntimeStateStore } from './remoteHostRuntimeState';
 
@@ -412,12 +413,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     log: message => logger.info(`[Pane daemon] ${message}`),
   });
   registerAgentNotesHandler(commandRegistry);
-  try {
-    const notes = writeSessionAgentNotes();
-    if (notes.length > 0) logger.info(`[Pane daemon] wrote the Session notes for agents: ${notes.join(', ')}`);
-  } catch (error) {
-    logger.warn(`[Pane daemon] could not write the Session notes for agents: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  whenCloudSession(() => {
+    try {
+      const notes = writeSessionAgentNotes();
+      if (notes.length > 0) logger.info(`[Pane daemon] wrote the Session notes for agents: ${notes.join(', ')}`);
+    } catch (error) {
+      logger.warn(`[Pane daemon] could not write the Session notes for agents: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
 
   let paneDaemonServer: PaneDaemonServer | null = null;
   const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager);

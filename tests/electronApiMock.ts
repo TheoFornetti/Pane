@@ -382,6 +382,17 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
 
       const key = args[0] === undefined ? undefined : String(args[0]);
       const value = args[1] === undefined ? undefined : String(args[1]);
+      if (channel === 'terminal:get-shell-settings') {
+        // Raw result, like the host: Windows shells only on a Windows host.
+        return Promise.resolve({
+          shells: mockOptions.platform === 'win32' ? clone(mockOptions.availableShells ?? []) : [],
+          preferredShell: configState.preferredShell ?? 'auto',
+        });
+      }
+      if (channel === 'terminal:set-preferred-shell') {
+        configState.preferredShell = String(args[0]);
+        return Promise.resolve(undefined);
+      }
       if (channel === 'panels:get-layout') {
         return success(clone(key && mockLayouts.has(key) ? mockLayouts.get(key) : mockOptions.initialLayout ?? null));
       }
@@ -636,7 +647,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           }
           return response;
         },
-        getAvailableShells: () => success(clone(mockOptions.availableShells ?? [])),
         getMonospaceFonts: () => success([]),
         getSessionPreferences: () => success({}),
       }),

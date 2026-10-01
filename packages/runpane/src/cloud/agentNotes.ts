@@ -62,11 +62,13 @@ export function configuredGuardrails(settings: CloudSettings): string[] | undefi
   return settings.agentNotes?.guardrails;
 }
 
-/** One trimmed line, at most 500 characters (the daemon checks the same). */
+/** One trimmed line, at most 500 characters, without comment markers (the daemon checks the same). */
 function checkGuardrail(raw: string): string {
   const line = raw.trim();
   if (!line) throw new Error('A guardrail cannot be empty.');
   if (/[\r\n]/u.test(line)) throw new Error('A guardrail must be a single line.');
+  // The Session's notes delimit blocks with HTML comments; a marker in a line would break them.
+  if (line.includes('<!--') || line.includes('-->')) throw new Error('A guardrail cannot contain HTML comment markers (<!-- or -->).');
   if (line.length > MAX_GUARDRAIL_LENGTH) throw new Error(`A guardrail can be at most ${MAX_GUARDRAIL_LENGTH} characters.`);
   return line;
 }

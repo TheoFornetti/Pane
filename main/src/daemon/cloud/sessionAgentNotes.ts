@@ -82,6 +82,8 @@ export function normalizeGuardrails(guardrails: readonly string[]): string[] {
     const line = raw.trim();
     if (!line) throw new Error('A guardrail cannot be empty.');
     if (/[\r\n]/u.test(line)) throw new Error('A guardrail must be a single line.');
+    // A marker inside a line would make the next write match the wrong block end.
+    if (line.includes('<!--') || line.includes('-->')) throw new Error('A guardrail cannot contain HTML comment markers (<!-- or -->).');
     if (line.length > MAX_GUARDRAIL_LENGTH) throw new Error(`A guardrail can be at most ${MAX_GUARDRAIL_LENGTH} characters.`);
     if (seen.has(line)) continue;
     seen.add(line);

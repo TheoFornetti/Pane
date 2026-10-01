@@ -142,6 +142,6 @@ add|remove|push` with the saved user token (the coordinator's scoped token can't
 The daemon stores the list in `~/.runpane-cloud/agent-notes.json` (0600) and writes it as a
 `<!-- runpane-cloud-guardrails:start -->` ... `:end -->` block next to the ports block, now and at every
 daemon start (boot, wake, upgrade). The list replaces the previous one, and an empty list removes the
-block. Each entry is one line of at most 500 characters, and a list holds at most 20. Without `guardrails`
+block. Each entry is one line of at most 500 characters without `<!--` or `-->` (they delimit the blocks), and a list holds at most 20. Without `guardrails`
 the channel answers the stored list. It answers `{ ok, guardrails, changedFiles }` and refuses off a Session
 (`ERR_AGENT_NOTES_UNAVAILABLE`) or for bad input (`ERR_AGENT_NOTES_INVALID`).

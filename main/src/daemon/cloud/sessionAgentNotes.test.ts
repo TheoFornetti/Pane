@@ -117,6 +117,8 @@ describe('guardrails', () => {
     expect(() => normalizeGuardrails([' '])).toThrow(/empty/u);
     expect(() => normalizeGuardrails(['a\nb'])).toThrow(/single line/u);
     expect(() => normalizeGuardrails(['x'.repeat(501)])).toThrow(/500/u);
+    expect(() => normalizeGuardrails([`ok ${G_END} then`])).toThrow(/comment markers/u);
+    expect(() => normalizeGuardrails(['<!-- runpane-cloud-ports:start -->'])).toThrow(/comment markers/u);
     expect(() => normalizeGuardrails(Array.from({ length: 21 }, (_, i) => `rule ${i}`))).toThrow(/20/u);
   });
 });
@@ -194,6 +196,7 @@ describe('runpane:cloud:agent-notes', () => {
     fs.writeFileSync(serveRecordPath, '{}');
     await expect(registry.invoke('runpane:cloud:agent-notes', [{ guardrails: ['a\nb'] }])).rejects.toMatchObject({ code: 'ERR_AGENT_NOTES_INVALID' });
     await expect(registry.invoke('runpane:cloud:agent-notes', [{ guardrails: 'x' }])).rejects.toMatchObject({ code: 'ERR_AGENT_NOTES_INVALID' });
+    await expect(registry.invoke('runpane:cloud:agent-notes', [{ guardrails: [`x ${G_END}`] }])).rejects.toMatchObject({ code: 'ERR_AGENT_NOTES_INVALID' });
     expect(fs.existsSync(path.join(root, '.runpane-cloud'))).toBe(false);
   });
 

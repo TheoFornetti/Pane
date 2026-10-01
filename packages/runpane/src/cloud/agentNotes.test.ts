@@ -104,6 +104,7 @@ test('notes refuses bad input without changing settings', async () => {
   await assert.rejects(run(harness, ['notes', 'add', 'two\nlines']), /single line/u);
   await assert.rejects(run(harness, ['notes', 'add', ' ']), /empty/u);
   await assert.rejects(run(harness, ['notes', 'add', 'x'.repeat(501)]), /500/u);
+  await assert.rejects(run(harness, ['notes', 'add', 'end <!-- runpane-cloud-guardrails:end --> here']), /comment markers/u);
   await assert.rejects(run(harness, ['notes', 'add', 'Ask', 'first']), /quote the guardrail/u);
   await assert.rejects(run(harness, ['notes', 'remove', '3']), /No guardrail "3"/u);
   await assert.rejects(run(harness, ['notes', 'push', '--no-push']), /--no-push goes with add and remove/u);

@@ -5,9 +5,13 @@
 #
 # Session ports: the daemon's ports service reads Tailscale through the `tailscale` CLI. A fake
 # tailscale.exe, on the PATH of this daemon only, reports a running node named "localhost" whose Serve
-# config holds one web entry, tailnet :$PortsPort -> http://127.0.0.1:$PortsPort; ports.json names it
+# config starts with one web entry, tailnet :$PortsPort -> http://127.0.0.1:$PortsPort; ports.json names it
 # "taste" (plain http: no certificate on a runner), and a small HTTP server answers behind it. The desktop
-# then shows a real "taste" chip whose URL is http://localhost:$PortsPort/.
+# then shows a real "taste" chip whose URL is http://localhost:$PortsPort/. `serve --bg`/`off` change the
+# fake's entries, so `runpane port open|close` in the fake host's terminal work too (R3.5's proof).
+#
+# The fake host's terminals use Git Bash (preferredShell), as a cloud Session's terminals use bash: R3.5's
+# session-checks.sh runs in one.
 param(
   [Parameter(Mandatory = $true)][string]$Exe,
   [Parameter(Mandatory = $true)][string]$PairingFile,
@@ -25,14 +29,33 @@ $fakeBin = Join-Path $HostDir 'fake-tailscale'
 New-Item -ItemType Directory -Force -Path $fakeBin | Out-Null
 $fakeSource = @'
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 class FakeTailscale {
+  // Serve entries, one per line: "<tailnet port> <http|https> <proxy target>". `serve --bg --http=P <target>`
+  // adds one and `serve --http=P off` removes it, so `runpane port open|close` work against this fake too.
   static int Main(string[] args) {
     string dir = AppDomain.CurrentDomain.BaseDirectory;
     string joined = string.Join(" ", args);
     File.AppendAllText(Path.Combine(dir, "calls.log"), joined + Environment.NewLine);
+    string state = Path.Combine(dir, "serve-entries.txt");
+    List<string> entries = File.ReadAllLines(state).Where(l => l.Trim().Length > 0).ToList();
     if (joined == "status --json") { Console.Write(File.ReadAllText(Path.Combine(dir, "status.json"))); return 0; }
-    if (joined == "serve status --json") { Console.Write(File.ReadAllText(Path.Combine(dir, "serve.json"))); return 0; }
+    if (joined == "serve status --json") {
+      var tcp = entries.Select(e => e.Split(' ')).Select(p => "\"" + p[0] + "\":{\"" + (p[1] == "https" ? "HTTPS" : "HTTP") + "\":true}");
+      var web = entries.Select(e => e.Split(' ')).Select(p => "\"localhost:" + p[0] + "\":{\"Handlers\":{\"/\":{\"Proxy\":\"" + p[2] + "\"}}}");
+      Console.Write("{\"TCP\":{" + string.Join(",", tcp) + "},\"Web\":{" + string.Join(",", web) + "}}");
+      return 0;
+    }
+    string flag = args.Length > 1 && args[0] == "serve" ? args.FirstOrDefault(a => a.StartsWith("--http=") || a.StartsWith("--https=")) : null;
+    if (flag != null) {
+      string scheme = flag.Substring(2, flag.IndexOf('=') - 2);
+      string port = flag.Substring(flag.IndexOf('=') + 1);
+      entries.RemoveAll(e => e.Split(' ')[0] == port);
+      if (args[args.Length - 1] != "off") entries.Add(port + " " + scheme + " " + args[args.Length - 1]);
+      File.WriteAllLines(state, entries.ToArray());
+    }
     return 0;
   }
 }
@@ -41,10 +64,7 @@ Set-Content -Path (Join-Path $fakeBin 'FakeTailscale.cs') -Value $fakeSource
 & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" -nologo -out:(Join-Path $fakeBin 'tailscale.exe') (Join-Path $fakeBin 'FakeTailscale.cs') | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'could not compile the fake tailscale.exe' }
 Set-Content -Path (Join-Path $fakeBin 'status.json') -Value '{"BackendState":"Running","Self":{"DNSName":"localhost."}}'
-Set-Content -Path (Join-Path $fakeBin 'serve.json') -Value (@{
-    TCP = @{ "$PortsPort" = @{ HTTP = $true } }
-    Web = @{ "localhost:$PortsPort" = @{ Handlers = @{ '/' = @{ Proxy = "http://127.0.0.1:$PortsPort" } } } }
-  } | ConvertTo-Json -Depth 6 -Compress)
+Set-Content -Path (Join-Path $fakeBin 'serve-entries.txt') -Value "$PortsPort http http://127.0.0.1:$PortsPort"
 # A daemon is in a Runpane Cloud Session when /etc/rp-cloud/serve.json exists (bootstrap writes it); Node
 # on Windows reads that path from the current drive, so write it on the system drive and on this one.
 foreach ($drive in @($env:SystemDrive, "$((Get-Location).Drive.Name):") | Select-Object -Unique) {
@@ -86,6 +106,10 @@ Write-Host "Wrote the fake host's pairing code to $PairingFile (not shown)"
 
 $hostConfig = (Get-Content -Raw (Join-Path $HostDir 'config.json') | ConvertFrom-Json).remoteDaemon.host.config
 Write-Host "fake host config: enabled=$($hostConfig.enabled) listen=$($hostConfig.listenHost):$($hostConfig.listenPort)"
+
+# Pinned rather than left to "auto" (which also prefers Git Bash when it is installed).
+node -e "const fs=require('fs');const f=process.argv[1];const c=JSON.parse(fs.readFileSync(f,'utf8'));c.preferredShell='gitbash';fs.writeFileSync(f,JSON.stringify(c,null,2))" (Join-Path $HostDir 'config.json')
+if ($LASTEXITCODE -ne 0) { throw 'could not set the fake host shell' }
 
 # cmd owns the output files, so the daemon never writes into a pipe that dies with this PowerShell.
 # The fake tailscale.exe is on this daemon's PATH only (a child keeps the PATH it started with).

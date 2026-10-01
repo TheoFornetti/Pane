@@ -37,6 +37,10 @@ on:
         description: Only rerun the relay kit proof against this existing rc-desktop-* prerelease
         type: string
         default: ''
+      app_from:
+        description: Kit-only release - reuse this rc-desktop-* release's app zips byte for byte (it must be built from ref) instead of building
+        type: string
+        default: ''
       upgrade_from:
         description: rc-desktop-* prerelease the relay proof installs first, then upgrades in place (empty = fresh install only)
         type: string
@@ -77,9 +81,15 @@ jobs:
       name: Version = <pkg>-rc.<commit UTC time>.g<sha8> (as scripts/cloud-dist)
       env:
         KIT_SHA: ${{ github.sha }}
+        APP_FROM: ${{ inputs.app_from }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         sha=$(git rev-parse HEAD)
+        if [ -n "$APP_FROM" ]; then
+          from=$(gh release view "$APP_FROM" --repo "$GITHUB_REPOSITORY" --json targetCommitish -q .targetCommitish)
+          if [ "$from" != "$sha" ]; then echo "app_from $APP_FROM was built from $from, not ref $sha" >&2; exit 1; fi
+        fi
         stamp=$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d%H%M%S HEAD)
         version="$(node -p 'require("./package.json").version')-rc.${stamp}.g${sha:0:8}"
         tag="rc-desktop-${sha:0:8}"
@@ -102,7 +112,7 @@ jobs:
   windows:
     name: Windows x64
     needs: meta
-    if: ${{ !inputs.proof_tag }}
+    if: ${{ !inputs.proof_tag && !inputs.app_from }}
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
@@ -169,7 +179,7 @@ jobs:
     name: macOS arm64 + x64
     needs: meta
     # inputs.macos is null on push, and Actions compares null == false.
-    if: github.event_name != 'workflow_dispatch' || (inputs.macos && !inputs.proof_tag)
+    if: github.event_name != 'workflow_dispatch' || (inputs.macos && !inputs.proof_tag && !inputs.app_from)
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
@@ -246,7 +256,8 @@ jobs:
     if: >-
       always() &&
       github.repository != 'greenfield-inc/Pane' &&
-      needs.windows.result == 'success' &&
+      !inputs.proof_tag &&
+      (needs.windows.result == 'success' || (inputs.app_from && needs.windows.result == 'skipped')) &&
       (needs.macos.result == 'success' || needs.macos.result == 'skipped')
     runs-on: ubuntu-24.04
     permissions:
@@ -257,10 +268,21 @@ jobs:
         ref: ${{ needs.meta.outputs.kit_sha }}
 
     - uses: actions/download-artifact@v7
+      if: ${{ !inputs.app_from }}
       with:
         pattern: desktop-*
         path: release
         merge-multiple: true
+
+    - name: The app zips of ${{ inputs.app_from }}, byte for byte (kit-only release)
+      if: ${{ inputs.app_from }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        gh release download "${{ inputs.app_from }}" --repo "$GITHUB_REPOSITORY" --dir release \
+          --pattern '*-Windows-x64.zip' --pattern '*-macOS-*.zip' --pattern SHA256SUMS.txt
+        (cd release && grep -E -- '-(Windows-x64|macOS-[a-z0-9]+)\.zip$' SHA256SUMS.txt | sha256sum -c - && rm SHA256SUMS.txt)
 
     # The relay kit: the scripts that install the test build, save a cloud host into its data dir from
     # a pairing file and drive it with Playwright (scripts/cloud-dist/sobeck), plus playwright-core at
@@ -273,7 +295,7 @@ jobs:
         playwright=$(grep -m1 -oE "^  '@playwright/test@[0-9.]+'" pnpm-lock.yaml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
         kit=kit/relay-kit
         mkdir -p "$kit"
-        cp scripts/cloud-dist/sobeck/{install.ps1,run-proof.ps1,remove.ps1,seed-profile.cjs,proof.mjs} "$kit/"
+        cp scripts/cloud-dist/sobeck/{install.ps1,run-proof.ps1,remove.ps1,seed-profile.cjs,proof.mjs,run-session-proof.ps1,session-proof.mjs,session-checks.sh} "$kit/"
         (cd "$kit" && echo '{"private":true}' > package.json && npm install --no-audit --no-fund --no-package-lock "playwright-core@$playwright")
         (cd kit && zip -qr "../release/Pane-CloudTest-relay-kit-$VERSION.zip" relay-kit)
         cp scripts/cloud-dist/sobeck/install.ps1 release/sobeck-install.ps1
@@ -285,6 +307,7 @@ jobs:
         TAG: ${{ needs.meta.outputs.tag }}
         SHA: ${{ needs.meta.outputs.sha }}
         KIT_SHA: ${{ needs.meta.outputs.kit_sha }}
+        APP_FROM: ${{ inputs.app_from }}
         VERSION: ${{ needs.meta.outputs.version }}
       run: |
         set -euo pipefail
@@ -294,7 +317,7 @@ jobs:
         sha256sum -- * > SHA256SUMS.txt
         cat SHA256SUMS.txt
         NOTES="Unsigned SIDE-BY-SIDE desktop test build of ${SHA} (Runpane Cloud fork), built by GitHub Actions run ${GITHUB_RUN_ID}. Not an upstream release; it never updates itself.
-        Version: ${VERSION}. Relay kit (scripts/cloud-dist/sobeck) from ${KIT_SHA}.
+        Version: ${VERSION}. Relay kit (scripts/cloud-dist/sobeck) from ${KIT_SHA}.${APP_FROM:+ App zips copied byte for byte from ${APP_FROM} (kit-only release).}
         It keeps its data in ~/.pane_${SIDE_BY_SIDE_NAME} and runs next to an installed Pane without touching it. Remove it by deleting its folder and ~/.pane_${SIDE_BY_SIDE_NAME}.
         Windows: unzip, run Pane.exe inside the folder (SmartScreen: More info, then Run anyway).
         macOS: unzip, then right-click Pane Cloud Test.app and choose Open (or xattr -dr com.apple.quarantine on it)."
@@ -311,7 +334,9 @@ jobs:
   # upgrades it in place (the pairing and the saved host must survive) and run-proof.ps1 drives the app.
   # The runner has no tailnet, so a real headless Pane daemon of this release on loopback stands in for
   # the cloud Session (ci-fake-host.ps1, with a fake tailscale.exe so its Session ports work) and Claude's
-  # reply is skipped. The released Pane runs throughout and must be left untouched.
+  # reply is skipped. run-session-proof.ps1 (R3.5) then creates a fresh Pane on it and publishes a port from
+  # its terminal (its broker and secrets checks need a real Session). The released Pane runs throughout and
+  # must be left untouched.
   relay-proof:
     name: Relay kit proof (Windows)
     needs: [meta, release]
@@ -433,6 +458,24 @@ jobs:
         if ($env:UPGRADE_FROM) { $proofArgs += '-SkipSeed' }
         powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\PaneCloudTest\kit\run-proof.ps1" @proofArgs
         $code = $LASTEXITCODE
+        # Again, as on every later SOBECK run: the Pane now has a terminal, which must be reused, not
+        # joined by another one (SOBECK run 3 try 1 waited on a hidden new terminal).
+        $rerunArgs = @('-OutDir', "$PWD\relay-evidence\proof-rerun", '-NoClaudeReply', '-HostnamePrefix', $env:COMPUTERNAME, '-PortUrl', 'http://localhost:8443/', '-SkipSeed')
+        powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\PaneCloudTest\kit\run-proof.ps1" @rerunArgs
+        if ($LASTEXITCODE -ne 0) { $code = $LASTEXITCODE }
+        if (Select-String -Path relay-evidence\proof-rerun\steps.log -Pattern 'terminal: reused tab' -Quiet) { Write-Host 'PASS second run reused the Pane terminal' }
+        else { Write-Host 'FAIL second run did not reuse the Pane terminal'; $code = 1 }
+        # R3.5 against the same fake host: a fresh Pane in montlakev2 created in the UI, its terminal (Git Bash
+        # here, bash on a cloud Session), runpane port open -> its chip -> click -> Invoke-WebRequest 200 -> port
+        # closed. A runner has no coordinator and no Doppler stand-in, so the broker and secrets checks SKIP.
+        powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\PaneCloudTest\kit\run-session-proof.ps1" -OutDir "$PWD\relay-evidence\session-proof" -NoGitHub
+        if ($LASTEXITCODE -ne 0) { $code = 1 }
+        $verdicts = @{}
+        if (Test-Path relay-evidence\session-proof\results.json) { (Get-Content -Raw relay-evidence\session-proof\results.json | ConvertFrom-Json).checks | ForEach-Object { $verdicts[$_.name] = $_.verdict } }
+        $expected = [ordered]@{ 'pane-created' = 'PASS'; 'pane-terminal' = 'PASS'; 'script-delivered' = 'PASS'; 'secrets-at-creation' = 'SKIP'; 'port-open' = 'PASS'; 'ports-chip' = 'PASS'; 'ports-chip-opens' = 'PASS'; 'broker' = 'SKIP'; 'port-closed' = 'PASS'; 'pane-archived' = 'PASS' }
+        foreach ($name in $expected.Keys) {
+          if ($verdicts[$name] -eq $expected[$name]) { Write-Host "PASS R3.5 $name is $($expected[$name])" } else { Write-Host "FAIL R3.5 $name is '$($verdicts[$name])', expected $($expected[$name])"; $code = 1 }
+        }
         # The pairing token must not appear in anything the proof wrote.
         $token = (Get-Content $config -Raw | ConvertFrom-Json).remoteDaemon.client.profiles[0].token
         if (-not $token) { Write-Error 'no saved profile token to search for'; exit 1 }

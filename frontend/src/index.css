@@ -37,7 +37,8 @@ body {
 /*
  * App chrome behaves like a native window: labels and controls are not
  * drag-selectable, the cursor stays an arrow (Tailwind's preflight gives every
- * button a hand), and nothing rubber-bands or chains scroll to the page.
+ * button a hand), and the window does not rubber-band. Nested scroll areas
+ * still hand leftover scroll to their parent, so the rule stays on the root.
  * Content that people copy opts back in below or with `select-text`.
  */
 body {
@@ -45,7 +46,8 @@ body {
   cursor: default;
 }
 
-* {
+html,
+body {
   overscroll-behavior: none;
 }
 

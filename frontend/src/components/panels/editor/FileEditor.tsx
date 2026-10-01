@@ -1217,8 +1217,9 @@ interface FileEditorProps {
 
 /**
  * The Files inspector: a file tree whose clicks open center editor tabs.
- * Single-click previews, double-click pins (VS Code semantics); the row of
- * the active editor tab's file is highlighted.
+ * Single-click previews, double-click pins (VS Code semantics); double-clicking
+ * an HTML file opens it rendered in a browser tab. The row of the active
+ * editor tab's file is highlighted.
  */
 export function FileEditor({ sessionId, initialState, onStateChange, shortcutsActive = true }: FileEditorProps) {
   const [error, setError] = useState<string | null>(null);
@@ -1247,7 +1248,16 @@ export function FileEditor({ sessionId, initialState, onStateChange, shortcutsAc
   }, [sessionId]);
 
   const handleFileSelect = useCallback((file: FileItem | null) => { void openFile(file, false); }, [openFile]);
-  const handleFileOpen = useCallback((file: FileItem) => { void openFile(file, true); }, [openFile]);
+  const handleFileOpen = useCallback((file: FileItem) => {
+    if (!isHtmlFile(file.path)) {
+      void openFile(file, true);
+      return;
+    }
+    // HTML opens rendered in its own browser tab, the same tab `runpane panels open --file` uses.
+    setError(null);
+    window.electronAPI.invoke('runpane:panels:open', { paneId: sessionId, filePath: file.path, source: 'user' })
+      .catch((openError: unknown) => setError(openError instanceof Error ? openError.message : 'Failed to open HTML file'));
+  }, [openFile, sessionId]);
 
   const previewHtmlFile = useCallback(async (filePath: string) => {
     setError(null);

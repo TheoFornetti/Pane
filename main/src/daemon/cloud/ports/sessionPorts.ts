@@ -139,7 +139,10 @@ export class SessionPortsService {
     const ports = state.ports.map(port => toSessionPort(port, dnsName, listeners));
     const anyHttpFallback = state.ports.some(port => port.scheme === 'http' && port.detail);
     const scheme: SessionPortScheme = anyHttpFallback && !(await this.deps.serve.certCached(dnsName)) ? 'http' : 'https';
-    return { ok: true, autoOpen: state.autoOpen, manifests: this.manifests, available: true, host: dnsName, scheme, ports, suggested: this.suggested };
+    // Suggestions refresh on the detection tick; one just opened is already a port.
+    const published = new Set(state.ports.filter(port => !port.blockedBy).map(port => port.port));
+    const suggested = this.suggested.filter(suggestion => !published.has(suggestion.port));
+    return { ok: true, autoOpen: state.autoOpen, manifests: this.manifests, available: true, host: dnsName, scheme, ports, suggested };
   }
 
   private async emitChanged(): Promise<void> {

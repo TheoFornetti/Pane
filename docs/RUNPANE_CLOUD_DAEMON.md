@@ -128,3 +128,20 @@ At start, a daemon on a Runpane Cloud Session (`/etc/rp-cloud/serve.json` exists
 text differs, keeps everything else in those files (including the CLI's `runpane-cloud-github` and
 `runpane-cloud-secrets` blocks), and never writes it off a Session. Because the daemon writes it, an upgraded
 Session gets the current text without `runpane cloud repair`. Code: `main/src/daemon/cloud/sessionAgentNotes.ts`.
+
+## `runpane:cloud:agent-notes`: the user's guardrails
+
+The user's own rules for agents (`agentNotes.guardrails` in their `~/.config/runpane-cloud/settings.json`;
+Pane ships none) reach a Session through this channel, called by `runpane cloud new`, `wake` and `notes
+add|remove|push` with the saved user token (the coordinator's scoped token can't call it):
+
+```json
+{ "channel": "runpane:cloud:agent-notes", "args": [{ "guardrails": ["Ask before running destructive database operations."] }] }
+```
+
+The daemon stores the list in `~/.runpane-cloud/agent-notes.json` (0600) and writes it as a
+`<!-- runpane-cloud-guardrails:start -->` ... `:end -->` block next to the ports block, now and at every
+daemon start (boot, wake, upgrade). The list replaces the previous one, and an empty list removes the
+block. Each entry is one line of at most 500 characters, and a list holds at most 20. Without `guardrails`
+the channel answers the stored list. It answers `{ ok, guardrails, changedFiles }` and refuses off a Session
+(`ERR_AGENT_NOTES_UNAVAILABLE`) or for bad input (`ERR_AGENT_NOTES_INVALID`).

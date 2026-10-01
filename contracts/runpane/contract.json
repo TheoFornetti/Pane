@@ -1730,6 +1730,50 @@
       ]
     },
     {
+      "name": "cloud notes list",
+      "summary": "List your guardrails for agents in every cloud Session (settings agentNotes.guardrails).",
+      "usage": [
+        "runpane cloud notes list [--json]"
+      ],
+      "mutates": false,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud notes add",
+      "summary": "Add a guardrail line for agents in every cloud Session, then push the list to awake Sessions.",
+      "usage": [
+        "runpane cloud notes add \"<guardrail>\" [--no-push] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud notes remove",
+      "summary": "Remove a guardrail (by its number in notes list, or its text), then push the list to awake Sessions.",
+      "usage": [
+        "runpane cloud notes remove <number|text> [--no-push] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud notes push",
+      "summary": "Give one cloud Session (default: every one) the current guardrails now.",
+      "usage": [
+        "runpane cloud notes push [<host>] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
       "name": "cloud github connect",
       "summary": "Let a cloud Session reach one GitHub repository: generates an ed25519 key inside the sandbox and registers its public half as a read-only deploy key with your GitHub credential, which never enters the sandbox.",
       "usage": [
@@ -2415,7 +2459,7 @@
         "  runpane panes move --pane <pane-id> --folder <folder-id> --yes [--json] [--pane-dir <path>]",
         "  runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]",
         "  runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]",
-        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|agent> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|notes|agent> [options]",
         "  runpane port <open|list|close|auto-open> [options]",
         "  runpane help [command]",
         "",
@@ -4013,9 +4057,50 @@
         "  <port|name>                    The local port or the name of a published port.",
         "  --json                         Print machine-readable output."
       ],
+      "cloud notes list": [
+        "Usage:",
+        "  runpane cloud notes list [--json]",
+        "",
+        "List your guardrails for agents in every cloud Session (settings agentNotes.guardrails).",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud notes add": [
+        "Usage:",
+        "  runpane cloud notes add \"<guardrail>\" [--no-push] [--json]",
+        "",
+        "Add a guardrail line for agents in every cloud Session, then push the list to awake Sessions.",
+        "",
+        "Options:",
+        "  <guardrail>                    One line, quoted.",
+        "  --no-push                      Only save the setting.",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud notes remove": [
+        "Usage:",
+        "  runpane cloud notes remove <number|text> [--no-push] [--json]",
+        "",
+        "Remove a guardrail (by its number in notes list, or its text), then push the list to awake Sessions.",
+        "",
+        "Options:",
+        "  <number|text>                  The guardrail's number in runpane cloud notes list, or its exact text.",
+        "  --no-push                      Only save the setting.",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud notes push": [
+        "Usage:",
+        "  runpane cloud notes push [<host>] [--json]",
+        "",
+        "Give one cloud Session (default: every one) the current guardrails now.",
+        "",
+        "Options:",
+        "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --json                         Print machine-readable output."
+      ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|agent> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|notes|agent> [options]",
         "",
         "Run each Pane Session on its own cloud sandbox with a normal Pane daemon, paired to your Pane apps as a remote host.",
         "Keys stay on this machine (~/.config/runpane-cloud, 0600). Pane desktop only lists the saved remote hosts.",
@@ -5531,9 +5616,37 @@
         "`runpane cloud port close` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud port close"
       ],
+      "cloud notes list": [
+        "Usage:",
+        "  runpane cloud notes list [--json]",
+        "",
+        "`runpane cloud notes list` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud notes list"
+      ],
+      "cloud notes add": [
+        "Usage:",
+        "  runpane cloud notes add \"<guardrail>\" [--no-push] [--json]",
+        "",
+        "`runpane cloud notes add` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud notes add"
+      ],
+      "cloud notes remove": [
+        "Usage:",
+        "  runpane cloud notes remove <number|text> [--no-push] [--json]",
+        "",
+        "`runpane cloud notes remove` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud notes remove"
+      ],
+      "cloud notes push": [
+        "Usage:",
+        "  runpane cloud notes push [<host>] [--json]",
+        "",
+        "`runpane cloud notes push` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud notes push"
+      ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|agent> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|notes|agent> [options]",
         "",
         "`runpane cloud` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud"
@@ -16576,6 +16689,103 @@
         ],
         "examples": [
           "runpane cloud port close rp-red-zd56pin5 taste"
+        ],
+        "notes": []
+      },
+      "cloud notes list": {
+        "name": "cloud notes list",
+        "summary": "List your guardrails for agents in every cloud Session (settings agentNotes.guardrails).",
+        "details": "Reads agentNotes.guardrails from ~/.config/runpane-cloud/settings.json. Pane ships none; each Session's daemon writes the list it was given into ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md (marked block runpane-cloud-guardrails) at every boot and wake.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud notes list"
+        ],
+        "notes": []
+      },
+      "cloud notes add": {
+        "name": "cloud notes add",
+        "summary": "Add a guardrail line for agents in every cloud Session, then push the list to awake Sessions.",
+        "details": "Saves the line in agentNotes.guardrails (one line, at most 500 characters, at most 20 lines) and calls each awake Session daemon's runpane:cloud:agent-notes. An asleep Session gets the list at its next runpane cloud wake.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<guardrail>",
+            "required": true,
+            "description": "One line, quoted."
+          },
+          {
+            "name": "--no-push",
+            "required": false,
+            "description": "Only save the setting."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud notes add \"Ask before running destructive database operations.\""
+        ],
+        "notes": []
+      },
+      "cloud notes remove": {
+        "name": "cloud notes remove",
+        "summary": "Remove a guardrail (by its number in notes list, or its text), then push the list to awake Sessions.",
+        "details": "An empty list removes the guardrails block from each Session's notes.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<number|text>",
+            "required": true,
+            "description": "The guardrail's number in runpane cloud notes list, or its exact text."
+          },
+          {
+            "name": "--no-push",
+            "required": false,
+            "description": "Only save the setting."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud notes remove 1"
+        ],
+        "notes": []
+      },
+      "cloud notes push": {
+        "name": "cloud notes push",
+        "summary": "Give one cloud Session (default: every one) the current guardrails now.",
+        "details": "Calls the Session daemon's runpane:cloud:agent-notes over the tailnet with the saved client token; the daemon stores the list (~/.runpane-cloud/agent-notes.json) and rewrites the notes. Exits 1 when a Session was not updated (asleep, or a Pane that predates agent notes). runpane cloud new and wake push too.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": false,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud notes push rp-red-zd56pin5"
         ],
         "notes": []
       },

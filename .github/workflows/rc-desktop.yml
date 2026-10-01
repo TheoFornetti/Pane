@@ -37,6 +37,10 @@ on:
         description: Only rerun the relay kit proof against this existing rc-desktop-* prerelease
         type: string
         default: ''
+      app_from:
+        description: Kit-only release - reuse this rc-desktop-* release's app zips byte for byte (it must be built from ref) instead of building
+        type: string
+        default: ''
       upgrade_from:
         description: rc-desktop-* prerelease the relay proof installs first, then upgrades in place (empty = fresh install only)
         type: string
@@ -77,9 +81,15 @@ jobs:
       name: Version = <pkg>-rc.<commit UTC time>.g<sha8> (as scripts/cloud-dist)
       env:
         KIT_SHA: ${{ github.sha }}
+        APP_FROM: ${{ inputs.app_from }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         sha=$(git rev-parse HEAD)
+        if [ -n "$APP_FROM" ]; then
+          from=$(gh release view "$APP_FROM" --repo "$GITHUB_REPOSITORY" --json targetCommitish -q .targetCommitish)
+          if [ "$from" != "$sha" ]; then echo "app_from $APP_FROM was built from $from, not ref $sha" >&2; exit 1; fi
+        fi
         stamp=$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d%H%M%S HEAD)
         version="$(node -p 'require("./package.json").version')-rc.${stamp}.g${sha:0:8}"
         tag="rc-desktop-${sha:0:8}"
@@ -102,7 +112,7 @@ jobs:
   windows:
     name: Windows x64
     needs: meta
-    if: ${{ !inputs.proof_tag }}
+    if: ${{ !inputs.proof_tag && !inputs.app_from }}
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
@@ -169,7 +179,7 @@ jobs:
     name: macOS arm64 + x64
     needs: meta
     # inputs.macos is null on push, and Actions compares null == false.
-    if: github.event_name != 'workflow_dispatch' || (inputs.macos && !inputs.proof_tag)
+    if: github.event_name != 'workflow_dispatch' || (inputs.macos && !inputs.proof_tag && !inputs.app_from)
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
@@ -246,7 +256,8 @@ jobs:
     if: >-
       always() &&
       github.repository != 'greenfield-inc/Pane' &&
-      needs.windows.result == 'success' &&
+      !inputs.proof_tag &&
+      (needs.windows.result == 'success' || (inputs.app_from && needs.windows.result == 'skipped')) &&
       (needs.macos.result == 'success' || needs.macos.result == 'skipped')
     runs-on: ubuntu-24.04
     permissions:
@@ -257,10 +268,21 @@ jobs:
         ref: ${{ needs.meta.outputs.kit_sha }}
 
     - uses: actions/download-artifact@v7
+      if: ${{ !inputs.app_from }}
       with:
         pattern: desktop-*
         path: release
         merge-multiple: true
+
+    - name: The app zips of ${{ inputs.app_from }}, byte for byte (kit-only release)
+      if: ${{ inputs.app_from }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        gh release download "${{ inputs.app_from }}" --repo "$GITHUB_REPOSITORY" --dir release \
+          --pattern '*-Windows-x64.zip' --pattern '*-macOS-*.zip' --pattern SHA256SUMS.txt
+        (cd release && grep -E -- '-(Windows-x64|macOS-[a-z0-9]+)\.zip$' SHA256SUMS.txt | sha256sum -c - && rm SHA256SUMS.txt)
 
     # The relay kit: the scripts that install the test build, save a cloud host into its data dir from
     # a pairing file and drive it with Playwright (scripts/cloud-dist/sobeck), plus playwright-core at
@@ -285,6 +307,7 @@ jobs:
         TAG: ${{ needs.meta.outputs.tag }}
         SHA: ${{ needs.meta.outputs.sha }}
         KIT_SHA: ${{ needs.meta.outputs.kit_sha }}
+        APP_FROM: ${{ inputs.app_from }}
         VERSION: ${{ needs.meta.outputs.version }}
       run: |
         set -euo pipefail
@@ -294,7 +317,7 @@ jobs:
         sha256sum -- * > SHA256SUMS.txt
         cat SHA256SUMS.txt
         NOTES="Unsigned SIDE-BY-SIDE desktop test build of ${SHA} (Runpane Cloud fork), built by GitHub Actions run ${GITHUB_RUN_ID}. Not an upstream release; it never updates itself.
-        Version: ${VERSION}. Relay kit (scripts/cloud-dist/sobeck) from ${KIT_SHA}.
+        Version: ${VERSION}. Relay kit (scripts/cloud-dist/sobeck) from ${KIT_SHA}.${APP_FROM:+ App zips copied byte for byte from ${APP_FROM} (kit-only release).}
         It keeps its data in ~/.pane_${SIDE_BY_SIDE_NAME} and runs next to an installed Pane without touching it. Remove it by deleting its folder and ~/.pane_${SIDE_BY_SIDE_NAME}.
         Windows: unzip, run Pane.exe inside the folder (SmartScreen: More info, then Run anyway).
         macOS: unzip, then right-click Pane Cloud Test.app and choose Open (or xattr -dr com.apple.quarantine on it)."

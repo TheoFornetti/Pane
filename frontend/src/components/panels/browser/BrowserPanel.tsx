@@ -122,7 +122,11 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   useEffect(() => {
     if (!reopenedAt || reopenedAt === lastReopenedAt.current) return;
     lastReopenedAt.current = reopenedAt;
-    webviewRef.current?.reload();
+    try {
+      webviewRef.current?.reload();
+    } catch {
+      // Not dom-ready yet: the load in flight already reads the rewritten file.
+    }
   }, [reopenedAt]);
 
   const handleBack = () => {

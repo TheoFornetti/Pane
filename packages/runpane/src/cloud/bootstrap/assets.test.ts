@@ -39,22 +39,26 @@ test('an unknown step fails with a parsable result', () => {
   assert.match(result.stdout, /^RP_RESULT \{"ok": false, "error": "unknown step 'nope'"\}$/m);
 });
 
-// Wake: the CLI's repair runs tailnet-identity while the resumed box is still booting (p5-verify,
-// rc-40f1386c: `tailscale status --json` printed nothing, json.loads('') threw, the wake exited 1
-// although the Session came up seconds later). The step must wait for tailscaled like the others do.
-test('tailnet-identity waits for tailscaled instead of failing on an empty status', () => {
+// Wake: the CLI's repair runs tailnet-identity while the resumed box is still booting, and re-enrols the
+// node unless it reports Running (p5-verify, rc-40f1386c). Seen live: first an empty status (json.loads('')
+// threw, the wake exited 1), and with a plain "wait until it answers" the transient NoState of tailscaled's
+// first second, which re-enrolled a healthy node. The step must wait until the state settles.
+test('tailnet-identity waits until tailscaled answers and settles past NoState and Starting', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-assets-'));
   const file = path.join(dir, 'rp-bootstrap.sh');
   fs.writeFileSync(file, cloudBootstrapAssets['rp-bootstrap.sh']);
   const counter = path.join(dir, 'calls');
-  const status = '{"BackendState":"Running","Self":{"ID":"n1","HostName":"rp-x","DNSName":"rp-x.ts.net.","TailscaleIPs":["100.64.0.1"]}}';
+  const status = (state: string) => `{"BackendState":"${state}","Self":{"ID":"n1","HostName":"rp-x","DNSName":"rp-x.ts.net.","TailscaleIPs":["100.64.0.1"]}}`;
+  // Calls 0-1: no answer; 2-3: NoState; 4: Starting; then Running. Only `status --json` prints.
+  const fake = `() { n=$(cat '${counter}' 2>/dev/null || echo 0); echo $((n+1)) > '${counter}'; [ "$1 $2" = "status --json" ] || return 0; `
+    + `if [ "$n" -lt 2 ]; then return 1; elif [ "$n" -lt 4 ]; then echo '${status('NoState')}'; elif [ "$n" -lt 5 ]; then echo '${status('Starting')}'; else echo '${status('Running')}'; fi; }`;
   const result = childProcess.spawnSync('bash', [file, 'tailnet-identity'], {
     encoding: 'utf8',
     env: {
       ...process.env,
       RP_STATE: path.join(dir, 'state'),
-      // Exported functions win over PATH (the script puts /usr/bin first): tailscaled answers from the 4th call.
-      'BASH_FUNC_tailscale%%': `() { n=$(cat '${counter}' 2>/dev/null || echo 0); echo $((n+1)) > '${counter}'; [ "$n" -ge 3 ] || return 1; [ "$1 $2" = "status --json" ] && echo '${status}'; return 0; }`,
+      // Exported functions win over PATH (the script puts /usr/bin first).
+      'BASH_FUNC_tailscale%%': fake,
       'BASH_FUNC_sudo%%': '() { "$@"; }',
     },
   });

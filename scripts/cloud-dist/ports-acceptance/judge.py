@@ -71,6 +71,8 @@ if check == 'c1':
     m = re.search(r'### ~/.runpane-cloud/ports.json \((\d+)\)', state)
     out(bool(m) and m.group(1) == '600', 'Session ~/.runpane-cloud/ports.json is 0600', m.group(1) if m else 'missing')
     out(*no_funnel(state)[:1], 'no Funnel on the fresh Session', no_funnel(state)[1])
+    blocks = re.findall(r'(\S+) ports-block=(\d+)', state)
+    out(len(blocks) == 2 and all(n == '1' for _, n in blocks), 'agent notes: one runpane-cloud-ports block in ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md', str(blocks))
 
 elif check == 'c2':
     a, b, port = args[0], args[1], int(args[2])

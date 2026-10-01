@@ -15,3 +15,5 @@ echo "### runpane port list --json"; env -u PANE_SESSION_ID "$RP" port list --js
 echo "### listeners"; ss -ltnp 2>/dev/null | awk 'NR==1 || /127.0.0.1|0.0.0.0|\[::/' | cut -c1-160
 echo "### daemon log (ports:)"; grep -h "ports:" "$HOME"/.pane_remote/logs/pane-*.log 2>/dev/null | tail -25
 echo "### serve guard events"; tail -3 /var/lib/rp-cloud/serve-events.log 2>/dev/null
+echo "### agent notes blocks"; for f in "$HOME/.claude/CLAUDE.md" "$HOME/.codex/AGENTS.md"; do printf '%s ports-block=%s\n' "$f" "$(grep -c 'runpane-cloud-ports:start' "$f" 2>/dev/null || echo 0)"; done
+sed -n '/runpane-cloud-ports:start/,/runpane-cloud-ports:end/p' "$HOME/.claude/CLAUDE.md" 2>/dev/null | head -12

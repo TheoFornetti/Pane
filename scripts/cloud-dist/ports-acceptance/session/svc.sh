@@ -17,9 +17,11 @@ label, port = sys.argv[1], int(sys.argv[2])
 def dns():
     try: return json.loads(subprocess.run(['tailscale', 'status', '--self', '--json'], capture_output=True, timeout=5).stdout)['Self']['DNSName'].rstrip('.')
     except Exception: return '?'
-DNS = dns()
+DNS = ''
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        global DNS
+        DNS = DNS if DNS not in ('', '?') else dns()  # at boot this unit may start before tailscaled
         boot = open('/proc/sys/kernel/random/boot_id').read().strip()[:8]
         body = f'ports-acceptance label={label} port={port} tailnet={DNS} boot={boot} t={time.strftime("%H:%M:%SZ", time.gmtime())}\n'.encode()
         self.send_response(200); self.send_header('Content-Type', 'text/plain'); self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
@@ -38,7 +40,7 @@ WantedBy=default.target
 UNIT
 done
 systemctl --user daemon-reload
-for p in "$@"; do systemctl --user enable --now "pa-www-$p.service" >/dev/null 2>&1; done
+for p in "$@"; do systemctl --user enable "pa-www-$p.service" >/dev/null 2>&1; systemctl --user restart "pa-www-$p.service"; done
 sleep 1
 for p in "$@"; do printf '127.0.0.1:%s -> %s' "$p" "$(curl -sS --max-time 3 "http://127.0.0.1:$p/" || echo DOWN)"; done
 echo "linger: $(loginctl show-user "$(id -un)" -p Linger 2>/dev/null)"

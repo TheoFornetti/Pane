@@ -45,6 +45,12 @@ Set-Content -Path (Join-Path $fakeBin 'serve.json') -Value (@{
     TCP = @{ "$PortsPort" = @{ HTTP = $true } }
     Web = @{ "localhost:$PortsPort" = @{ Handlers = @{ '/' = @{ Proxy = "http://127.0.0.1:$PortsPort" } } } }
   } | ConvertTo-Json -Depth 6 -Compress)
+# A daemon is in a Runpane Cloud Session when /etc/rp-cloud/serve.json exists (bootstrap writes it); Node
+# on Windows reads that path from the current drive, so write it on the system drive and on this one.
+foreach ($drive in @($env:SystemDrive, (Get-Location).Drive.Name + ':') | Select-Object -Unique) {
+  New-Item -ItemType Directory -Force -Path "$drive\etc\rp-cloud" | Out-Null
+  Set-Content -Path "$drive\etc\rp-cloud\serve.json" -Value "{`"port`":$Port}"
+}
 $portsDir = Join-Path $env:USERPROFILE '.runpane-cloud'
 New-Item -ItemType Directory -Force -Path $portsDir | Out-Null
 Set-Content -Path (Join-Path $portsDir 'ports.json') -Value (@{

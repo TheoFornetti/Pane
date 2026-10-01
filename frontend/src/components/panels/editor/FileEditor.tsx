@@ -1248,16 +1248,20 @@ export function FileEditor({ sessionId, initialState, onStateChange, shortcutsAc
   }, [sessionId]);
 
   const handleFileSelect = useCallback((file: FileItem | null) => { void openFile(file, false); }, [openFile]);
-  const handleFileOpen = useCallback((file: FileItem) => {
-    if (!isHtmlFile(file.path)) {
-      void openFile(file, true);
-      return;
-    }
-    // HTML opens rendered in its own browser tab, the same tab `runpane panels open --file` uses.
+  // HTML opens rendered in its own browser tab, the same tab `runpane panels open --file` uses.
+  const openHtmlFile = useCallback(async (filePath: string) => {
     setError(null);
-    window.electronAPI.invoke('runpane:panels:open', { paneId: sessionId, filePath: file.path, source: 'user' })
-      .catch((openError: unknown) => setError(openError instanceof Error ? openError.message : 'Failed to open HTML file'));
-  }, [openFile, sessionId]);
+    try {
+      await window.electronAPI.invoke('runpane:panels:open', { paneId: sessionId, filePath, source: 'user' });
+    } catch (openError) {
+      setError(openError instanceof Error ? openError.message : 'Failed to open HTML file');
+    }
+  }, [sessionId]);
+
+  const handleFileOpen = useCallback((file: FileItem) => {
+    if (isHtmlFile(file.path)) void openHtmlFile(file.path);
+    else void openFile(file, true);
+  }, [openFile, openHtmlFile]);
 
   const previewHtmlFile = useCallback(async (filePath: string) => {
     setError(null);

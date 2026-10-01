@@ -1013,7 +1013,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         pendingReplayWritesRef.current = 0;
         terminal.parser.registerOscHandler(52, (data) => {
           const text = decodeOsc52Write(data);
-          if (text && pendingReplayWritesRef.current === 0) {
+          // Only while the user is in this window: output arriving in the background
+          // cannot silently replace what they copied elsewhere.
+          if (text && pendingReplayWritesRef.current === 0 && document.hasFocus()) {
             void copyTerminalText(text).catch(() => {
               terminalRuntimeRef.current.handleClipboardError();
             });

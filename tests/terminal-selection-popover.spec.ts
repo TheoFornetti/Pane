@@ -249,7 +249,9 @@ test('remote mode copies a mouse selection without the selection popover', async
 
   await page.mouse.move(box.x + 1, box.y + 8);
   await page.mouse.down();
+  // Release outside the terminal, as when a drag overshoots into the next panel.
   await page.mouse.move(box.x + 300, box.y + 8, { steps: 8 });
+  await page.mouse.move(box.x + box.width + 40, box.y + 8, { steps: 4 });
   await page.mouse.up();
 
   await expect.poll(() => clipboardWrites(page)).toEqual(['selection-1']);

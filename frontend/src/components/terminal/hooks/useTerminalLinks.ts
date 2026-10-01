@@ -132,13 +132,20 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     if (isRemoteMode) {
       const element = terminal.element;
       if (!element) return;
+      const doc = element.ownerDocument;
       const copySelection = () => {
         if (!terminal.hasSelection()) return;
         void copyTerminalText(terminal.getSelection()).catch(onCopyError);
       };
-      element.addEventListener('mouseup', copySelection);
+      // A drag can end outside the terminal (auto-scroll, overshoot), so the
+      // release is caught on the document, as xterm does to finish the selection.
+      const watchRelease = () => {
+        doc.addEventListener('mouseup', copySelection, { once: true });
+      };
+      element.addEventListener('mousedown', watchRelease);
       return () => {
-        element.removeEventListener('mouseup', copySelection);
+        element.removeEventListener('mousedown', watchRelease);
+        doc.removeEventListener('mouseup', copySelection);
       };
     }
 

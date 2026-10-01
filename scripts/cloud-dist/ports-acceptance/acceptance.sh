@@ -30,6 +30,8 @@ rpv() { env -u PANE_SESSION_ID -u PANE_PANEL_ID -u PANE_ORCHESTRATION_SESSION_ID
 ts() { date -u +%H:%M:%SZ; }
 log() { echo "$(ts) $*" | tee -a "$EV/timeline.txt"; }
 probe() { node "$HERE/probe.mjs" "$@"; }
+# The second Session's CLI (e.g. the owner's own `rpc`) must not inherit this run's isolated config dirs.
+second() { env -u RUNPANE_CLOUD_DIR -u RUNPANE_CLOUD_DESKTOP_DIR ${PV_SECOND_CLI:-false} "$@"; }
 # sx <sandbox> <script> [args...]: run a session/ script in a sandbox with arguments.
 sx() {
   local sb="$1" script="$2"; shift 2
@@ -95,11 +97,11 @@ c2)
   sx "$SB" svc.sh "$HOST" "$P" | tee "$EV/c2-svc-a.txt"
   sx "$PV_SECOND_SANDBOX" svc.sh "$PV_SECOND_HOST" "$P" | tee "$EV/c2-svc-b.txt"
   rpv cloud port open "$HOST" "$P" --name pa-clash --json > "$EV/c2-open-a.json" 2>&1; cat "$EV/c2-open-a.json"
-  ${PV_SECOND_CLI:-rpv} cloud port open "$PV_SECOND_HOST" "$P" --name p5verify-clash --json > "$EV/c2-open-b.json" 2>&1; cat "$EV/c2-open-b.json"
+  second cloud port open "$PV_SECOND_HOST" "$P" --name p5verify-clash --json > "$EV/c2-open-b.json" 2>&1; cat "$EV/c2-open-b.json"
   A=$(python3 -c "import json;print(json.load(open('$EV/c2-open-a.json'))['port']['url'])")
   B=$(python3 -c "import json;print(json.load(open('$EV/c2-open-b.json'))['port']['url'])")
   rpv cloud port list "$HOST" --json > "$EV/c2-port-list-a.json"
-  ${PV_SECOND_CLI:-rpv} cloud port list "$PV_SECOND_HOST" --json > "$EV/c2-port-list-b.json"
+  second cloud port list "$PV_SECOND_HOST" --json > "$EV/c2-port-list-b.json"
   # Interleaved: both URLs 5 times each, plus every other port of both Sessions (no interference).
   OTHER_A=$(python3 -c "import json;print(' '.join(p['url'] for p in json.load(open('$EV/c2-port-list-a.json'))['ports'] if p['port']!=$P))")
   OTHER_B=$(python3 -c "import json;print(' '.join(p['url'] for p in json.load(open('$EV/c2-port-list-b.json'))['ports'] if p['port']!=$P))")
@@ -108,10 +110,10 @@ c2)
   cat "$EV/c2-probe.jsonl" | cut -c1-400
   python3 "$HERE/judge.py" c2 "$EV" "$HOST" "$PV_SECOND_HOST" "$P" | tee -a "$EV/verdicts.txt"
   if [ "${PV_KEEP_CLASH:-0}" != 1 ]; then
-    ${PV_SECOND_CLI:-rpv} cloud port close "$PV_SECOND_HOST" p5verify-clash --json > "$EV/c2-close-b.json" 2>&1
+    second cloud port close "$PV_SECOND_HOST" p5verify-clash --json > "$EV/c2-close-b.json" 2>&1
     sx "$PV_SECOND_SANDBOX" svc.sh --stop "$P"
     probe --timeout 5000 "$B" > "$EV/c2-after-close-b.jsonl"; cat "$EV/c2-after-close-b.jsonl"
-    ${PV_SECOND_CLI:-rpv} cloud port list "$PV_SECOND_HOST" --json > "$EV/c2-port-list-b-after.json"
+    second cloud port list "$PV_SECOND_HOST" --json > "$EV/c2-port-list-b-after.json"
   fi
   ;;
 c3-restart)
@@ -183,8 +185,8 @@ c6)
     REVIEWER="p5-verify $engine" NOTE="[p5-verify TEST, ignore] $engine walk at $(ts) on the integrated ports release ($PV_TAG)" \
       node "$HERE/taste-walk.cjs" "$PV_GROUP_FILE" "$EV/c6-shots-$engine" "$engine" | tee "$EV/c6-walk-$engine.txt"
   done
-  ${PV_SECOND_CLI:-rpv} cloud port list "${PV_SECOND_HOST:?}" --json > "$EV/c6-scratch-port-list.json" 2>&1
-  ${PV_SECOND_CLI:-rpv} cloud port list "$PV_SECOND_HOST" > "$EV/c6-scratch-port-list.txt" 2>&1; cat "$EV/c6-scratch-port-list.txt"
+  second cloud port list "${PV_SECOND_HOST:?}" --json > "$EV/c6-scratch-port-list.json" 2>&1
+  second cloud port list "$PV_SECOND_HOST" > "$EV/c6-scratch-port-list.txt" 2>&1; cat "$EV/c6-scratch-port-list.txt"
   python3 "$HERE/judge.py" c6 "$EV" "$PV_SECOND_HOST" | tee -a "$EV/verdicts.txt"
   ;;
 destroy)

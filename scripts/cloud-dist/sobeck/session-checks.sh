@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # R3.5: the checks that run INSIDE a fresh Pane on a cloud Session. session-proof.mjs types this file into
 # the Pane's terminal (base64, never a value of anything) and reads back one line per check:
-#   R35 <tag> <check> <PASS|FAIL|SKIP|INFO> <detail>
+#   R35 <tag> <check> <PASS|FAIL|SKIP|INFO> <detail> /R35
+# (the terminator lets the reader find a line that the terminal wrapped, e.g. ConPTY on Windows)
 # Phases (the desktop checks the Ports chip between "setup" and "broker"):
 #   setup <tag> <port>          context, manifest secrets (names only), a tiny server + runpane port open
 #   broker <tag> <port> <github> GitHub broker: push, gh issue create, gh pr create --draft, master refused,
@@ -14,7 +15,7 @@ phase=${1:?phase}; tag=${2:?tag}; port=${3:?port}; github=${4:-1}
 name="r35-$tag"
 work="${TMPDIR:-/tmp}/runpane-r35-$tag"
 mkdir -p "$work"
-say() { printf 'R35 %s %s %s %s\n' "$tag" "$1" "$2" "$3"; }
+say() { printf 'R35 %s %s %s %s /R35\n' "$tag" "$1" "$2" "$3"; }
 oneline() { tr '\r\n\t' '   ' | sed 's/  */ /g' | cut -c1-"${1:-300}"; }
 runpane_cli() {
   local candidate

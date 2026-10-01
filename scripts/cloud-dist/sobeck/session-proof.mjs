@@ -156,15 +156,15 @@ async function typeLine(text) {
   await page.keyboard.press('Enter');
 }
 
-// One "R35 <tag> <check> <verdict> <detail>" line per check from session-checks.sh. The commands typed
-// never contain "R35 <tag> ", so only the script's output matches.
-const LINE = new RegExp(`^R35 ${tag} (\\S+) (PASS|FAIL|SKIP|INFO) ?(.*)$`);
+// One "R35 <tag> <check> <verdict> <detail> /R35" line per check from session-checks.sh, read from the
+// terminal stream with its line breaks removed: ConPTY (the Windows CI fake host) hard-wraps long lines at
+// the terminal width. The commands typed never contain "R35 <tag> <word> <verdict>", so only the script's
+// output matches.
+const joinedStream = async () => (await streamText()).replace(/[\r\n]/g, '');
+const LINE = new RegExp(`R35 ${tag} (\\S+) (PASS|FAIL|SKIP|INFO) ?(.*?) /R35`, 'g');
 const seen = new Set();
-const sessionLines = async () => {
-  const text = `${await streamText()}\n${await domText()}`;
-  return text.split(/\r?\n/).map((line) => line.trim().match(LINE)).filter(Boolean)
-    .map(([, name, verdict, detail]) => ({ name, verdict, detail: detail.trim() }));
-};
+const sessionLines = async () => [...(await joinedStream()).matchAll(LINE)]
+  .map(([, name, verdict, detail]) => ({ name, verdict, detail: detail.trim() }));
 async function runPhase(phase, timeoutMs) {
   await typeLine(`bash "$R35" ${phase} ${tag} ${port} ${github}`);
   const deadline = Date.now() + timeoutMs;
@@ -196,7 +196,7 @@ let acks = 0;
 async function typeAcked(command, timeoutMs = 30_000) {
   const ack = `R35 ${tag} ack ${++acks}.`;
   await typeLine(`${command}; echo "R35 ${tag}" "ack ${acks}."`);
-  return waitFor(async () => (await streamText()).includes(ack), timeoutMs);
+  return waitFor(async () => (await joinedStream()).includes(ack), timeoutMs);
 }
 
 // Writes session-checks.sh into the Session through the terminal: base64 in short printf lines (no line
@@ -209,7 +209,7 @@ async function deliverScript() {
     typed = await typeAcked(`printf %s '${b64.slice(at, at + 900)}' >> "$R35.b64"`);
   }
   if (typed) await typeLine(`base64 -d "$R35.b64" > "$R35" && rm -f "$R35.b64" && echo "R35 ${tag}" "script $(sha256sum "$R35" | cut -c1-64)"`);
-  const delivered = typed && await waitFor(async () => (await streamText()).includes(`R35 ${tag} script ${sha}`), 60_000);
+  const delivered = typed && await waitFor(async () => (await joinedStream()).includes(`R35 ${tag} script ${sha}`), 60_000);
   pass('script-delivered', delivered, delivered
     ? `session-checks.sh in the Pane in ${acks} acknowledged lines (sha256 ${sha.slice(0, 12)}…)`
     : `${typed ? `sha256 ${sha.slice(0, 12)}… never echoed back within 60 s` : `typed line ${acks} not acknowledged within 30 s`}`);

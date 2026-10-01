@@ -38,3 +38,26 @@ test('an unknown step fails with a parsable result', () => {
   assert.equal(result.status, 1);
   assert.match(result.stdout, /^RP_RESULT \{"ok": false, "error": "unknown step 'nope'"\}$/m);
 });
+
+// Wake: the CLI's repair runs tailnet-identity while the resumed box is still booting (p5-verify,
+// rc-40f1386c: `tailscale status --json` printed nothing, json.loads('') threw, the wake exited 1
+// although the Session came up seconds later). The step must wait for tailscaled like the others do.
+test('tailnet-identity waits for tailscaled instead of failing on an empty status', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-assets-'));
+  const file = path.join(dir, 'rp-bootstrap.sh');
+  fs.writeFileSync(file, cloudBootstrapAssets['rp-bootstrap.sh']);
+  const counter = path.join(dir, 'calls');
+  const status = '{"BackendState":"Running","Self":{"ID":"n1","HostName":"rp-x","DNSName":"rp-x.ts.net.","TailscaleIPs":["100.64.0.1"]}}';
+  const result = childProcess.spawnSync('bash', [file, 'tailnet-identity'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      RP_STATE: path.join(dir, 'state'),
+      // Exported functions win over PATH (the script puts /usr/bin first): tailscaled answers from the 4th call.
+      'BASH_FUNC_tailscale%%': `() { n=$(cat '${counter}' 2>/dev/null || echo 0); echo $((n+1)) > '${counter}'; [ "$n" -ge 3 ] || return 1; [ "$1 $2" = "status --json" ] && echo '${status}'; return 0; }`,
+      'BASH_FUNC_sudo%%': '() { "$@"; }',
+    },
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^RP_RESULT .*"backendState": "Running"/m);
+});

@@ -292,8 +292,10 @@ step_tailscale_up() {
   result "$(tailnet_identity_json)"
 }
 
-# tailnet-identity: current tailnet identity (read-only).
+# tailnet-identity: current tailnet identity (read-only). On a wake it runs while the box may still be
+# booting, so it waits for tailscaled to answer first (an empty status is not JSON).
 step_tailnet_identity() {
+  wait_for_tailscaled >/dev/null || fail "tailscaled is not answering"
   result "$(tailnet_identity_json)"
 }
 

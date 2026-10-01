@@ -34,7 +34,9 @@ export function RemoteCreateOrchestrationSessionDialog({
   onCreated,
 }: RemoteCreateOrchestrationSessionDialogProps) {
   const [name, setName] = useState('');
-  const [agent, setAgent] = useState<PaneChatAgent>(sessionAgents.defaultAgent);
+  // Follows the host default, which can arrive after the sheet opens, until the person picks one.
+  const [pickedAgent, setPickedAgent] = useState<PaneChatAgent | null>(null);
+  const agent = pickedAgent ?? sessionAgents.defaultAgent;
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const defaultName = nextOrchestrationSessionName(sessions);
@@ -124,7 +126,7 @@ export function RemoteCreateOrchestrationSessionDialog({
                         name="remote-session-agent"
                         value={option}
                         checked={agent === option}
-                        onChange={() => setAgent(option)}
+                        onChange={() => setPickedAgent(option)}
                         aria-label={PANE_CHAT_AGENT_LABELS[option]}
                         className="sr-only"
                       />

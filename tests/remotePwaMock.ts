@@ -15,6 +15,8 @@ export interface RemotePwaMockOptions {
   panelTitles?: string[];
   /** Host-defined terminal shortcuts offered in the mobile input bar. */
   shortcuts?: Array<{ id: string; key: string; label: string; text: string }>;
+  /** Index of the panel the host reports as active. */
+  activePanelIndex?: number;
   /** Orchestration Sessions the mock host reports. */
   orchestrationSessionNames?: string[];
 }
@@ -144,7 +146,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
     sessions: (options.orchestrationSessionNames ?? []).map(buildOrchestrationSession),
   };
 
-  return { project, panels, affordances, host };
+  return { project, panels, affordances, host, activePanel: panels[options.activePanelIndex ?? 0] };
 }
 
 function buildOrchestrationSession(name: string, index: number): OrchestrationSessionRecord {
@@ -358,7 +360,7 @@ async function installRemoteHostRoute(
         result = ownerSession ? [orchestrationSessionView(ownerSession).panel] : fixtures.panels;
         break;
       case 'panels:getActive':
-        result = ownerSession ? orchestrationSessionView(ownerSession).panel : fixtures.panels[0];
+        result = ownerSession ? orchestrationSessionView(ownerSession).panel : fixtures.activePanel;
         break;
       case 'orchestration-sessions:list':
         result = { success: true, data: { sessions: host.sessions } };

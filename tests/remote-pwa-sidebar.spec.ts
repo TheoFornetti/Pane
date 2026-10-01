@@ -24,6 +24,11 @@ test('a phone creates a Session from the drawer and lands in its agent chat', as
   await expect(page.getByRole('group', { name: 'Sessions' }).getByRole('button', { name: 'Open Session New chat' })).toBeVisible();
 });
 
+test('a pane opens on the tab that is active on the host', async ({ page }) => {
+  await openConnectedRemotePwa(page, { activePanelIndex: 1 });
+  await expect(page.getByRole('tab', { name: 'shell', exact: true })).toHaveAttribute('aria-selected', 'true');
+});
+
 test('pinned Sessions and pinned panes share the Pinned section', async ({ page }) => {
   await openConnectedRemotePwa(page, { orchestrationSessionNames: ['Release prep'] });
   const pinned = page.getByRole('group', { name: 'Pinned' });

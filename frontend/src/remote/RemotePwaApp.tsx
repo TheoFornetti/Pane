@@ -103,7 +103,7 @@ export function RemotePwaApp() {
   const createOrchestrationOpenerRef = useRef<HTMLElement | null>(null);
   /** Bumped by each Pane or Session open, so a slow Session open cannot replace a later choice. */
   const navigationRequestRef = useRef(0);
-  const archivedLoadRuntimeRef = useRef<RemoteRuntimeAdapter | null>(null);
+  const archivedLoadRequestRef = useRef(0);
   const pushRoutePanelRef = useRef<{ sessionId: string; panelId: string } | null>(null);
 
   useEffect(() => {
@@ -274,11 +274,12 @@ export function RemotePwaApp() {
         runtime.getActivePanel(sessionId).catch(() => null),
       ]);
       if (runtime !== activeRuntimeRef.current || request !== panelLoadRequestRef.current || useRemoteSessionStore.getState().selectedSessionId !== sessionId) return;
+      // Read before setPanels, which fills an empty selection with the first panel.
+      const currentPanelId = useRemoteSessionStore.getState().selectedPanelId;
       setPanels(sessionId, panels);
       const routedPanel = pushRoutePanelRef.current;
       const routeMatches = routedPanel?.sessionId === sessionId && panels.some(panel => panel.id === routedPanel.panelId);
       if (routedPanel?.sessionId === sessionId) pushRoutePanelRef.current = null;
-      const currentPanelId = useRemoteSessionStore.getState().selectedPanelId;
       const keptPanelId = panels.some(panel => panel.id === currentPanelId) ? currentPanelId : null;
       setSelectedPanel(routeMatches ? routedPanel.panelId : keptPanelId ?? activePanel?.id ?? panels[0]?.id ?? null);
       if (routedPanel?.sessionId === sessionId && !routeMatches) {
@@ -305,18 +306,16 @@ export function RemotePwaApp() {
   }, [adapter]);
 
   const loadArchived = useCallback(async (runtime: RemoteRuntimeAdapter | null = adapter) => {
-    // The drawer and the wide sidebar can both ask at once.
-    if (!runtime || archivedLoadRuntimeRef.current === runtime) return;
-    archivedLoadRuntimeRef.current = runtime;
+    if (!runtime) return;
+    // Only the newest request applies, so an older snapshot never overwrites a later archive or restore.
+    const request = ++archivedLoadRequestRef.current;
     try {
       const archived = await runtime.getArchivedProjectsWithSessions();
-      if (runtime === activeRuntimeRef.current) setArchivedProjects(archived);
+      if (runtime === activeRuntimeRef.current && request === archivedLoadRequestRef.current) setArchivedProjects(archived);
     } catch (error) {
-      if (runtime !== activeRuntimeRef.current) return;
+      if (runtime !== activeRuntimeRef.current || request !== archivedLoadRequestRef.current) return;
       setArchivedProjects([]);
       setLastError(error instanceof Error ? error.message : 'Failed to load archived panes');
-    } finally {
-      if (archivedLoadRuntimeRef.current === runtime) archivedLoadRuntimeRef.current = null;
     }
   }, [adapter, setArchivedProjects, setLastError]);
 
@@ -373,7 +372,7 @@ export function RemotePwaApp() {
   /** Clears everything that belongs to the previous host. */
   const resetHostState = useCallback(() => {
     pushRoutePanelRef.current = null;
-    archivedLoadRuntimeRef.current = null;
+    archivedLoadRequestRef.current += 1;
     navigationRequestRef.current += 1;
     resetRemoteHost();
     setSidebarOpen(false);
@@ -523,6 +522,8 @@ export function RemotePwaApp() {
   }, [adapter, sidebarActionId, setLastError]);
 
   const handleOrchestrationSessionCreated = useCallback((view: OrchestrationSessionView<Session>) => {
+    // The create request can finish after a switch to another host.
+    if (adapter !== activeRuntimeRef.current) return;
     navigationRequestRef.current += 1;
     openSession(view);
     void refreshOrchestrationSessions(adapter);

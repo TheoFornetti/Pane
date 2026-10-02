@@ -1445,16 +1445,15 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   });
   await page.goto('/');
   await page.getByTestId('orchestration-session-tools').click();
-  // The Session's tabs sit on their own row under the window title bar, which
-  // names the Session; tabs never share the title bar's row.
+  // The window title bar names the Session; its tabs are the next row.
   const workspaceTabs = page.getByTestId('session-workspace-tabs');
   const activeTab = workspaceTabs.getByRole('tab').first();
   await expect(activeTab).toBeVisible();
-  await expect(activeTab).toHaveCSS('border-top-left-radius', '6px');
+  await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   const titleBar = page.getByTestId('window-title-bar');
   await expect(titleBar.getByTestId('window-title-bar-label')).toContainText('Tools');
   const [tabBounds, titleBarBounds] = [await layoutBox(activeTab), await layoutBox(titleBar)];
-  expect(tabBounds.y).toBeGreaterThanOrEqual(titleBarBounds.y + titleBarBounds.height);
+  expect(tabBounds.y).toBe(titleBarBounds.y + titleBarBounds.height);
   await expect(page.getByTestId('sidebar').getByRole('button', { name: 'Home menu' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Session settings', exact: true })).toBeVisible();
   const titleBarControls = page.getByTestId('window-title-bar-trailing-controls');
@@ -1676,7 +1675,7 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   expect(pageStrip.y).toBe(agentStrip.y);
   expect(pageStrip.height).toBe(agentStrip.height);
   const titleBar = await layoutBox(page.getByTestId('window-title-bar'));
-  expect(agentStrip.y).toBeGreaterThanOrEqual(titleBar.y + titleBar.height);
+  expect(agentStrip.y).toBe(titleBar.y + titleBar.height);
 
   await openPage('report-page', 'report.html', false);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
@@ -1761,8 +1760,7 @@ test('a Session dropped on another tiles beside it, survives a reload, and close
 
   await page.getByTestId('orchestration-session-alpha').click();
   const tiles = page.getByTestId('session-tile-header');
-  await expect(tiles).toHaveCount(1, { timeout: 10_000 });
-  await expect(tiles.first()).toContainText('Alpha');
+  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached();
 
   // Drop Beta on the right quarter of Alpha's tile: an edge drop splits.
   const stage = await layoutBox(page.getByTestId('session-tile-layout'));
@@ -1772,6 +1770,8 @@ test('a Session dropped on another tiles beside it, survives a reload, and close
   });
 
   await expect(tiles).toHaveCount(2);
+  await expect(tiles.nth(0)).toBeVisible();
+  await expect(tiles.nth(1)).toBeVisible();
   await expect(tiles.nth(0)).toContainText('Alpha');
   await expect(tiles.nth(1)).toContainText('Beta');
   // Both tiles stay mounted and live; neither is a placeholder for the other.
@@ -1792,7 +1792,7 @@ test('a Session dropped on another tiles beside it, survives a reload, and close
 
   // Closing a tile stops tiling that Session without touching the Session.
   await page.getByRole('button', { name: 'Stop tiling Beta', exact: true }).click();
-  await expect(tiles).toHaveCount(1);
-  await expect(tiles.first()).toContainText('Alpha');
+  await expect(page.getByTestId('session-workspace-tabs')).toHaveCount(1);
+  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached();
   await expect(page.getByTestId('orchestration-session-beta')).toBeVisible();
 });

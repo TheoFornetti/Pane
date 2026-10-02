@@ -147,9 +147,15 @@ context menus use compact widths.
 The right sidebar has Overview, Files, and Changes tabs. Overview shows linked
 Panes and activity. Files browses the Session workspace. Changes summarizes
 linked worktrees and opens a Pane for detailed review. The upper-right sidebar
-button shows or hides the selected tab. Session file clicks open editor tabs
-beside the agent tab in the title bar. These tabs can be selected and closed
-directly, and reopening a file restores its tab.
+button shows or hides the selected tab. A single Session uses two rows at the
+top: the window title bar shows its name and controls, and the tab strip sits
+directly below it. Session file clicks open editor tabs beside the agent tab in
+that strip. These tabs can be selected and closed directly, and reopening a file
+restores its tab.
+
+![Two-row Session header in Folio](screenshots/two-row-header-folio.png)
+
+![Two-row Session header in Walnut](screenshots/two-row-header-walnut.png)
 
 Right-click a Session to archive it. Archiving hides the chat from the active
 Sessions list while retaining its identity, conversation history, and Pane
@@ -532,20 +538,22 @@ other documents as self-contained HTML files in its Session folder and open them
 this way. Opening a Session never submits a prompt or starts work just to write
 a document.
 
-While the stage is split, each group has its own tab strip and the agent tab
-stays in the top bar. Closing the last tab in the side group returns to a single
+While the stage is split, each group has its own tab strip, including the agent
+tab in its group. For a single Session, the strips align directly below the
+window title bar. Closing the last tab in the side group returns to a single
 group. Layouts are saved with the Session.
 
 ## Tiling Sessions side by side
 
 ![Two Sessions tiled side by side, both streaming](screenshots/session-tiling.png)
 
-Sessions tile with the same gesture as tabs, one level up. Drag a Session — from
-its sidebar row or by its title row — onto another Session and drop it against
-an edge to put the two beside each other; drop it in the middle to show it in
-that slot instead. Edge bands are the outer quarter of the target, as they are
-for tabs, and the layout nests as deeply as you take it: a row of Sessions with
-one of them split into a column is an ordinary shape, not a special case.
+Sessions tile with the same gesture as tabs, one level up. Drag a Session from
+its sidebar row — or by its title row once tiled — onto another Session and drop
+it against an edge to put the two beside each other; drop it in the middle to
+show it in that slot instead. Edge bands are the outer quarter of the target,
+as they are for tabs, and the layout nests as deeply as you take it: a row of
+Sessions with one of them split into a column is an ordinary shape, not a
+special case.
 
 Both halves stay fully live. A tile that is not focused keeps its agent running
 and its output streaming; nothing is throttled or suspended, so a Session you

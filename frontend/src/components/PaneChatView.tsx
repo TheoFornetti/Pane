@@ -567,6 +567,16 @@ function SessionTileHeader({ name, chrome, error, actions }: {
   error?: string | null;
   actions?: React.ReactNode;
 }) {
+  // The window title already names a single Session, including native frames.
+  if (!chrome.tiled) {
+    return (
+      <>
+        <h1 className="sr-only">{name}</h1>
+        {error && <p role="alert" className="px-4 py-1 text-xs text-status-error">{error}</p>}
+      </>
+    );
+  }
+
   return (
     <div
       draggable

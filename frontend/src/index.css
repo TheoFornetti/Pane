@@ -196,36 +196,37 @@ body.understory {
 }
 
 /* Tab indicator — default fill mode */
-.panel-tab-bar [aria-selected="true"] {
+.panel-tab-strip [aria-selected="true"] {
   background-color: var(--color-bg-primary);
 }
 
-:root.haar .panel-tab-bar [aria-selected="true"] {
+:root.haar .panel-tab-strip [aria-selected="true"] {
   background-color: var(--color-bg-editor);
 }
 
 /* Tab indicator — Forge underline mode */
-:root.forge .panel-tab-bar [aria-selected="true"],
-:root.ember .panel-tab-bar [aria-selected="true"],
-:root.night-owl .panel-tab-bar [aria-selected="true"],
-:root.night-owl-oled .panel-tab-bar [aria-selected="true"],
-:root.terracotta .panel-tab-bar [aria-selected="true"],
-:root.synthwave .panel-tab-bar [aria-selected="true"],
-:root.acid .panel-tab-bar [aria-selected="true"],
-:root.tokyo-rain .panel-tab-bar [aria-selected="true"],
-:root.folio .panel-tab-bar [aria-selected="true"],
-:root.newsprint .panel-tab-bar [aria-selected="true"],
-:root.walnut .panel-tab-bar [aria-selected="true"],
-:root.amber-crt .panel-tab-bar [aria-selected="true"],
-:root.teletype .panel-tab-bar [aria-selected="true"],
-:root.dot-matrix .panel-tab-bar [aria-selected="true"],
-:root.abyss .panel-tab-bar [aria-selected="true"],
-:root.understory .panel-tab-bar [aria-selected="true"],
-:root.colorblind-safe .panel-tab-bar [aria-selected="true"],
-:root.low-fatigue .panel-tab-bar [aria-selected="true"],
-:root.high-legibility .panel-tab-bar [aria-selected="true"] {
+:root.forge .panel-tab-strip [aria-selected="true"],
+:root.ember .panel-tab-strip [aria-selected="true"],
+:root.night-owl .panel-tab-strip [aria-selected="true"],
+:root.night-owl-oled .panel-tab-strip [aria-selected="true"],
+:root.terracotta .panel-tab-strip [aria-selected="true"],
+:root.synthwave .panel-tab-strip [aria-selected="true"],
+:root.acid .panel-tab-strip [aria-selected="true"],
+:root.tokyo-rain .panel-tab-strip [aria-selected="true"],
+:root.folio .panel-tab-strip [aria-selected="true"],
+:root.newsprint .panel-tab-strip [aria-selected="true"],
+:root.walnut .panel-tab-strip [aria-selected="true"],
+:root.amber-crt .panel-tab-strip [aria-selected="true"],
+:root.teletype .panel-tab-strip [aria-selected="true"],
+:root.dot-matrix .panel-tab-strip [aria-selected="true"],
+:root.abyss .panel-tab-strip [aria-selected="true"],
+:root.understory .panel-tab-strip [aria-selected="true"],
+:root.colorblind-safe .panel-tab-strip [aria-selected="true"],
+:root.low-fatigue .panel-tab-strip [aria-selected="true"],
+:root.high-legibility .panel-tab-strip [aria-selected="true"] {
   background-color: transparent;
-  box-shadow: inset 0 calc(-1 * var(--tab-indicator-height, 4px)) 0 0 var(--tab-indicator-color, #3574F0);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000),
+    inset 0 calc(-1 * var(--tab-indicator-height, 4px)) 0 0 var(--tab-indicator-color, #3574F0);
 }
 
 /* Theme-aware structural shells.

@@ -28,15 +28,25 @@ function temporaryDirectory(): string {
   return directory;
 }
 
-/** The grandchildren are spawned after the parent is up, so give them a moment. */
-async function settle(ms = 500): Promise<void> {
-  await new Promise(resolve => setTimeout(resolve, ms));
+/**
+ * The grandchildren are spawned after the parent is up, so poll for them
+ * rather than sleeping a fixed amount: reading the process table costs a
+ * PowerShell process on Windows, which is slow enough under a loaded test run
+ * to make any guessed delay flaky.
+ */
+async function waitForDescendants(pid: number, count: number): Promise<number[]> {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const descendants = await listDescendantPids([pid]);
+    if (descendants.length >= count || Date.now() >= deadline) return descendants;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
 }
 
 afterEach(async () => {
-  for (const child of spawned.splice(0)) {
-    if (child.pid) await terminateProcessTrees([child.pid], { timeoutMs: 5000 });
-  }
+  // One call, so teardown costs one process-table read rather than one each.
+  const pids = spawned.splice(0).flatMap(child => child.pid ? [child.pid] : []);
+  if (pids.length > 0) await terminateProcessTrees(pids, { timeoutMs: 15_000 });
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
@@ -69,14 +79,13 @@ describe('listDescendantPids', () => {
   it('finds the children a process launched, without the roots themselves', async () => {
     const child = idleProcess(temporaryDirectory(), 2);
     if (!child.pid) throw new Error('spawn reported no pid');
-    await settle();
 
-    const descendants = await listDescendantPids([child.pid]);
+    const descendants = await waitForDescendants(child.pid, 2);
 
     expect(descendants).toHaveLength(2);
     expect(descendants).not.toContain(child.pid);
     for (const pid of descendants) expect(isProcessAlive(pid)).toBe(true);
-  });
+  }, 30_000);
 
   it('has nothing to report for a pid that cannot exist', async () => {
     await expect(listDescendantPids([])).resolves.toEqual([]);
@@ -91,8 +100,7 @@ describe('terminateProcessTrees', () => {
     await fs.mkdir(held);
     const child = idleProcess(held, 2);
     if (!child.pid) throw new Error('spawn reported no pid');
-    await settle();
-    const tree = [child.pid, ...await listDescendantPids([child.pid])];
+    const tree = [child.pid, ...await waitForDescendants(child.pid, 2)];
     expect(tree).toHaveLength(3);
 
     // Windows refuses to move a directory that is a live process's cwd; this
@@ -101,23 +109,22 @@ describe('terminateProcessTrees', () => {
       await expect(fs.rename(held, join(parent, 'moved'))).rejects.toMatchObject({ code: 'EBUSY' });
     }
 
-    expect(await terminateProcessTrees(tree, { timeoutMs: 5000 })).toEqual([]);
+    expect(await terminateProcessTrees(tree, { timeoutMs: 15_000 })).toEqual([]);
 
     for (const pid of tree) expect(isProcessAlive(pid)).toBe(false);
     await expect(fs.rename(held, join(parent, 'moved'))).resolves.toBeUndefined();
-  });
+  }, 30_000);
 
   it('kills a child its parent left behind', async () => {
     const child = idleProcess(temporaryDirectory(), 1);
     if (!child.pid) throw new Error('spawn reported no pid');
-    await settle();
-    const [grandchild] = await listDescendantPids([child.pid]);
+    const [grandchild] = await waitForDescendants(child.pid, 1);
     expect(grandchild).toBeTypeOf('number');
 
-    expect(await terminateProcessTrees([child.pid], { timeoutMs: 5000 })).toEqual([]);
+    expect(await terminateProcessTrees([child.pid], { timeoutMs: 15_000 })).toEqual([]);
 
     expect(isProcessAlive(grandchild)).toBe(false);
-  });
+  }, 30_000);
 
   it('does nothing for pids that cannot exist', async () => {
     await expect(terminateProcessTrees([])).resolves.toEqual([]);

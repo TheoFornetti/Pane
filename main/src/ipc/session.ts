@@ -121,6 +121,16 @@ export function registerSessionHandlers(
       console.error(`[Session IPC] stopRunCommands failed during permanent delete for ${sessionId}:`, err);
     }
 
+    // Normally a no-op: the session was archived, which already killed its
+    // panels. It still has to be awaited, because a panel process that
+    // outlived that teardown would keep the worktree removal below from
+    // succeeding on Windows.
+    try {
+      await terminalPanelManager.terminateSessionTerminals(sessionId);
+    } catch (err) {
+      console.error(`[Session IPC] terminateSessionTerminals failed during permanent delete for ${sessionId}:`, err);
+    }
+
     try {
       const worktreeName = dbSession.worktree_name || '';
       const projectId = dbSession.project_id;
@@ -392,22 +402,19 @@ export function registerSessionHandlers(
         console.warn(`[ArchiveCleanup] archive_message_output_failed sessionId=${sessionId}:`, error);
       }
 
-      // Kill all panel processes for this session before worktree cleanup
-      // This prevents leaked node-pty processes and ensures worktree removal succeeds.
-      // NOTE: must run BEFORE cleanupSessionPanelsInMemory because
-      // getPanelsForSession has a DB-read side effect that repopulates
-      // panelManager.panels; calling it after the in-memory cleanup would
-      // re-insert the entries we just cleared.
-      const panels = panelManager.getPanelsForSession(sessionId);
-      for (const panel of panels) {
-        try {
-          if (panel.type === 'terminal') {
-            await terminalPanelManager.destroyTerminal(panel.id);
-          }
-        } catch (panelError) {
-          console.error(`[Session IPC] Failed to cleanup panel ${panel.id} (${panel.type}):`, panelError);
-        }
-      }
+      // Kill this session's panel processes now, so the agent stops working the
+      // moment the user archives, but hold on to the promise: it only settles
+      // once those processes have really left the OS process table, and the
+      // worktree cannot be removed before then. On Windows the panel shell and
+      // the agent CLI it launched both sit in the worktree, and a directory
+      // cannot be renamed or deleted while it is a live process's cwd.
+      // Reads terminalPanelManager's live PTY map rather than the session's
+      // panels, so it does not repopulate panelManager.panels through
+      // getPanelsForSession's DB-read side effect.
+      const terminalsExited = terminalPanelManager.terminateSessionTerminals(sessionId)
+        .catch(panelError => {
+          console.error(`[Session IPC] terminateSessionTerminals failed for ${sessionId}:`, panelError);
+        });
 
       // Release in-memory panel state (does NOT hard-delete DB rows — archive-safe)
       try {
@@ -435,6 +442,11 @@ export function registerSessionHandlers(
         } catch (err) {
           console.error(`[Session IPC] stopRunCommands failed for ${sessionId}:`, err);
         }
+
+        // The panel processes were killed when the archive was requested; this
+        // is where we wait for them to be gone. Removing the worktree while one
+        // is still sitting in it fails on Windows.
+        await terminalsExited;
 
         // Clean up the worktree if session has one (but not for main repo sessions)
         if (removesWorktree && dbSession.worktree_name && dbSession.project_id) {

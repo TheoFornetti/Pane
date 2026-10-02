@@ -23,6 +23,7 @@ import type { AnalyticsManager } from './analyticsManager';
 import { getWSLShellSpawn, buildWSLENV, WSLContext } from '../utils/wslUtils';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { interactiveTerminalEnv } from '../utils/inheritedProcessEnv';
+import { listDescendantPids, terminateProcessTrees, waitForProcessesToExit } from '../utils/processTree';
 import {
   type FlowControlRecord,
   createFlowControlRecord,
@@ -68,6 +69,12 @@ const INPUT_SETTLE_MAX_MS = 3000;
 const CLAUDE_INPUT_SETTLE_MIN_MS = 150;
 const CODEX_INPUT_SETTLE_MIN_MS = 500;
 const CODEX_SUBMIT_SEQUENCE = '\x1b[13;5u\r';
+// Archive waits for the real OS exit of a session's PTY processes before its
+// worktree is removed. A shell leaves within milliseconds of its kill; the
+// grace covers an agent flushing its transcript, after which the tree is taken
+// down forcefully and the rest of the budget is spent confirming it is gone.
+const PROCESS_EXIT_GRACE_MS = 3000;
+const PROCESS_EXIT_TIMEOUT_MS = 8000;
 // Formal ceiling for the restore/getState replay payload (now the emulator
 // serialization for normal buffers, raw ANSI log otherwise). Peer consensus:
 // Orca (TERMINAL_SCROLLBACK_REPLAY_BYTE_LIMIT) and Superset (MAX_HISTORY_SCROLLBACK_BYTES) both use
@@ -2146,6 +2153,46 @@ export class TerminalPanelManager extends EventEmitter {
       if (detection.visibleIdle) return true;
     }
     return this.getAgentStatus(terminal.panelId) === 'idle';
+  }
+
+  /**
+   * Destroys every terminal of a session and waits for their PTY processes —
+   * and the processes those launched — to actually exit.
+   *
+   * `destroyTerminal` only asks: it returns as soon as the kill is sent, which
+   * is not enough before the session's worktree is removed. A Windows
+   * directory cannot be renamed or deleted while it is any live process's
+   * current working directory, and both the panel shell and the agent CLI it
+   * started sit in the worktree, so archive has to see them leave the process
+   * table first. Bounded: a process that outlives the grace period has its
+   * tree killed, and one that survives even that is logged and left behind
+   * rather than holding the archive open.
+   */
+  async terminateSessionTerminals(sessionId: string, options: { timeoutMs?: number } = {}): Promise<void> {
+    const terminals = [...this.terminals.values()].filter(terminal => terminal.sessionId === sessionId);
+    if (terminals.length === 0) return;
+    const deadline = Date.now() + (options.timeoutMs ?? PROCESS_EXIT_TIMEOUT_MS);
+    const roots = terminals.map(terminal => terminal.pty.pid);
+    // Snapshot the tree alongside the destroy rather than before it: it has to
+    // be read while the shells are alive, because a dead parent's children keep
+    // its pid and nothing can walk to them afterwards, and destroy saves each
+    // panel's state before it kills, which leaves room for the read. Starting
+    // it first would delay the kill by the whole process-table query.
+    const tree = listDescendantPids(roots).then(descendants => [...new Set([...roots, ...descendants])]);
+
+    await Promise.all(terminals.map(terminal => this.destroyTerminal(terminal.panelId).catch(error => {
+      console.error(`[TerminalPanelManager] Destroy failed for ${terminal.panelId}:`, error);
+    })));
+
+    const graceMs = Math.min(PROCESS_EXIT_GRACE_MS, Math.max(0, deadline - Date.now()));
+    const outlived = await waitForProcessesToExit(await tree, graceMs);
+    if (outlived.length === 0) return;
+
+    console.warn(`[TerminalPanelManager] process_exit_timeout sessionId=${sessionId} pids=${outlived.join(',')} killing their process trees`);
+    const survivors = await terminateProcessTrees(outlived, { timeoutMs: Math.max(0, deadline - Date.now()) });
+    if (survivors.length > 0) {
+      console.error(`[TerminalPanelManager] process_kill_failed sessionId=${sessionId} pids=${survivors.join(',')} these may still hold the worktree open`);
+    }
   }
 
   destroyTerminal(panelId: string, options: { saveState?: boolean } = {}): Promise<void> {

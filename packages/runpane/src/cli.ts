@@ -1,5 +1,5 @@
-import { RUNPANE_CONTRACT } from './generated/contract';
 #!/usr/bin/env node
+import { RUNPANE_CONTRACT } from './generated/contract';
 import * as os from 'node:os';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';

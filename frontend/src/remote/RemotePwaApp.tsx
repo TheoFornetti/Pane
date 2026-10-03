@@ -677,8 +677,8 @@ export function RemotePwaApp() {
 
       switch (event.channel) {
         case 'session:created':
-          void loadArchivedIfShown(adapter);
         case 'session:updated': {
+          void loadArchivedIfShown(adapter);
           const session = decodeBoundary(event.args[0], remoteSessionSchema);
           if (session.archived || session.isHidden || session.isMainRepo) removeSession(session.id);
           else upsertSession(session);

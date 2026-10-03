@@ -109,7 +109,7 @@ describe('removeWorktreeViaTrash', () => {
       if (++attempts <= 3) throw busyError();
       return realRename(from, to);
     });
-    const execAsync = vi.spyOn(runner, 'execAsync');
+    const execFile = vi.spyOn(runner, 'execFile');
 
     const outcome = await removeWorktreeViaTrash(worktree, repo, resolver, runner, { label: 'pane-busy' });
 
@@ -117,7 +117,7 @@ describe('removeWorktreeViaTrash', () => {
     expect(attempts).toBe(4);
     expect(existsSync(worktree)).toBe(false);
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
-    expect(execAsync.mock.calls.map(([command]) => command).join('\n')).not.toContain('worktree remove');
+    expect(execFile.mock.calls.some(([file, args]) => file === 'git' && args[0] === 'worktree' && args[1] === 'remove')).toBe(false);
   });
 
   it('removes a worktree a live process is still sitting in', async () => {
@@ -145,8 +145,11 @@ describe('removeWorktreeViaTrash', () => {
       if (rootLocked) throw busyError();
       return realRename(from, to);
     });
-    vi.spyOn(runner, 'execAsync').mockImplementation(async command => {
-      if (!command.includes('worktree remove')) throw new Error(`Unexpected command: ${command}`);
+    const realExecFile = runner.execFile.bind(runner);
+    vi.spyOn(runner, 'execFile').mockImplementation(async (file, args, cwd, options) => {
+      if (file !== 'git' || args[0] !== 'worktree' || args[1] !== 'remove') {
+        return realExecFile(file, args, cwd, options);
+      }
       for (const entry of readdirSync(worktree)) rmSync(join(worktree, entry), { recursive: true, force: true });
       rootLocked = false;
       throw new Error(`error: failed to delete '${worktree}': Permission denied`);
@@ -164,8 +167,11 @@ describe('removeWorktreeViaTrash', () => {
   it('deletes the empty directory in place when it cannot be moved either', async () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();
     vi.spyOn(fsPromises, 'rename').mockRejectedValue(busyError());
-    vi.spyOn(runner, 'execAsync').mockImplementation(async command => {
-      if (!command.includes('worktree remove')) throw new Error(`Unexpected command: ${command}`);
+    const realExecFile = runner.execFile.bind(runner);
+    vi.spyOn(runner, 'execFile').mockImplementation(async (file, args, cwd, options) => {
+      if (file !== 'git' || args[0] !== 'worktree' || args[1] !== 'remove') {
+        return realExecFile(file, args, cwd, options);
+      }
       for (const entry of readdirSync(worktree)) rmSync(join(worktree, entry), { recursive: true, force: true });
       throw new Error(`error: failed to delete '${worktree}': Permission denied`);
     });
@@ -181,7 +187,13 @@ describe('removeWorktreeViaTrash', () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();
     vi.spyOn(fsPromises, 'rename').mockRejectedValue(busyError());
     vi.spyOn(fsPromises, 'rm').mockRejectedValue(busyError());
-    vi.spyOn(runner, 'execAsync').mockRejectedValue(new Error(`error: failed to delete '${worktree}': Permission denied`));
+    const realExecFile = runner.execFile.bind(runner);
+    vi.spyOn(runner, 'execFile').mockImplementation(async (file, args, cwd, options) => {
+      if (file !== 'git' || args[0] !== 'worktree' || args[1] !== 'remove') {
+        return realExecFile(file, args, cwd, options);
+      }
+      throw new Error(`error: failed to delete '${worktree}': Permission denied`);
+    });
 
     await expect(removeWorktreeViaTrash(worktree, repo, resolver, runner, { busyRetryMs: 10 }))
       .rejects.toThrow(/Permission denied/);

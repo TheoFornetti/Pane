@@ -2305,10 +2305,11 @@ describe('runpane IPC handlers', () => {
       input: 'Read and follow brief.md',
     }]);
 
-    await vi.advanceTimersByTimeAsync(20_000);
+    // Drain the echo wait and both bounded submit checks, including the retry.
+    await vi.runAllTimersAsync();
     const result = await pendingResult;
 
-    expect(enters).toBe(1);
+    expect(enters).toBe(2);
     expect(result).toMatchObject({
       ok: false,
       verifiedSubmitted: false,

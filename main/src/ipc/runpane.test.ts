@@ -5408,7 +5408,7 @@ describe('runpane IPC handlers', () => {
       vi.mocked(panelManager.createPanel).mockImplementation(async (request) => readyPanel(request.sessionId) as ToolPanel);
       // SAFETY: Same fixture shape as above, looked up by the fixture panel id.
       vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) => (panelId === terminalPanel.id ? readyPanel(session.id) as ToolPanel : undefined));
-      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› ready', 'idle', 'claude'));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('────────────────────────────────────────\n❯\n────────────────────────────────────────\n', 'idle', 'claude'));
       return { services, createSession, updateSessionDb, pathResolver };
     }
 

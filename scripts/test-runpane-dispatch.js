@@ -74,14 +74,21 @@ print(main(['panes', 'unpin', '--pane', 'p2', '--yes']))
   });
 }
 
-test('pip: adopt explicitly reports that the command is unsupported', () => {
+test('pip: adopt dispatch forwards supported selectors and returns the handler exit code', () => {
   const result = run('pip', `
+import json
+import runpane.local_control as local
+
+def adopt(parsed):
+    print(json.dumps([parsed.repo, parsed.path, parsed.name, parsed.base, parsed.folder, parsed.resume, parsed.launch, parsed.no_focus, parsed.source], separators=(',', ':')))
+    return 7
+
+local.run_panes_adopt = adopt
 from runpane.cli import main
-raise SystemExit(main(['panes', 'adopt']))
+print(main(['panes', 'adopt', '--repo', 'r1', '--path', '/tmp/wt', '--name', 'adopted', '--base', 'main', '--folder', 'f1', '--resume', 'resume1', '--launch', '--no-focus', '--source', 'agent', '--yes']))
 `);
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /panes adopt is not supported by the Python wrapper/);
-  assert.equal(result.stdout, '');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split(/\r?\n/), ['["r1","/tmp/wt","adopted","main","f1","resume1",true,true,"agent"]', '7']);
 });
 
 for (const runtime of ['npm', 'pip']) {

@@ -76,6 +76,7 @@ interface ConsolePayload {
 }
 
 interface TerminalMock {
+  emitPanelTerminalOutput(sessionId: string, panelId: string, output: string): void;
   emitWindowFocusChanged(focused: boolean): void;
   getConsoleLogCalls(): ConsolePayload[];
   getInvokeCalls(channel: string): InvokeCall[];
@@ -95,6 +96,8 @@ declare global {
   interface Window {
     __maskAppearances?: MaskAppearance[];
     __resumeTerminalRequest?: () => void;
+    __terminalEchoPaints?: Array<{ start: number; end: number }>;
+    __terminalEchoRows?: number;
   }
 }
 
@@ -133,6 +136,7 @@ async function bootFixture(
   powerMode: 'performance' | 'batterySaver' = 'performance',
   alternateScreen = false,
   systemAppearance = false,
+  platform: 'darwin' | 'win32' = 'darwin',
 ): Promise<BootFixtureResult> {
   if (systemAppearance) await page.emulateMedia({ colorScheme: 'light' });
   await page.clock.install();
@@ -147,7 +151,7 @@ async function bootFixture(
       }
     : { terminalPowerMode: powerMode };
   await installElectronApiMock(page, {
-    platform: 'darwin',
+    platform,
     initialConfig,
     initialProjects: [project],
     initialSessions: [session, otherSession],
@@ -211,7 +215,9 @@ async function maskAppearances(page: Page, panel?: Locator): Promise<MaskAppeara
 
 async function pauseClock(page: Page): Promise<void> {
   const pageNow = await page.evaluate(() => Date.now());
-  await page.clock.pauseAt(pageNow + 10);
+  // Leave time for the protocol round trip on busy hosts; a 10 ms lead can
+  // already be in the past when the pause command reaches the browser.
+  await page.clock.pauseAt(pageNow + 1000);
 }
 
 async function emitFocus(page: Page, focused: boolean): Promise<void> {
@@ -488,4 +494,58 @@ test('System appearance changes while blurred preserve the scrolled viewport wit
   const after = await readSnapshot(panel);
   expect(after.viewportY).toBe(before.viewportY);
   expect(await maskAppearances(page, panel)).toEqual([]);
+});
+
+// A composer echo usually changes one row. Calling scrollToBottom at an already
+// settled bottom promotes xterm's dirty range to a full-viewport redraw.
+test('Windows terminal echo repaints only changed rows at the bottom', async ({ page }) => {
+  const { panel } = await bootFixture(page, 'performance', false, false, 'win32');
+  await page.clock.runFor(1000);
+  await xtermEvaluate(panel, (terminal) => {
+    // SAFETY: the helper returns a real xterm; these are public xterm APIs.
+    const observed = terminal as typeof terminal & {
+      rows: number;
+      onRender(callback: (range: { start: number; end: number }) => void): { dispose(): void };
+    };
+    window.__terminalEchoPaints = [];
+    window.__terminalEchoRows = observed.rows;
+    observed.onRender(range => window.__terminalEchoPaints?.push(range));
+  });
+  await mockEvaluate(page, mock => mock.emitPanelTerminalOutput(
+    'terminal-blur-session', 'blur-primary', '\rtyping into the agent composer',
+  ));
+  await page.clock.runFor(250);
+  const paints = await page.evaluate(() => ({
+    ranges: window.__terminalEchoPaints ?? [],
+    rows: window.__terminalEchoRows ?? 0,
+  }));
+  expect(paints.ranges.length).toBeGreaterThan(0);
+  expect(paints.ranges.every(range => range.end - range.start + 1 < paints.rows)).toBe(true);
+  const after = await readSnapshot(panel);
+  expect(after.lines.at(-1)).toContain('typing into the agent composer');
+  expect(after.viewportY).toBe(after.baseY);
+});
+
+test('terminal output preserves history viewing and follows new lines at the bottom', async ({ page }) => {
+  const { panel } = await bootFixture(page, 'performance', false, false, 'win32');
+  await page.clock.runFor(1000);
+  await scrollUp(panel, 20);
+  await page.clock.runFor(100);
+  const before = await readSnapshot(panel);
+  expect(before.viewportY).toBeLessThan(before.baseY);
+  await mockEvaluate(page, mock => mock.emitPanelTerminalOutput(
+    'terminal-blur-session', 'blur-primary', '\rstill drafting',
+  ));
+  await page.clock.runFor(250);
+  expect((await readSnapshot(panel)).viewportY).toBe(before.viewportY);
+  await xtermEvaluate(panel, terminal => terminal.scrollLines(10000));
+  await page.clock.runFor(100);
+  await mockEvaluate(page, mock => mock.emitPanelTerminalOutput(
+    'terminal-blur-session', 'blur-primary', '\r\nnext output\r\n',
+  ));
+  await page.clock.runFor(250);
+  const after = await readSnapshot(panel);
+  expect(after.viewportY).toBe(after.baseY);
+  expect(after.baseY).toBeGreaterThan(before.baseY);
+  expect(after.lines.at(-1)).toBe('next output');
 });

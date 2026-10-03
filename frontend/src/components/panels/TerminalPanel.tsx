@@ -1600,16 +1600,22 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             terminal.write(output, () => {
               if (disposed) return;
               markPanelOutput(panel.id);
-              // Ack AFTER xterm has rendered the data — proper backpressure
+              // Ack AFTER xterm has parsed the data — proper backpressure.
               pendingAckBytes += outputLength;
               if (pendingAckBytes >= ACK_BATCH_SIZE) {
                 flushAck();
               } else if (!ackFlushTimer) {
                 ackFlushTimer = setTimeout(flushAck, ACK_BATCH_INTERVAL);
               }
-              // Read scroll position LIVE after render, not before write —
+              // Read scroll position LIVE after parsing, not before write —
               // avoids stale shouldSnap=true yanking user back to bottom
-              if (isNearBottomRef.current && terminal) {
+              // xterm's scrollToBottom refreshes every viewport row even for a
+              // zero-distance scroll. Preserve its dirty-row repaint for CLI
+              // typing echoes that already leave the viewport at the bottom.
+              if (
+                isNearBottomRef.current && terminal
+                && terminal.buffer.active.viewportY !== terminal.buffer.active.baseY
+              ) {
                 terminal.scrollToBottom();
               }
             });

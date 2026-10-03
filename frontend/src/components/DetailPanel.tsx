@@ -40,7 +40,6 @@ interface DetailPanelProps {
 }
 
 const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus:!ring-0';
-const remoteIdeTooltip = 'Open in IDE is only available in local mode. Switch this client back to the local runtime to use your desktop IDE.';
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return <h3 className="mb-1 px-2 text-[10px] font-semibold uppercase leading-4 tracking-wider text-text-tertiary">{children}</h3>;

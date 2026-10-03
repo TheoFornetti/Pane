@@ -5048,7 +5048,7 @@ describe('runpane IPC handlers', () => {
     function createPushedRepo(name: string) {
       const repoPath = createTempGitRepo(name);
       const remotePath = path.join(path.dirname(repoPath), `${name}-remote.git`);
-      execFileSync('git', ['init', '--bare', remotePath], { stdio: 'ignore' });
+      execFileSync('git', ['init', '--bare', '--initial-branch=main', remotePath], { stdio: 'ignore' });
       fs.writeFileSync(path.join(repoPath, 'README.md'), 'hello\n');
       execFileSync('git', ['add', 'README.md'], { cwd: repoPath, stdio: 'ignore' });
       execFileSync('git', ['commit', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
@@ -5304,7 +5304,7 @@ describe('runpane IPC handlers', () => {
       const repoPath = createTempGitRepo(name);
       const parent = path.dirname(repoPath);
       const remotePath = path.join(parent, `${name}-remote.git`);
-      execFileSync('git', ['init', '--bare', remotePath], { stdio: 'ignore' });
+      execFileSync('git', ['init', '--bare', '--initial-branch=main', remotePath], { stdio: 'ignore' });
       fs.writeFileSync(path.join(repoPath, 'README.md'), 'hello\n');
       execFileSync('git', ['add', 'README.md'], { cwd: repoPath, stdio: 'ignore' });
       execFileSync('git', ['commit', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
@@ -5770,7 +5770,7 @@ describe('runpane IPC handlers', () => {
     it('refuses to archive a pane with commits unpushed to its remote upstream', async () => {
       const repoPath = createTempGitRepo('unpushed-repo');
       const remotePath = path.join(path.dirname(repoPath), 'unpushed-remote.git');
-      execFileSync('git', ['init', '--bare', remotePath], { stdio: 'ignore' });
+      execFileSync('git', ['init', '--bare', '--initial-branch=main', remotePath], { stdio: 'ignore' });
       execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
       execFileSync('git', ['branch', '-M', 'main'], { cwd: repoPath, stdio: 'ignore' });
       execFileSync('git', ['remote', 'add', 'origin', remotePath], { cwd: repoPath, stdio: 'ignore' });
@@ -5831,7 +5831,7 @@ describe('runpane IPC handlers', () => {
     it('refreshes a stale remote-tracking ref before deciding that pushed commits are unpushed', async () => {
       const repoPath = createTempGitRepo('stale-upstream-repo');
       const remotePath = path.join(path.dirname(repoPath), 'remote.git');
-      execFileSync('git', ['init', '--bare', remotePath], { stdio: 'ignore' });
+      execFileSync('git', ['init', '--bare', '--initial-branch=main', remotePath], { stdio: 'ignore' });
       execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
       execFileSync('git', ['branch', '-M', 'main'], { cwd: repoPath, stdio: 'ignore' });
       const staleSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoPath, encoding: 'utf8' }).trim();
@@ -5921,7 +5921,7 @@ describe('runpane IPC handlers', () => {
     it('archives a pane whose branch is merged and fully pushed (0 unpushed commits)', async () => {
       const repoPath = createTempGitRepo('merged-repo');
       const remotePath = path.join(path.dirname(repoPath), 'merged-remote.git');
-      execFileSync('git', ['init', '--bare', remotePath], { stdio: 'ignore' });
+      execFileSync('git', ['init', '--bare', '--initial-branch=main', remotePath], { stdio: 'ignore' });
       execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
       execFileSync('git', ['branch', '-M', 'main'], { cwd: repoPath, stdio: 'ignore' });
       execFileSync('git', ['remote', 'add', 'origin', remotePath], { cwd: repoPath, stdio: 'ignore' });

@@ -311,11 +311,6 @@ async function withFakeDaemon(paneDir, onRequest, action, onFrame = () => {}) {
     pendingResponseTimers.delete(socket);
   };
   const server = net.createServer((socket) => {
-    socket.on('error', (error) => {
-      // runWatchCli kills the peer once the required output is observed, which
-      // can reset a response in flight. Other fixture failures must still fail.
-      if (error.code !== 'ECONNRESET') socketError ??= error;
-    });
     let buffer = '';
     socket.on('error', (error) => rememberSocketError(error, socket));
     socket.once('close', () => clearResponseTimers(socket));

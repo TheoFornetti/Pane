@@ -1270,7 +1270,10 @@
         "paneHandoffRequest",
         "paneHandoffResult"
       ],
-      "localControl": true
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
     },
     {
       "name": "panes receive",
@@ -1283,7 +1286,10 @@
         "paneReceiveRequest",
         "paneReceiveResult"
       ],
-      "localControl": true
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
     }
   ],
   "flags": {

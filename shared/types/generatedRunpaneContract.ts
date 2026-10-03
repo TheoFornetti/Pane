@@ -1272,7 +1272,10 @@ export const RUNPANE_CONTRACT = {
         "paneHandoffRequest",
         "paneHandoffResult"
       ],
-      "localControl": true
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
     },
     {
       "name": "panes receive",
@@ -1285,7 +1288,10 @@ export const RUNPANE_CONTRACT = {
         "paneReceiveRequest",
         "paneReceiveResult"
       ],
-      "localControl": true
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
     }
   ],
   "flags": {

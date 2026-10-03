@@ -523,7 +523,7 @@ export class PaneRemoteHttpApiServer {
       );
       this.writeJson(response, 200, {
         ok: true,
-        result,
+        result: result === undefined ? undefined : decodeBoundary(JSON.parse(JSON.stringify(result)), boundary.json),
       } satisfies RemoteInvokeSuccessPayload, request);
     } catch (error) {
       if (error instanceof RemoteDaemonBadRequestError) {

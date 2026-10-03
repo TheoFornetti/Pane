@@ -476,7 +476,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('returns emulated live screen and restore state for daemon and renderer reads', async () => {
-    const manager = testAccess<SnapshotAccess>(new TerminalPanelManager(inProcessEmulatorHost, panelManager));
+    const manager = testAccess<SnapshotAccess>(new TerminalPanelManager(inProcessEmulatorHost, undefined, panelManager));
     const screenEmulator = inProcessEmulatorHost().createEmulator(40, 5);
     screenEmulator.write('\x1b[?1049h\x1b[Hagent screen');
     await screenEmulator.refresh();
@@ -535,7 +535,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('serves normal-buffer restore content from the rendered emulator, not the raw append log', async () => {
-    const manager = testAccess<SnapshotAccess>(new TerminalPanelManager(inProcessEmulatorHost, panelManager));
+    const manager = testAccess<SnapshotAccess>(new TerminalPanelManager(inProcessEmulatorHost, undefined, panelManager));
     const screenEmulator = inProcessEmulatorHost().createEmulator(40, 5);
     const frame = 'PR #363 state unchanged';
     // Live stream: the frame prints once, then forced-redraw repaints re-emit it
@@ -625,7 +625,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
 
   it('delivers pending ready initial input with the panel submit strategy', async () => {
     vi.useFakeTimers();
-    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager(inProcessEmulatorHost, panelManager));
+    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager(inProcessEmulatorHost, undefined, panelManager));
     const terminal = createTerminal({ screenEmulator: inProcessEmulatorHost().createEmulator(40, 5) });
     manager.terminals.set(terminal.panelId, terminal);
     manager.registerAgentStatusPanel(terminal);
@@ -665,7 +665,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('delivers after a premark clear when the cliReady path already skipped', async () => {
-    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager(inProcessEmulatorHost, panelManager));
+    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager(inProcessEmulatorHost, undefined, panelManager));
     const terminal = createTerminal({ screenEmulator: inProcessEmulatorHost().createEmulator(40, 5) });
     manager.terminals.set(terminal.panelId, terminal);
     manager.registerAgentStatusPanel(terminal);

@@ -335,6 +335,7 @@ export class TerminalPanelManager extends EventEmitter {
   constructor(
     private readonly emulatorHost: () => TerminalEmulatorHostConnection = sharedEmulatorThread,
     private readonly readForegroundExecutable: (shellPid: number) => Promise<string | undefined> = readForegroundExecutablePath,
+    private readonly panels: Pick<typeof panelManager, 'getPanel' | 'updatePanel' | 'emitPanelEvent'> = panelManager,
   ) {
     super();
     this.setMaxListeners(100);

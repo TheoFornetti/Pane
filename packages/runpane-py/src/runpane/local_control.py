@@ -585,7 +585,7 @@ def run_panes_adopt(parsed: Any) -> int:
     if parsed.json:
         print_json(result)
     else:
-        print_pane_create_result(result)
+        print_pane_create_result(result, bool(request.get("dryRun")), "adopt")
 
     return 0 if result.get("ok") else 1
 
@@ -1595,15 +1595,15 @@ def print_pane_cost_models(models: list[Dict[str, Any]]) -> None:
         print(f"  {model.get('model')}\t{model.get('totalTokens', 0)} tokens\t{cost}")
 
 
-def print_pane_create_result(result: Dict[str, Any], dry_run: bool = False) -> None:
+def print_pane_create_result(result: Dict[str, Any], dry_run: bool = False, action: str = "create") -> None:
     for item in result.get("items", []):
         name = item.get("name") or f"pane {item.get('index')}"
         if item.get("ok"):
             worktree = f" at {item.get('worktreePath')}" if item.get("worktreePath") else ""
             if dry_run:
-                print(f"Would create {name}{worktree}")
+                print(f"Would {action} {name}{worktree}")
                 continue
-            print(f"Created {name}: session {item.get('sessionId', 'unknown')} panel {item.get('panelId', 'unknown')}{worktree}")
+            print(f"{'Adopted' if action == 'adopt' else 'Created'} {name}: session {item.get('sessionId', 'unknown')} panel {item.get('panelId', 'unknown')}{worktree}")
             readiness = item.get("readiness")
             if readiness:
                 ready_state = "yes" if readiness.get("ok") else "timed out" if readiness.get("timedOut") else "blocked"

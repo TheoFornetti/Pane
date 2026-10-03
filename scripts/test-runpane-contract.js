@@ -4092,7 +4092,7 @@ async function checkDryRunMessages() {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-dry-run-messages-'));
   try {
     for (const runtime of ['npm', 'pip']) {
-      for (const command of ['pin', 'unpin', 'create', ...(runtime === 'npm' ? ['adopt'] : [])]) {
+      for (const command of ['pin', 'unpin', 'create', 'adopt']) {
         const args = ['panes', command, '--dry-run'];
         if (command === 'pin' || command === 'unpin') args.push('--pane', 's1');
         else args.push('--repo', 'active', '--name', 'Work', '--agent', 'codex');

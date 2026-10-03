@@ -232,7 +232,7 @@ test('terminal palette and rendered diff follow a System slot flip', async ({ pa
   const terminalBackground = () => readTerminalTheme(terminalSurface).then((theme) => theme.background ?? '');
   await expect.poll(terminalBackground).not.toBe('');
   const lightBackground = await terminalBackground();
-  await page.getByRole('treeitem', { name: /^Open diff for example\.ts,/ }).click();
+  await page.getByRole('option', { name: /^Open diff for example\.ts,/ }).click();
   await expect(page.getByText('example.ts', { exact: true }).last()).toBeVisible();
   const lightDiffColor = await page.getByText('export const value = 2;', { exact: false }).last().evaluate((element) => getComputedStyle(element).color);
 

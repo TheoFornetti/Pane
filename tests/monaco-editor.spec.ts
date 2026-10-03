@@ -105,21 +105,21 @@ test('retargeted files stay editable and restore their own cursor after remount'
   await expect(page.locator('.monaco-editor .view-lines')).toContainText('beta');
   await input.focus();
   await input.press('ControlOrMeta+a');
-  await page.keyboard.type('{ "edited": true }');
+  await page.keyboard.insertText('true');
   await input.press('ControlOrMeta+s');
-  await expect.poll(() => savedFile(page, 'beta.json')).toBe('{ "edited": true }');
+  await expect.poll(() => savedFile(page, 'beta.json')).toBe('true');
   expect(await page.evaluate(() => window.__editorModelCount)).toBe(1);
 
   await page.getByRole('button', { name: 'Toggle editor', exact: true }).click();
   await expect(page.locator('.monaco-editor')).toHaveCount(0);
   expect(await page.evaluate(() => window.__editorModelCount)).toBe(0);
   await page.getByRole('button', { name: 'Toggle editor', exact: true }).click();
-  await expect(page.locator('.monaco-editor .view-lines')).toContainText('edited');
+  await expect(page.locator('.monaco-editor .view-lines')).toContainText('true');
   await input.focus();
   await input.press('ControlOrMeta+a');
-  await page.keyboard.type('{ "remounted": true }');
+  await page.keyboard.insertText('false');
   await input.press('ControlOrMeta+s');
-  await expect.poll(() => savedFile(page, 'beta.json')).toBe('{ "remounted": true }');
+  await expect.poll(() => savedFile(page, 'beta.json')).toBe('false');
   expect(errors).toEqual([]);
 });
 

@@ -52,7 +52,7 @@ test('worktree navigation keeps panel state without loading obsolete conversatio
     };
   });
   await page.clock.install();
-  await page.getByRole('button', { name: 'Expand repository Session navigation fixture', exact: true }).click();
+  await page.getByRole('button', { name: 'Expand project Session navigation fixture', exact: true }).click();
   await page.getByRole('button', { name: 'First pane', exact: true }).click();
   await expect(page.locator('.pane-session-content')).toBeVisible();
   await page.getByRole('tab', { name: /second log/ }).click();

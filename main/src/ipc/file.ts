@@ -10,7 +10,6 @@ import { glob } from 'glob';
 import { hasCommitMessageTitle } from '../../../shared/utils/commitMessage';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
-import type { PathResolver } from '../utils/pathResolver';
 import { commitGitMessage } from '../utils/gitCommit';
 import { revealInFileManager } from '../utils/revealInFileManager';
 

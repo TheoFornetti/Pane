@@ -250,7 +250,7 @@ describe('WorktreeManager.resolveWorkingDirectory', () => {
   it('renames a claimed reserve branch to the exact requested name', async () => {
     const runner = commandRunner(async command => {
       if (command === 'git fetch' || command.startsWith('git worktree add -b ')) return { stdout: '', stderr: '' };
-      if (/^git rev-parse ['"]?origin\/main['"]?$/.test(command)) {
+      if (command === 'git rev-parse --verify --end-of-options origin/main') {
         return { stdout: 'base-commit\n', stderr: '' };
       }
       if (command.startsWith('git worktree move ') || command.startsWith('git branch -m ')) return { stdout: '', stderr: '' };
@@ -265,8 +265,9 @@ describe('WorktreeManager.resolveWorkingDirectory', () => {
     );
 
     expect(claimed).toEqual({ worktreePath: '/repo-claim/worktrees/w5a' });
-    const renameCall = vi.mocked(runner.execAsync).mock.calls.find(([command]) => command.startsWith('git branch -m '));
-    expect(renameCall?.[0]).toMatch(/^git branch -m ['"]_reserve\/[0-9a-f]{8}['"] ['"]agents\/w5a['"]$/);
+    const renameCall = vi.mocked(runner.execFile).mock.calls.find(([, args]) => args[0] === 'branch' && args[1] === '-m');
+    expect(renameCall?.[0]).toBe('git');
+    expect(renameCall?.[1]).toEqual(['branch', '-m', '--', expect.stringMatching(/^_reserve\/[0-9a-f]{8}$/), 'agents/w5a']);
   });
 });
 

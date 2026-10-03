@@ -148,10 +148,12 @@ async function renameWhileBusy(from: string, to: string, budgetMs: number): Prom
  *
  * `git worktree remove --force` can delete every file inside the worktree and
  * then fail on the root directory, because a live process is sitting in it.
- * The worktree is gone in every way that matters at that point, so finish the
- * job by hand instead of reporting the whole archive as failed: move the
- * leftover aside — an empty directory moves as soon as its last holder exits —
- * or delete it in place.
+ * Recover that case by moving the leftover aside, or removing an empty root.
+ * Git can also fail with files still present (for example, Windows long paths).
+ * Never recursively delete that leftover in place: fs.rm retries can restart
+ * child walks at every depth, with no cancellation or total retry deadline.
+ * One busy descendant can hold the serial archive queue for minutes.
+ * Only a successful rename makes recursive background deletion safe.
  *
  * Returns whether the leftover ended up at `trashPath`, so the caller deletes
  * it in the background like any other trashed worktree. Rethrows git's error
@@ -178,7 +180,7 @@ async function removeWithGit(
     } catch (renameError) {
       console.warn(`[WorktreeTrash] leftover_rename_failed worktreePath=${JSON.stringify(worktreePath)}:`, renameError);
     }
-    await fs.rm(worktreePath, { recursive: true, force: true, maxRetries: 5, retryDelay: BUSY_RETRY_DELAY_MS })
+    await fs.rmdir(worktreePath)
       .catch(error => console.warn(`[WorktreeTrash] leftover_delete_failed worktreePath=${JSON.stringify(worktreePath)}:`, error));
     if (await exists(worktreePath)) throw gitError;
     return false;

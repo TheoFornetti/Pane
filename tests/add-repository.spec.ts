@@ -4,7 +4,7 @@ import { installElectronApiMock } from './electronApiMock';
 
 async function openAddDialog(page: Page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: 'New Project' }).click();
+  await page.getByRole('button', { name: 'New Project', exact: true }).click();
   await expect(page.getByText('Add New Repository')).toBeVisible();
 }
 

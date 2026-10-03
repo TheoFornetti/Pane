@@ -11,7 +11,7 @@ import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
 import { PaneContextMenu, type PaneContextMenuState } from './PaneContextMenu';
 import { RenamePaneDialog } from './RenamePaneDialog';
-import { AgentStatusDot } from './ui/AgentStatusDot';
+import { AgentActivityDot, AgentStatusDot } from './ui/AgentStatusDot';
 import type { DropdownItem } from './ui/Dropdown';
 import { useSessionAgentDisplayStatus } from '../hooks/useAgentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
@@ -692,7 +692,9 @@ function SessionRowContent({
         ) : (
           <GitBranch className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
         )}
-        <AgentStatusDot status={agentDisplayStatus} size="sm" className="flex-shrink-0" />
+        {agentDisplayStatus === 'unknown'
+          ? <span role="status" aria-label="Agent status unknown" className="flex-shrink-0"><AgentActivityDot active={false} size="sm" /></span>
+          : <AgentStatusDot status={agentDisplayStatus} size="sm" className="flex-shrink-0" />}
         <span className={cn(
           'min-w-0 flex-1 truncate text-[13px] font-medium text-navigation-primary decoration-status-info decoration-2 underline-offset-4',
           showUnviewedCompleted && 'underline decoration-dashed'
@@ -710,7 +712,9 @@ function SessionRowContent({
       ) : (
         <GitBranch className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       )}
-      <AgentStatusDot status={agentDisplayStatus} size="sm" className="mt-0.5 flex-shrink-0" />
+      {agentDisplayStatus === 'unknown'
+        ? <span role="status" aria-label="Agent status unknown" className="mt-0.5 flex-shrink-0"><AgentActivityDot active={false} size="sm" /></span>
+        : <AgentStatusDot status={agentDisplayStatus} size="sm" className="mt-0.5 flex-shrink-0" />}
       <div className="flex min-w-0 flex-1 flex-col">
         <span className={cn(
           'min-w-0 truncate text-[13px] font-medium leading-5 text-navigation-primary decoration-status-info decoration-2 underline-offset-4',

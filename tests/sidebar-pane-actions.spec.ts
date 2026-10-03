@@ -76,7 +76,7 @@ test.describe('sidebar pane actions', () => {
     await row.click({ button: 'right' });
     menu = page.getByRole('menu', { name: 'Pane actions for Regular work' });
     await expectNoAxeViolations(page);
-    await menu.getByRole('menuitem', { name: 'Rename' }).click();
+    await menu.getByRole('menuitem', { name: 'Rename', exact: true }).click();
 
     const input = page.getByRole('textbox', { name: 'Pane name' });
     await expect(input).toBeFocused();
@@ -108,7 +108,7 @@ test.describe('sidebar pane actions', () => {
     const row = page.getByRole('button', { name: 'Regular work', exact: true }).last();
     await row.click();
     await row.click({ button: 'right' });
-    await page.getByRole('menuitem', { name: 'Rename' }).click();
+    await page.getByRole('menuitem', { name: 'Rename', exact: true }).click();
     await page.getByRole('textbox', { name: 'Pane name' }).fill('Human label');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Human label', exact: true })).toBeVisible();
@@ -145,7 +145,7 @@ test.describe('sidebar pane actions', () => {
     await setup(page);
     const row = page.getByRole('button', { name: 'Regular work', exact: true }).last();
     await row.click({ button: 'right' });
-    await page.getByRole('menuitem', { name: 'Rename' }).click();
+    await page.getByRole('menuitem', { name: 'Rename', exact: true }).click();
     const input = page.getByRole('textbox', { name: 'Pane name' });
     await input.fill('   ');
     await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();

@@ -1611,15 +1611,14 @@ def print_pane_create_result(result: Dict[str, Any], dry_run: bool = False, acti
                 blocked = readiness.get("blocked")
                 if blocked:
                     print(f"  Blocked: {blocked.get('message')}")
+            print_initial_input_delivery(item.get("initialInput"), "  ")
             association = item.get("association")
             if association:
                 if association.get("ok"):
                     print(f"  Associated with Session {association.get('sessionId')}")
                 else:
                     print(f"  Not associated with Session {association.get('sessionId')}: {association.get('error', 'unknown error')}")
-            print_delivery((item.get("initialInput") or {}).get("delivery"), "  ")
             print_prompt_notes(item, "  ")
-            print_initial_input_delivery(item.get("initialInput"), "  ")
             if item.get("nextCommand"):
                 print(f"  Next: {item.get('nextCommand')}")
         else:
@@ -1709,16 +1708,14 @@ def print_panel_create_result(result: Dict[str, Any]) -> None:
         blocked = readiness.get("blocked")
         if blocked:
             print(f"Blocked: {blocked.get('message')}")
-    print_prompt_notes(result)
     print_initial_input_delivery(result.get("initialInput"))
+    print_prompt_notes(result)
     if result.get("nextCommand"):
         print(f"Next: {result.get('nextCommand')}")
 
 
 def print_initial_input_delivery(initial_input: Optional[Dict[str, Any]], prefix: str = "") -> None:
     if initial_input is None:
-        return
-    if "delivery" in initial_input and not any(key in initial_input for key in ("submitted", "delivered")):
         return
     status = "submitted" if initial_input.get("submitted") else "delivered but not verified submitted" if initial_input.get("delivered") else "not delivered"
     strategy = f" via {initial_input['sequenceName']}" if initial_input.get("sequenceName") else ""
@@ -1730,6 +1727,7 @@ def print_initial_input_delivery(initial_input: Optional[Dict[str, Any]], prefix
     if "staged" in initial_input:
         staged = f"; staged: {'yes' if initial_input['staged'] else 'no'}"
     print(f"{prefix}Initial input: {status}{strategy}{attempts}{staged}")
+    print_delivery(initial_input.get("delivery"), prefix)
     if initial_input.get("blocked"):
         print(f"{prefix}Initial input blocked: {initial_input['blocked']['message']}")
     if initial_input.get("error"):

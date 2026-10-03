@@ -92,12 +92,13 @@ for (const kind of ['panes', 'panels']) {
       { inputBytes: 3, submitted: false, delivered: true, sequenceName: 'enter-cr', attempts: 1, staged: true },
       { inputBytes: 3, submitted: true, delivered: true, attempts: 2 },
     ];
+    for (const [index, delivery] of deliveries.entries()) delivery.delivery = { state: ['unknown', 'in-composer', 'taken'][index], evidence: ['screen', 'screen', 'transcript'][index] };
     const output = runPython(`
 import json, sys
 import runpane.local_control as local
 from runpane.cli import main
 for delivery in json.load(sys.stdin):
-    item = {'ok': True, 'index': 0, 'name': 'Example', 'sessionId': 'p1', 'paneId': 'p1', 'panelId': 't1', 'title': 'Agent', 'active': False, 'initialInput': delivery}
+    item = {'ok': True, 'index': 0, 'name': 'Example', 'sessionId': 'p1', 'paneId': 'p1', 'panelId': 't1', 'title': 'Agent', 'active': False, 'initialInput': delivery, 'association': {'ok': True, 'sessionId': 'orchestration-1'}, 'promptFile': '/tmp/prompt.md', 'warnings': [{'code': 'terminal-not-ready', 'message': 'Fixture warning'}]}
     result = {'ok': True, 'items': [item]} if '${kind}' == 'panes' else item
     local.invoke_daemon = lambda *args, **kwargs: result
     args = ['panes', 'create', '--repo', 'repo', '--name', 'Example', '--agent', 'codex', '--yes'] if '${kind}' == 'panes' else ['panels', 'create', '--pane', 'p1', '--agent', 'codex', '--yes']
@@ -108,7 +109,7 @@ for delivery in json.load(sys.stdin):
       const { main } = require('./packages/runpane/dist/cli');
       (async () => {
         for (const delivery of ${JSON.stringify(deliveries)}) {
-          const item = { ok: true, index: 0, name: 'Example', sessionId: 'p1', paneId: 'p1', panelId: 't1', title: 'Agent', active: false, focused: false, pinned: false, tool: {title: 'Agent', command: 'codex'}, initialInput: delivery };
+          const item = { ok: true, index: 0, name: 'Example', sessionId: 'p1', paneId: 'p1', panelId: 't1', title: 'Agent', active: false, focused: false, pinned: false, tool: {title: 'Agent', command: 'codex'}, initialInput: delivery, association: {ok: true, sessionId: 'orchestration-1'}, promptFile: '/tmp/prompt.md', warnings: [{code: 'terminal-not-ready', message: 'Fixture warning'}] };
           daemon.invokeDaemon = async () => '${kind}' === 'panes'
             ? {ok: true, repo: {id: 1, name: 'Repo', path: '/repo', active: true, sessionCount: 0}, items: [item]}
             : item;

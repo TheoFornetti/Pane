@@ -10,7 +10,6 @@ import { sanitizeTerminalOutput } from '../utils/terminalOutputSanitizer';
 import { escapeShellArg } from '../utils/shellEscape';
 import {
   boundSanitizedLines,
-  normalizeScrollbackBuffer,
   selectPanelScreenText,
 } from '../services/panels/terminalScreenText';
 import { panelManager } from '../services/panelManager';

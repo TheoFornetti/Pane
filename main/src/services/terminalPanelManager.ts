@@ -1873,7 +1873,7 @@ export class TerminalPanelManager extends EventEmitter {
       alternateScreenBuffer: terminal.alternateScreenBuffer,
       // Survives dispose: the emulator keeps its last screen text, so a panel
       // saved on exit still knows what the agent finished on.
-      screenText: terminal.screenEmulator?.getScreenText(),
+      screenText: restore?.screenText ?? terminal.screenEmulator?.state.screenText,
       isAlternateScreen: savedIsAlternateScreen,
       lastActivityTime: terminal.lastActivity.toISOString(),
       serializedBuffer: restore?.isAlternateScreen

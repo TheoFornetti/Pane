@@ -28,5 +28,5 @@ it('preserves acknowledgements from legacy viewers without an id', () => {
   const invoke = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal('window', { electronAPI: { ptyHost: { ack: vi.fn() }, invoke } });
   acknowledgeTerminalOutput('panel-1', 5_000, null, true);
-  expect(invoke).toHaveBeenCalledWith('terminal:ack', 'panel-1', 5_000, 'panel-viewer');
+  expect(invoke).toHaveBeenCalledWith('terminal:ack', 'panel-1', 5_000);
 });

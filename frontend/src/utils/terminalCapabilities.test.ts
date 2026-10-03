@@ -49,8 +49,8 @@ describe('terminalCapabilityOptions', () => {
   });
 
   it('carries the user kitty keyboard setting either way', () => {
-    expect(terminalCapabilityOptions(true).vtExtensions).toEqual({ kittyKeyboard: true });
-    expect(terminalCapabilityOptions(false).vtExtensions).toEqual({ kittyKeyboard: false });
+    expect(terminalCapabilityOptions(true).vtExtensions).toEqual({ kittyKeyboard: true, win32InputMode: true });
+    expect(terminalCapabilityOptions(false).vtExtensions).toEqual({ kittyKeyboard: false, win32InputMode: true });
   });
 });
 

@@ -72,17 +72,17 @@ describe('selectPanelScreenText', () => {
   it('reads persisted state when the panel has no live terminal', () => {
     const customState: TerminalPanelState = {
       isAlternateScreen: true,
-      alternateScreenBuffer: 'stored alt',
+      screenText: undefined,
     };
 
-    expect(selectPanelScreenText(null, customState)).toEqual({
+    expect(selectPanelScreenText(null, customState, { alternate: 'stored alt', scrollback: null, serialized: null })).toEqual({
       source: 'persistedOutput',
       rawText: 'stored alt',
     });
   });
 
-  it('joins a persisted line-array scrollback', () => {
-    expect(selectPanelScreenText(null, { scrollbackBuffer: ['one', 'two'] })).toEqual({
+  it('reads the SQLite scrollback column without a live terminal', () => {
+    expect(selectPanelScreenText(null, {}, { scrollback: 'one\ntwo', alternate: null, serialized: null })).toEqual({
       source: 'persistedOutput',
       rawText: 'one\ntwo',
     });

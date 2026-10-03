@@ -19,7 +19,6 @@ interface SessionEventData {
   sessionId: string;
 }
 
-type ValidatedEventData = SessionEventData;
 
 async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean): Promise<void> {
   if (hostChanged) {

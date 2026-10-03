@@ -5552,7 +5552,7 @@ describe('runpane IPC handlers', () => {
       const result = await createRegistry(services).invoke('runpane:panes:receive', [receiveRequest({ name: 'renamed' })]);
 
       // git worktree list reports the canonical path (/private/var on macOS), which is what receive stores.
-      const canonicalOrphanPath = fs.realpathSync.native(orphanPath);
+      const canonicalOrphanPath = fs.realpathSync.native(orphanPath).replace(/\\/g, '/');
       expect(result).toMatchObject({ ok: true, path: 'adopt-orphan', worktreePath: canonicalOrphanPath });
       expect(createSession).toHaveBeenCalledWith('renamed', canonicalOrphanPath, '', 'leftover', 'ignore', project.id, false, undefined, 'none', expect.any(String), 'origin/main', true);
       expect(gitOut(['rev-parse', 'HEAD'], orphanPath)).toBe(remoteSha);
@@ -6407,7 +6407,7 @@ describe('runpane IPC handlers', () => {
       it('treats an upstream deleted on the remote as gone and archives with merged PR evidence', async () => {
         const { repoPath, head } = createFeatureBranchRepo('upstream-gone-repo');
         const remotePath = path.join(path.dirname(repoPath), 'upstream-gone-remote.git');
-        execFileSync('git', ['init', '--bare', '-q', remotePath], { stdio: 'ignore' });
+        execFileSync('git', ['init', '--bare', '--initial-branch=main', '-q', remotePath], { stdio: 'ignore' });
         execFileSync('git', ['remote', 'add', 'origin', remotePath], { cwd: repoPath, stdio: 'ignore' });
         execFileSync('git', ['push', '-q', '-u', 'origin', 'feature'], { cwd: repoPath, stdio: 'ignore' });
         // GitHub deletes the head branch after merging; the local tracking ref goes stale.

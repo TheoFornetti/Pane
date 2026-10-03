@@ -403,6 +403,22 @@ describe('Remote PWA browser runtime', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it.each([400, 404])('does not retry permanent HTTP %s errors with a non-JSON body', async (status) => {
+    installBrowserGlobals();
+    const fetchMock = vi.fn(async () => new Response('Missing', { status }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(createClient().invoke('sessions:get-all-with-projects')).rejects.toThrow('Remote request failed with ' + status);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not replay a mutation after a malformed successful envelope', async () => {
+    installBrowserGlobals();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: 'yes' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(createClient().invoke('sessions:rename', ['pane', 'name'])).rejects.toThrow(/may have completed/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects malformed successful invoke response envelopes', async () => {
     vi.useFakeTimers();
     try {

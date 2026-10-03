@@ -415,6 +415,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
 
       const key = args[0] === undefined ? undefined : String(args[0]);
       const value = args[1] === undefined ? undefined : String(args[1]);
+      if (channel === 'panels:agent-statuses') return success([]);
       if (channel === 'terminal:get-shell-settings') {
         // Raw result, like the host: Windows shells only on a Windows host.
         return Promise.resolve({
@@ -751,6 +752,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         setActivePanel: (sessionId: string, panelId: string) => {
           setActiveMockPanel(sessionId, panelId);
+          panelActivations.push({ sessionId, panelId });
           return success();
         },
         createPanel: (sessionId: string, type: string, title: string, initialState?: JsonObject) => {
@@ -770,10 +772,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           // to place panels created outside its own create path into the layout.
           setTimeout(() => emit('panel:created', clone(panel)), 0);
           return success(clone(panel));
-        },
-        setActivePanel: (sessionId: string, panelId: string) => {
-          panelActivations.push({ sessionId, panelId });
-          return success();
         },
         shouldAutoCreate: () => success(false),
       }),

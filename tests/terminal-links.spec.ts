@@ -143,7 +143,7 @@ async function boot(page: Page, options: {
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Terminal links fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Terminal links fixture$/ }).click();
   await page.getByRole('button', { name: options.sessionName, exact: true }).click();
   const terminal = page.getByRole('tabpanel').locator('.xterm').first();
   await expect(terminal.locator('.xterm-screen')).toBeVisible({ timeout: 15_000 });
@@ -178,10 +178,10 @@ for (const platform of ['darwin', 'linux'] as const) {
     expect(created).toMatchObject({ sessionId: worktreeSession.id, type: 'browser', title: 'plain.example.com', state: { customState: { currentUrl: PLAIN_URL } } });
     await expect(page.getByRole('tab', { name: /plain\.example\.com|Browser/ })).toBeVisible();
     await page.waitForTimeout(200);
-    // Two activations: the router's own, plus SessionView's layout sync when the
-    // panel:created broadcast inserts the new tab (SessionView applyLayout) — the
-    // same as any panel creation. No second navigation or external open occurs.
-    expect(await counts(page)).toMatchObject({ external: 1, creates: 1, updates: 0, activations: 2 });
+    // The router inserts and activates the panel before the creation broadcast;
+    // SessionView ignores that duplicate event. No second activation or open occurs.
+    await expect(page.getByRole('tab', { name: /plain\.example\.com|Browser/ })).toHaveAttribute('aria-selected', 'true');
+    expect(await counts(page)).toMatchObject({ external: 1, creates: 1, updates: 0, activations: 1 });
   });
 }
 

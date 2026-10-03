@@ -21,6 +21,8 @@ describe('keyboard shortcut catalog', () => {
       'toggle-terminal', 'toggle-detail-panel', 'open-add-tool', 'run-dev-server',
       'usage-download', 'usage-share', 'scroll-focused-surface-up',
       'scroll-focused-surface-down', 'page-focused-surface-up', 'page-focused-surface-down',
+      'focus-session-tile-left', 'focus-session-tile-right', 'focus-session-tile-up',
+      'focus-session-tile-down', 'close-session-tile',
       ...Array.from({ length: 9 }, (_, index) => `panel-tab-${index + 1}`),
       ...Array.from({ length: 9 }, (_, index) => `switch-session-${index + 1}`),
       ...Array.from({ length: 4 }, (_, index) => `add-tool-custom-${index}`),

@@ -63,7 +63,7 @@ async function openShortcuts(page: Page) {
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Settings' }).first().click();
-  await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toBeVisible();
+  await expect(page.getByTestId('settings-page')).toBeVisible();
   await page.getByRole('button', { name: 'Shortcuts', exact: true }).click();
   const map = page.locator('[data-setting-id="keyboard-shortcut-map"]');
   await expect(map).toBeVisible();
@@ -119,11 +119,11 @@ test('shows the same inventory from a Project view with a WSL project on a Windo
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Shortcut settings fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Shortcut settings fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await expect(page.getByRole('tabpanel').locator('.xterm-screen').first()).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press('Control+Alt+/');
-  await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toBeVisible();
+  await expect(page.getByTestId('settings-page')).toBeVisible();
   const map = page.locator('[data-setting-id="keyboard-shortcut-map"]');
 
   await expect(map.locator('[data-shortcut-id]')).toHaveCount(expectedRowCount);
@@ -159,7 +159,7 @@ test('records with the keyboard only, cancels with Escape without closing Settin
   await expect(row.getByText('Press a key with the modifier')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(row.getByText('Recording cancelled')).toBeVisible();
-  await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toBeVisible();
+  await expect(page.getByTestId('settings-page')).toBeVisible();
   await expect(record).toBeFocused();
 
   await page.keyboard.press('Enter');
@@ -235,7 +235,7 @@ test('Help and the Add Tool menu show the effective chord after a remap and afte
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Shortcut settings fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Shortcut settings fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await expect(page.getByRole('tabpanel').locator('.xterm-screen').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('tabpanel').getByRole('status', { name: 'Loading terminal' })).toHaveCount(0, { timeout: 15_000 });
@@ -246,7 +246,7 @@ test('Help and the Add Tool menu show the effective chord after a remap and afte
   await page.keyboard.press('Escape');
 
   await page.keyboard.press('Control+Alt+/');
-  await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toBeVisible();
+  await expect(page.getByTestId('settings-page')).toBeVisible();
   const map = page.locator('[data-setting-id="keyboard-shortcut-map"]');
   await map.getByRole('button', { name: 'Reset all to defaults' }).click();
   await page.getByRole('dialog', { name: 'Reset all key bindings?' }).getByRole('button', { name: 'Reset all' }).click();

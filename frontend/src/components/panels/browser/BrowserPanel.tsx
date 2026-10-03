@@ -167,7 +167,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   useEffect(() => {
     const endsRemoteFileSession = Boolean(fileSession?.partition) && !isHostFileUrl;
     const decision = resolveBrowserNavigation(
-      { url: lastNavigationUrlRef.current, nonce: lastNavigationNonceRef.current },
+      { url: lastNavigationUrlRef.current ?? '', nonce: lastNavigationNonceRef.current },
       { currentUrl: currentUrlFromPanelState, nonce: navigationNonceFromPanelState },
     );
     lastNavigationNonceRef.current = navigationNonceFromPanelState;

@@ -1161,7 +1161,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
               terminal.loadAddon(webLinksAddon);
               webLinksAddonRef.current = webLinksAddon;
               const paneLinksAddon = new WebLinksAddonImpl((event, uri) => {
-                if (isMac ? event.metaKey : event.ctrlKey) {
+                if (isMac() ? event.metaKey : event.ctrlKey) {
                   void openPaneLink(uri).catch(error => console.error('[TerminalPanel] Failed to open Pane link:', error));
                 }
               }, { urlRegex: PANE_LINK_REGEX });

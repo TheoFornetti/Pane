@@ -34,6 +34,8 @@ const STATIC_SHORTCUT_IDS = [
   'usage-download', 'usage-share', 'scroll-focused-surface-up',
   'scroll-focused-surface-down', 'page-focused-surface-up',
   'page-focused-surface-down',
+  'focus-session-tile-left', 'focus-session-tile-right', 'focus-session-tile-up',
+  'focus-session-tile-down', 'close-session-tile',
 ] as const;
 
 export type StaticKeyboardShortcutId = typeof STATIC_SHORTCUT_IDS[number];
@@ -74,6 +76,11 @@ const APP_ENTRIES: readonly ShortcutCatalogEntry[] = [
   entry({ id: 'open-shortcut-settings', label: 'Open Shortcut Settings', category: 'shortcuts', scope: 'app', defaultChord: 'mod+alt+/' }),
   entry({ id: 'new-session', label: 'New Pane', category: 'session', scope: 'app', defaultChord: 'mod+n' }),
   entry({ id: 'new-project', label: 'New Project', category: 'navigation', scope: 'app', defaultChord: 'mod+shift+n' }),
+  entry({ id: 'focus-session-tile-left', label: 'Focus Session Left', category: 'view', scope: 'app', defaultChord: null }),
+  entry({ id: 'focus-session-tile-right', label: 'Focus Session Right', category: 'view', scope: 'app', defaultChord: null }),
+  entry({ id: 'focus-session-tile-up', label: 'Focus Session Up', category: 'view', scope: 'app', defaultChord: null }),
+  entry({ id: 'focus-session-tile-down', label: 'Focus Session Down', category: 'view', scope: 'app', defaultChord: null }),
+  entry({ id: 'close-session-tile', label: 'Stop tiling this Session', category: 'view', scope: 'app', defaultChord: null }),
 ];
 
 const SESSION_ENTRIES: readonly ShortcutCatalogEntry[] = [

@@ -53,7 +53,7 @@ async function panelCreates(page: Page): Promise<JsonObject[]> {
 
 async function openSession(page: Page, sessionName: string) {
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Launch shortcut fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Launch shortcut fixture$/ }).click();
   await page.getByRole('button', { name: sessionName, exact: true }).click();
   await expect(page.locator('.xterm-screen').first()).toBeVisible({ timeout: 15_000 });
   await page.mouse.click(20, 20);

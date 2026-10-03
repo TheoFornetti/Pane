@@ -13,6 +13,7 @@ from .daemon_actions import contract_command, run_daemon_action, run_links_creat
 from .doctor import run_doctor
 from .download import download_artifact
 from .generated_contract import RUNPANE_CONTRACT
+from .command_matching import match_command, is_runpane_local_command
 from .installers import (
     install_pane_artifact,
     launch_pane_client,
@@ -73,11 +74,6 @@ from .version import print_version
 
 SOURCE = "pip"
 
-COMMAND_MATCHERS = sorted(
-    ((command["name"], command["name"].split(" ")) for command in RUNPANE_CONTRACT["commands"]),
-    key=lambda item: len(item[1]),
-    reverse=True,
-)
 TARGETS = set(RUNPANE_CONTRACT["enums"]["installTargets"])
 FORMATS = set(RUNPANE_CONTRACT["enums"]["artifactFormats"])
 CHANNELS = set(RUNPANE_CONTRACT["enums"]["channels"])
@@ -570,12 +566,6 @@ def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
         index += 1
 
 
-def match_command(args: List[str]) -> Optional[Tuple[str, List[str]]]:
-    for command, tokens in COMMAND_MATCHERS:
-        if args[:len(tokens)] == tokens:
-            return command, tokens
-    return None
-
 
 def match_command_group_help(args: List[str]) -> Optional[str]:
     if len(args) != 2 or args[1] not in {"-h", "--help"}:
@@ -916,10 +906,6 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
-LOCAL_COMMANDS = {command["name"] for command in RUNPANE_CONTRACT["commands"] if command["localControl"]}
-
-def is_runpane_local_command(command: str) -> bool:
-    return command in LOCAL_COMMANDS
 
 
 def append_remote_arg(parsed: ParsedArgs, flag: str, value: Optional[str] = None) -> None:

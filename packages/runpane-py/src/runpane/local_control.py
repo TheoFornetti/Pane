@@ -446,13 +446,13 @@ def run_watch(parsed: Any) -> int:
                     event_include=[],
                 )
             except PaneDaemonClientError as error:
-                if not parsed.follow or error.code not in {
+                if not parsed.follow or (not error.retryable and error.code not in {
                     "ERR_RUNPANE_DAEMON_CLOSED",
                     "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
                     "ERR_RUNPANE_DAEMON_TIMEOUT",
                     "ECONNREFUSED",
                     "ENOENT",
-                }:
+                }):
                     return emit_watch_failure(error, output_format)
                 code = error.code or type(error).__name__
                 now_ms = time.monotonic() * 1_000

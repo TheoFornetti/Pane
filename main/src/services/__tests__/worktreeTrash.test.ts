@@ -63,7 +63,7 @@ describe('removeWorktreeViaTrash', () => {
 
     expect(outcome).toBe('done');
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     expect(git(repo, 'branch', '--list', 'feature')).toContain('feature');
     expect(readdirSync(join(repo, '.git', 'pane-trash'))).toEqual([]);
   });
@@ -93,7 +93,7 @@ describe('removeWorktreeViaTrash', () => {
 
     expect(outcome).toBe('pending');
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     const [entry] = readdirSync(join(repo, '.git', 'pane-trash'));
     expect(entry).toMatch(/^pane-2-[0-9a-f]{8}$/);
 
@@ -117,7 +117,7 @@ describe('removeWorktreeViaTrash', () => {
     expect(outcome).toBe('done');
     expect(attempts).toBe(4);
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     expect(execFile.mock.calls.some(([file, args]) => file === 'git' && args[0] === 'worktree' && args[1] === 'remove')).toBe(false);
   });
 
@@ -132,7 +132,7 @@ describe('removeWorktreeViaTrash', () => {
 
     expect(outcome).toBe('done');
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     expect(git(repo, 'branch', '--list', 'feature')).toContain('feature');
   });
 
@@ -160,7 +160,7 @@ describe('removeWorktreeViaTrash', () => {
 
     expect(outcome).toBe('done');
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     await waitForPendingWorktreeTrash();
     expect(readdirSync(join(repo, '.git', 'pane-trash'))).toEqual([]);
   });
@@ -181,7 +181,7 @@ describe('removeWorktreeViaTrash', () => {
 
     expect(outcome).toBe('done');
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
   });
 
   it('reports the git failure when the worktree directory really cannot be removed', async () => {
@@ -261,7 +261,7 @@ describe('removeWorktreeViaTrash', () => {
 
     expect(outcome).toBe('done');
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
   });
 
   it('leaves a locked worktree to git, which refuses to remove it', async () => {

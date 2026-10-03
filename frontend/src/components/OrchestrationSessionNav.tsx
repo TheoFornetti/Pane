@@ -12,7 +12,7 @@ import {
 } from '../stores/orchestrationSessionStore';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import type { OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
-import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../shared/types/paneChat';
+import { DEFAULT_PANE_CHAT_AGENT, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';

@@ -1158,7 +1158,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "panels last-message": lambda parsed, context: run_panels_last_message(parsed),
     "report": lambda parsed, context: run_report(parsed),
     "agents doctor": lambda parsed, context: run_agents_doctor(parsed),
-    "panes adopt": lambda parsed, context: run_panes_adopt(parsed, context),
+    "panes adopt": lambda parsed, context: run_panes_adopt(parsed),
     "help": lambda parsed, context: print(help_text(parsed.help_topic)) or 0,
     "install": lambda parsed, context: install_or_update(parsed, context),
     "update": lambda parsed, context: install_or_update(parsed, context),

@@ -9,7 +9,7 @@ describe('agent shell invocation', () => {
       executable: process.execPath,
       args: ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', prompt],
     });
-    const output = execFileSync('/bin/sh', ['-c', command], { encoding: 'utf8' });
+    const output = execFileSync('sh', ['-c', command], { encoding: 'utf8' });
     expect(JSON.parse(output)).toEqual([prompt]);
   });
 

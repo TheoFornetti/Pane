@@ -142,8 +142,8 @@ export class TaskQueue {
       const Queue: typeof import('bull') = RedisQueue ?? loadQueueDependency('bull');
 
       this.sessionQueue = new Queue('session-creation', queueOptions);
-      this.inputQueue = new RedisQueue('session-input', queueOptions);
-      this.continueQueue = new RedisQueue('session-continue', queueOptions);
+      this.inputQueue = new Queue('session-input', queueOptions);
+      this.continueQueue = new Queue('session-continue', queueOptions);
     }
     
     // Add event handlers for debugging

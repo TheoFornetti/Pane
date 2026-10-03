@@ -4155,7 +4155,7 @@ async function handoffPane(
   for (const panel of panelManager.getPanelsForSession(pane.id)) {
     if (panel.type !== 'terminal' || !getTerminalCustomState(panel).isCliPanel) continue;
     // Killing the PTY alone is not enough: re-viewing the panel re-runs its launch command.
-    terminalPanelManager.destroyTerminal(panel.id);
+    await terminalPanelManager.destroyTerminal(panel.id);
     await panelManager.deletePanel(panel.id);
   }
   databaseService.updateSession(pane.id, { handed_off_at: handedOffAt });

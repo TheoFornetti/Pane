@@ -5179,7 +5179,20 @@ describe('runpane IPC handlers', () => {
       const headBefore = gitOut(['rev-parse', 'HEAD'], repoPath);
       const { services, updateSessionDb, updateSessionMemory } = handoffServices(repoPath);
 
-      const result = await createRegistry(services).invoke('runpane:panes:handoff', [{ paneId: session.id, to: 'remote:VM', source: 'agent' }]);
+      let finishDestroy: () => void = () => { throw new Error('destroy not started'); };
+      let notifyDestroy: () => void = () => { throw new Error('destroy waiter not installed'); };
+      const destroyPending = new Promise<void>(resolve => { finishDestroy = resolve; });
+      const destroyStarted = new Promise<void>(resolve => { notifyDestroy = resolve; });
+      vi.mocked(terminalPanelManager.destroyTerminal).mockImplementation(() => {
+        notifyDestroy();
+        return destroyPending;
+      });
+      const handoff = createRegistry(services).invoke('runpane:panes:handoff', [{ paneId: session.id, to: 'remote:VM', source: 'agent' }]);
+      await destroyStarted;
+      expect(panelManager.deletePanel).not.toHaveBeenCalled();
+      expect(updateSessionMemory).not.toHaveBeenCalled();
+      finishDestroy();
+      const result = await handoff;
 
       expect(result).toMatchObject({
         ok: true,

@@ -80,15 +80,15 @@ import json
 import runpane.local_control as local
 
 def adopt(parsed):
-    print(json.dumps([parsed.repo, parsed.path, parsed.name, parsed.base, parsed.folder, parsed.resume, parsed.launch, parsed.no_focus, parsed.source], separators=(',', ':')))
+    print(json.dumps([parsed.repo, parsed.repo_path, parsed.name, parsed.base_branch, parsed.folder, parsed.resume, parsed.launch, parsed.no_focus, parsed.source], separators=(',', ':')))
     return 7
 
 local.run_panes_adopt = adopt
 from runpane.cli import main
-print(main(['panes', 'adopt', '--repo', 'r1', '--path', '/tmp/wt', '--name', 'adopted', '--base', 'main', '--folder', 'f1', '--resume', 'resume1', '--launch', '--no-focus', '--source', 'agent', '--yes']))
+print(main(['panes', 'adopt', '--repo', 'r1', '--path', '/tmp/wt', '--name', 'adopted', '--agent', 'codex', '--folder', 'f1', '--resume', 'resume1', '--launch', '--no-focus', '--source', 'agent', '--yes']))
 `);
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.stdout.trim().split(/\r?\n/), ['["r1","/tmp/wt","adopted","main","f1","resume1",true,true,"agent"]', '7']);
+  assert.deepEqual(result.stdout.trim().split(/\r?\n/), ['["r1","/tmp/wt","adopted",null,"f1","resume1",true,true,"agent"]', '7']);
 });
 
 for (const runtime of ['npm', 'pip']) {

@@ -418,6 +418,12 @@ export function workspaceFilterKey(filter: WorkspaceJournalFilter): string {
   });
 }
 
+export function isQuietPanelEntry(entry: RunpaneWorkspaceEntry, quietPanelIds: readonly string[] | undefined): boolean {
+  return Boolean(entry.panelId && quietPanelIds?.includes(entry.panelId)
+    && (entry.kind === 'agent.ready' || entry.kind === 'agent.idle')
+    && !entry.heldInputPresent && entry.heldInput === undefined);
+}
+
 export function matchesFilter(
   entry: RunpaneWorkspaceEntry,
   filter: WorkspaceJournalFilter,
@@ -427,9 +433,7 @@ export function matchesFilter(
   if (!filter.kinds && filter.sessionId === undefined && entry.kind === 'agent.report') return false;
   if (!filter.kinds && filter.sessionId === undefined && OPT_IN_KINDS.includes(entry.kind)) return false;
   if (filter.sessionId !== undefined && !matchesSession(entry, filter.sessionId, membership)) return false;
-  if (entry.panelId && filter.quietPanelIds?.includes(entry.panelId)
-    && (entry.kind === 'agent.ready' || entry.kind === 'agent.idle')
-    && !entry.heldInputPresent && entry.heldInput === undefined) return false;
+  if (isQuietPanelEntry(entry, filter.quietPanelIds)) return false;
   if (filter.paneIds && !filter.paneIds.includes(entry.paneId)) return false;
   if (filter.excludePaneIds && filter.excludePaneIds.includes(entry.paneId)) return false;
   if (filter.repoId !== undefined && entry.repoId !== filter.repoId) return false;

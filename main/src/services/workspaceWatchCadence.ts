@@ -2,7 +2,7 @@ import type {
   RunpaneWorkspaceEntry,
   RunpaneWorkspaceEntryKind,
 } from '../../../shared/types/runpaneOrchestration';
-import { matchesFilter, type WorkspaceJournalFilter } from './workspaceJournal';
+import { isQuietPanelEntry, type WorkspaceJournalFilter } from './workspaceJournal';
 
 export interface WatchCadenceOptions {
   settleMs: number;
@@ -124,7 +124,7 @@ export class WatchCadence {
 
   private emits(entry: RunpaneWorkspaceEntry): boolean {
     return (!this.options.emitKinds || this.options.emitKinds.includes(entry.kind))
-      && matchesFilter(entry, { quietPanelIds: this.options.quietPanelIds });
+      && !isQuietPanelEntry(entry, this.options.quietPanelIds);
   }
 }
 

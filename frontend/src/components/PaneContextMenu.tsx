@@ -28,6 +28,7 @@ interface PaneContextMenuProps {
 
 /** Right-click actions for a pane in the collapsed sidebar rail. */
 export function PaneContextMenu({ menu, onClose, onRename, onTogglePinned, onArchive }: PaneContextMenuProps) {
+  const displayRenameOpener = useRef<HTMLElement | undefined>(undefined);
   const [displayRenaming, setDisplayRenaming] = useState<Session | null>(null);
   const [promoting, setPromoting] = useState<Session | null>(null);
   const [renaming, setRenaming] = useState<Session | null>(null);
@@ -58,7 +59,7 @@ export function PaneContextMenu({ menu, onClose, onRename, onTogglePinned, onArc
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
-      const opener = menu.opener;
+      const opener = menu?.opener;
       onClose();
       requestAnimationFrame(() => opener?.focus());
       return;
@@ -79,7 +80,7 @@ export function PaneContextMenu({ menu, onClose, onRename, onTogglePinned, onArc
         aria-label={`Pane actions for ${menu?.session.name || 'Untitled'}`}
         onKeyDown={handleKeyDown}
       >
-        <PopoverButton autoFocus role="menuitem" tabIndex={focusedIndex === 0 ? 0 : -1} onFocus={() => setFocusedIndex(0)} onClick={() => { if (onRename) onRename(); else if (menu) { setDisplayRenaming(menu.session); onClose(); } }}>
+        <PopoverButton autoFocus role="menuitem" tabIndex={focusedIndex === 0 ? 0 : -1} onFocus={() => setFocusedIndex(0)} onClick={() => { if (onRename) onRename(); else if (menu) { displayRenameOpener.current = menu.opener; setDisplayRenaming(menu.session); onClose(); } }}>
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename</span>
         </PopoverButton>
         <PopoverButton role="menuitem" tabIndex={focusedIndex === 1 ? 0 : -1} onFocus={() => setFocusedIndex(1)} onClick={onTogglePinned}>
@@ -102,7 +103,7 @@ export function PaneContextMenu({ menu, onClose, onRename, onTogglePinned, onArc
         </PopoverButton>
       </div>
     </TerminalPopover>
-    <RenamePaneDialog session={displayRenaming} onClose={() => setDisplayRenaming(null)} />
+    <RenamePaneDialog session={displayRenaming} onClose={() => { setDisplayRenaming(null); requestAnimationFrame(() => displayRenameOpener.current?.focus()); }} />
     {renaming && <RenameWorktreeDialog key={renaming.id} session={renaming} onClose={() => setRenaming(null)} />}
     {promoting && <PromotePaneDialog key={promoting.id} paneId={promoting.id} paneName={promoting.name} onClose={() => setPromoting(null)} />}
   </>);

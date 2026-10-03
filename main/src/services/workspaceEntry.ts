@@ -6,6 +6,8 @@ import type { AppConfig } from '../types/config';
 import type { AppServices } from '../ipc/types';
 import { panelManager } from './panelManager';
 import { terminalPanelManager } from './terminalPanelManager';
+import { escapeForBash } from '../utils/wslUtils';
+import { ShellDetector } from '../utils/shellDetector';
 import { runAgentDoctor } from './agents/agentDoctor';
 
 const READINESS_TIMEOUT_MS = 30_000;
@@ -51,7 +53,7 @@ async function waitForCliReady(
   ) {
     const snapshot = terminalPanelManager.getTerminalSnapshot(panelId);
     if (!snapshot) throw new Error(`${agentTitle} exited before it was ready.`);
-    if (snapshot.isCliReady) return;
+    if (snapshot.isCliReady && snapshot.initialCommandSent) return;
     await new Promise(resolve => setTimeout(resolve, READINESS_INTERVAL_MS));
   }
   if (!deadlineSignal.aborted && !attemptSignal.aborted) {
@@ -104,10 +106,10 @@ async function cleanupProvisionalPanel(
   if (panelId) {
     const provisionalPanelId = panelId;
     if (initializationPromise) {
-      void initializationPromise.then(() => {
+      void initializationPromise.then(async () => {
         try {
           if (terminalPanelManager.isTerminalInitialized(provisionalPanelId)) {
-            terminalPanelManager.destroyTerminal(provisionalPanelId);
+            await terminalPanelManager.destroyTerminal(provisionalPanelId);
           }
         } catch (cleanupError) {
           console.error('[WorkspaceEntry] Failed to destroy late provisional terminal:', cleanupError);
@@ -116,7 +118,7 @@ async function cleanupProvisionalPanel(
     }
     try {
       if (terminalPanelManager.isTerminalInitialized(provisionalPanelId)) {
-        terminalPanelManager.destroyTerminal(provisionalPanelId);
+        await terminalPanelManager.destroyTerminal(provisionalPanelId);
       }
     } catch (cleanupError) {
       console.error('[WorkspaceEntry] Failed to destroy provisional terminal:', cleanupError);
@@ -192,7 +194,7 @@ async function runAttempt(
       signal,
       launchPreset.title,
       () => services.sessionManager.getOrCreateMainRepoSessionAnnounced(projectId, {
-        autoCreateTerminal: false,
+        createDefaultTerminalOnCreate: false,
       }),
     );
     sessionId = session.id;
@@ -209,6 +211,19 @@ async function runAttempt(
       throw new AgentValidationError(failedCheck?.message ?? `${launchPreset.title} is unavailable.`);
     }
 
+    const context = services.sessionManager.getProjectContext(session.id);
+    const configuredExecutable = launchPreset.id === 'claude' ? services.configManager.getConfig().claudeExecutablePath?.trim() : undefined;
+    let initialCommand = launchPreset.command;
+    if (configuredExecutable) {
+      const shell = context?.commandRunner.wslContext ? 'bash' : ShellDetector.getDefaultShell(services.configManager.getPreferredShell()).name;
+      const flags = launchPreset.command.slice('claude'.length);
+      if (shell === 'pwsh' || shell === 'powershell') initialCommand = "& '" + configuredExecutable.replaceAll("'", "''") + "'" + flags;
+      else if (shell === 'cmd') {
+        if (/[\"%\r\n]/.test(configuredExecutable)) throw new AgentValidationError('Configured Claude path cannot be represented by the selected cmd shell.');
+        initialCommand = '"' + configuredExecutable + '"' + flags;
+      } else initialCommand = escapeForBash(configuredExecutable) + flags;
+    }
+
     panelId = randomUUID();
     const provisionalPanelId = panelId;
     const panel = await runCancellableStage(
@@ -222,13 +237,12 @@ async function runAttempt(
         type: 'terminal',
         title: launchPreset.title,
         initialState: {
-          initialCommand: launchPreset.command,
+          initialCommand,
           agentType: launchPreset.id,
           isCliPanel: true,
         },
       }),
     );
-    const context = services.sessionManager.getProjectContext(session.id);
     const deadlineController = new AbortController();
     let launchDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const launchDeadline = new Promise<never>((_resolve, reject) => {

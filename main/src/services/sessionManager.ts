@@ -593,7 +593,7 @@ export class SessionManager extends EventEmitter {
 
   async getOrCreateMainRepoSessionAnnounced(
     projectId: number,
-    options: { autoCreateTerminal?: boolean } = {},
+    options: { createDefaultTerminalOnCreate?: boolean } = {},
   ): Promise<Session> {
     const session = await this.getOrCreateMainRepoSession(projectId);
     const dbSession = this.db.getSession(session.id);

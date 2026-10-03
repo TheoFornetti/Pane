@@ -129,6 +129,7 @@ export interface TerminalPanelSnapshot {
   currentCommand: string;
   isCliPanel?: boolean;
   isCliReady?: boolean;
+  initialCommandSent?: boolean;
   agentType?: CliAgentType;
   agentSessionId?: string;
 }
@@ -235,6 +236,7 @@ interface TerminalProcess {
   /** True when `pty` is a `PtyHandleShim` wrapping a ptyHost handle. */
   isPtyHost: boolean;
   panelId: string;
+  initialCommandSent?: boolean;
   sessionId: string;
   scrollbackBuffer: string;
   alternateScreenBuffer: string;
@@ -1382,6 +1384,7 @@ export class TerminalPanelManager extends EventEmitter {
       const injectCommand = () => {
         if (this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
         this.writeToTerminal(panelId, commandToRun! + '\r');
+        terminalProcess.initialCommandSent = true;
 
         // For CLI tool terminals, signal the frontend when the CLI responds
         if (isCliCommand) {
@@ -1910,6 +1913,7 @@ export class TerminalPanelManager extends EventEmitter {
       currentCommand: terminal.currentCommand,
       isCliPanel: customState.isCliPanel,
       isCliReady: customState.isCliReady,
+      initialCommandSent: terminal.initialCommandSent,
       agentType,
       agentSessionId: customState.agentSessionId ?? terminal.capturedAgentSessionId,
     };

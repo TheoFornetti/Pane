@@ -66,6 +66,19 @@ export async function runAgentDoctor(
     return { ok: false, agent, command, repo: repoSummary, environment, available: false, checks, warnings };
   }
 
+  const configuredExecutable = agent === 'claude' ? services.configManager.getConfig().claudeExecutablePath?.trim() : undefined;
+  if (configuredExecutable) {
+    try {
+      const result = await context.commandRunner.execFile(configuredExecutable, ['--version'], repo.path, { timeout: 5_000, silent: true });
+      const version = firstNonEmptyLine(result.stdout) || firstNonEmptyLine(result.stderr);
+      checks.push({ name: 'configured-executable', ok: true, message: 'Configured Claude executable is available.' });
+      return { ok: true, agent, command, repo: repoSummary, environment, available: true, executablePath: configuredExecutable, version, checks };
+    } catch (error) {
+      checks.push({ name: 'configured-executable', ok: false, message: commandErrorMessage(error, 'Configured Claude executable is unavailable.') });
+      return { ok: false, agent, command, repo: repoSummary, environment, available: false, checks };
+    }
+  }
+
   const lookupCommand = environment === 'windows' ? `where ${executable}` : `command -v ${executable}`;
   let executablePath: string | undefined;
   let version: string | undefined;

@@ -10,7 +10,7 @@ import ProjectSettings from './ProjectSettings';
 import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
 import { SessionStatusBadge } from './SessionStatusBadge';
-import { PaneContextMenu } from './PaneContextMenu';
+import { PaneContextMenu, type PaneContextMenuState } from './PaneContextMenu';
 import { RenamePaneDialog } from './RenamePaneDialog';
 import { AgentStatusDot } from './ui/AgentStatusDot';
 import type { DropdownItem } from './ui/Dropdown';
@@ -635,13 +635,14 @@ const ROW_ACTION_REVEAL =
 // SessionRowContent so it can sit at the row's right edge, after the hover
 // actions — the actions collapse to nothing at rest, so an idle sidebar spends
 // its width on pane names instead of reserved button slots.
-function SessionRowMetadata({ prNumber, hasDiff, adds, dels }: {
+function SessionRowMetadata({ prNumber, hasDiff, adds, dels, external }: {
+  external?: boolean;
   prNumber: number | undefined;
   hasDiff: boolean;
   adds: number;
   dels: number;
 }) {
-  if (!prNumber && !hasDiff) return null;
+  if (!prNumber && !hasDiff && !external) return null;
   return (
     <span className="flex flex-shrink-0 items-center gap-1.5 text-xs tabular-nums">
       {hasDiff && (
@@ -651,6 +652,7 @@ function SessionRowMetadata({ prNumber, hasDiff, adds, dels }: {
         </span>
       )}
       {prNumber && <span className="text-navigation-muted">#{prNumber}</span>}
+      {external && <span className="text-navigation-muted">External</span>}
     </span>
   );
 }
@@ -832,14 +834,13 @@ function SessionRow({
 
   return (<>
     <div
-      onContextMenu={event => { if (onContextMenu) onContextMenu(event); else { event.preventDefault(); setContextMenu({ session, label: session.name, x: event.clientX, y: event.clientY }); } }}
+      onContextMenu={event => { if (onContextMenu) onContextMenu(event); else { event.preventDefault(); setContextMenu({ session, opener: event.currentTarget.querySelector<HTMLButtonElement>('button[aria-label]') ?? event.currentTarget, label: session.name, x: event.clientX, y: event.clientY }); } }}
       className={cn(
         'group/session relative mx-2 flex w-[calc(100%-1rem)] items-center gap-1 rounded-md pr-2 text-left transition-colors',
         nested ? 'pl-6' : 'pl-2',
         rowLayout === 'single' ? 'py-1' : 'py-1.5',
         isActive ? 'bg-surface-selected' : 'hover:bg-surface-hover'
       )}
-      onContextMenu={onContextMenu}
     >
       <Tooltip
         content={<SessionDetailTooltip session={session} gitStatus={localGitStatus} globalIndex={globalIndex} />}
@@ -898,7 +899,7 @@ function SessionRow({
           </button>
 
           {rowLayout === 'single' && (
-            <SessionRowMetadata prNumber={gs?.prNumber} hasDiff={hasDiff} adds={adds} dels={dels} />
+            <SessionRowMetadata external={session.worktreeOwnership === 'external'} prNumber={gs?.prNumber} hasDiff={hasDiff} adds={adds} dels={dels} />
           )}
           <SessionStatusBadge sessionId={session.id} size="sm" />
       </div>

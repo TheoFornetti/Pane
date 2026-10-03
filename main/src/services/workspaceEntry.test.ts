@@ -110,7 +110,7 @@ beforeEach(() => {
   mocks.removePanelFromMemory.mockImplementation(panelId => { panelRecords.delete(panelId); });
   mocks.getPanelsForSession.mockImplementation(sessionId => [{ id: `explorer-${sessionId}`, type: 'explorer' }]);
   mocks.initializeTerminal.mockResolvedValue(undefined);
-  mocks.getTerminalSnapshot.mockReturnValue({ isCliReady: true });
+  mocks.getTerminalSnapshot.mockReturnValue({ isCliReady: true, initialCommandSent: true });
   mocks.isTerminalInitialized.mockReturnValue(true);
   mocks.runAgentDoctor.mockResolvedValue({ available: true, checks: [] });
 });
@@ -134,7 +134,7 @@ describe('launchDefaultAgentOnce', () => {
       initialState: { initialCommand: command, agentType: agent, isCliPanel: true },
     });
     expect(services.sessionManager.getOrCreateMainRepoSessionAnnounced).toHaveBeenCalledWith(id, {
-      autoCreateTerminal: false,
+      createDefaultTerminalOnCreate: false,
     });
     expect(services.sessionManager.getOrCreateMainRepoSessionAnnounced.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.runAgentDoctor.mock.invocationCallOrder[0]);
@@ -211,7 +211,7 @@ describe('launchDefaultAgentOnce', () => {
     await expect(launchDisclosedCodex(services, id)).resolves.toMatchObject({
       status: 'failed', reason: 'validation-failed', message: `${check} failed`,
     });
-    expect(getSession).toHaveBeenCalledWith(id, { autoCreateTerminal: false });
+    expect(getSession).toHaveBeenCalledWith(id, { createDefaultTerminalOnCreate: false });
     expect(getSession.mock.invocationCallOrder[0]).toBeLessThan(mocks.runAgentDoctor.mock.invocationCallOrder[0]);
     expect(mocks.createPanel).not.toHaveBeenCalled();
     expect(mocks.setActivePanel).toHaveBeenCalledWith(`session-${id}`, `explorer-session-${id}`);
@@ -234,7 +234,7 @@ describe('launchDefaultAgentOnce', () => {
       reason: 'launch-error',
       message: 'Project was deleted before Codex started.',
     });
-    expect(getSession).toHaveBeenCalledWith(id, { autoCreateTerminal: false });
+    expect(getSession).toHaveBeenCalledWith(id, { createDefaultTerminalOnCreate: false });
     expect(mocks.createPanel).not.toHaveBeenCalled();
     expect(mocks.setActivePanel).toHaveBeenCalledWith(`session-${id}`, `explorer-session-${id}`);
     expect(updateProject).not.toHaveBeenCalled();
@@ -322,6 +322,17 @@ describe('launchDefaultAgentOnce', () => {
   it('times out, cleans up, and writes no receipt', async () => {
     vi.useFakeTimers();
     mocks.getTerminalSnapshot.mockReturnValue({ isCliReady: false });
+    const { services, id, updateProject } = createServices();
+    const promise = launchDisclosedCodex(services, id);
+    await vi.advanceTimersByTimeAsync(31_000);
+    await expect(promise).resolves.toMatchObject({ status: 'failed', message: expect.stringContaining('ready in time') });
+    expect(mocks.deletePanel).toHaveBeenCalledOnce();
+    expect(updateProject).not.toHaveBeenCalled();
+  });
+
+  it('does not record a receipt for CLI-ready state before command submission', async () => {
+    vi.useFakeTimers();
+    mocks.getTerminalSnapshot.mockReturnValue({ isCliReady: true, initialCommandSent: false });
     const { services, id, updateProject } = createServices();
     const promise = launchDisclosedCodex(services, id);
     await vi.advanceTimersByTimeAsync(31_000);

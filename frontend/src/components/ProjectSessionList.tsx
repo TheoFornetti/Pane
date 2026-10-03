@@ -9,7 +9,6 @@ import { AddProjectDialog } from './AddProjectDialog';
 import ProjectSettings from './ProjectSettings';
 import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
-import { SessionStatusBadge } from './SessionStatusBadge';
 import { PaneContextMenu, type PaneContextMenuState } from './PaneContextMenu';
 import { RenamePaneDialog } from './RenamePaneDialog';
 import { AgentStatusDot } from './ui/AgentStatusDot';
@@ -901,7 +900,6 @@ function SessionRow({
           {rowLayout === 'single' && (
             <SessionRowMetadata external={session.worktreeOwnership === 'external'} prNumber={gs?.prNumber} hasDiff={hasDiff} adds={adds} dels={dels} />
           )}
-          <SessionStatusBadge sessionId={session.id} size="sm" />
       </div>
     </div>
     <PaneContextMenu menu={contextMenu} onClose={() => setContextMenu(null)}

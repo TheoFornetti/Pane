@@ -42,6 +42,30 @@ async function dismissStartupDialogs(page: Page) {
   }
 }
 
+async function clickDomNode(locator: ReturnType<Page['locator']>) {
+  await locator.evaluate((node: HTMLElement) => {
+    node.click();
+  });
+}
+
+async function setInputValue(locator: ReturnType<Page['locator']>, value: string) {
+  await locator.evaluate((node: HTMLElement, nextValue) => {
+    if (!(node instanceof HTMLInputElement) && !(node instanceof HTMLTextAreaElement)) {
+      throw new Error('Expected an input or textarea element');
+    }
+    const input = node;
+    const prototype = input instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+
+    input.focus();
+    descriptor?.set?.call(input, nextValue);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, value);
+}
+
 async function openSettings(page: Page) {
   const collapseSidebarButton = page.getByRole('button', { name: 'Collapse sidebar' });
   await expect(collapseSidebarButton).toBeVisible({ timeout: 5000 });

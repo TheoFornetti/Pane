@@ -1,10 +1,21 @@
-import { promises as fs } from 'fs';
+import { promises as nodeFs } from 'fs';
+import { createRequire } from 'module';
 import path from 'path';
 import { randomBytes } from 'crypto';
 import type { CommandRunner } from '../utils/commandRunner';
 import type { PathResolver } from '../utils/pathResolver';
 import { forceRemoveWorktree, stopFsmonitorDaemon } from './gitPerformanceConfig';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+
+// Worktrees contain physical files, including dependencies' .asar archives.
+// Electron's patched fs treats those archives as directories and caches open
+// handles, so recursive removal can lock its own input on Windows. Bypass ASAR
+// interpretation for all worktree filesystem operations. Plain Node (including
+// service tests) has no original-fs module and already uses physical semantics.
+// SAFETY: Electron's built-in original-fs exposes the Node fs API unchanged.
+const fs: typeof nodeFs = process.versions.electron
+  ? (createRequire(__filename)('original-fs') as typeof import('fs')).promises
+  : nodeFs;
 
 /**
  * Once the worktree is removed, whether its files are fully deleted:

@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, memo, useMemo, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionHistoryStore } from '../stores/sessionHistoryStore';
@@ -139,7 +140,19 @@ export const SessionView = memo(() => {
     focusedGroupIds,
     setLayout: setLayoutInStore,
     setFocusedGroup: setFocusedGroupInStore,
-  } = usePanelStore();
+  } = usePanelStore(useShallow(state => ({
+    panels: state.panels,
+    activePanels: state.activePanels,
+    setPanels: state.setPanels,
+    setActivePanel: state.setActivePanel,
+    addPanel: state.addPanel,
+    removePanel: state.removePanel,
+    updatePanelState: state.updatePanelState,
+    layouts: state.layouts,
+    focusedGroupIds: state.focusedGroupIds,
+    setLayout: state.setLayout,
+    setFocusedGroup: state.setFocusedGroup,
+  })));
   
   // History store for navigation
   const { addToHistory } = useSessionHistoryStore();

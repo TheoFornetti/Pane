@@ -1,15 +1,11 @@
-import { cliAgentSchema, type CliAgentType } from './cli-agent';
+import { CLI_AGENT_LABELS, cliAgentSchema, type CliAgentType } from './cli-agent';
 import type { ToolPanel } from './panels';
 import { decodeBoundary } from '../validation/boundaryDecoder';
 import type { JsonValue } from '../validation/boundaryDecoder';
 
 export type PaneChatAgent = CliAgentType;
 
-export const PANE_CHAT_AGENT_LABELS = {
-  claude: 'Claude',
-  codex: 'Codex',
-  cursor: 'Cursor',
-} satisfies Record<PaneChatAgent, string>;
+export const PANE_CHAT_AGENT_LABELS = CLI_AGENT_LABELS;
 
 export const DEFAULT_PANE_CHAT_AGENT: PaneChatAgent = 'claude';
 export const PANE_CHAT_SESSION_ID = '__pane_chat_session__';

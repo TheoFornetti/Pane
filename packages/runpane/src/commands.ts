@@ -68,7 +68,6 @@ export interface ParsedArgs {
   merged?: boolean;
   launch?: boolean;
   handoffTo?: string;
-  branch?: string;
   remote?: string;
   park?: boolean;
   archive?: boolean;

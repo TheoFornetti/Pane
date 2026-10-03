@@ -1026,7 +1026,6 @@ export function registerRunpaneHandlers(
       return success;
     }, result => ({ paneId: result.paneId, ok: result.ok }));
   });
-  });
 
   commandRegistry.register('runpane:panes:handoff', async (request: PaneCommandValue): Promise<RunpanePaneHandoffResult> => {
     return withRunpaneAction(
@@ -4564,8 +4563,6 @@ function gitErrorOutput(cause: unknown): string | undefined {
   } catch {
     return undefined;
   }
-}
-
 }
 
 async function computeArchiveSafety(services: AppServices, pane: Session): Promise<RunpanePaneArchiveSafetyCheck> {

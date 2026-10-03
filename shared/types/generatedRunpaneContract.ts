@@ -5204,6 +5204,53 @@ export const RUNPANE_CONTRACT = {
         "--tab",
         "--yes",
         "--json"
+      ],
+      [
+        "peers",
+        "send",
+        "--peer",
+        "sender",
+        "--to",
+        "receiver",
+        "--id",
+        "task-1",
+        "--text",
+        "literal --yes value",
+        "--yes",
+        "--json"
+      ],
+      [
+        "peers",
+        "inbox",
+        "--peer",
+        "receiver",
+        "--id",
+        "task-1",
+        "--claim",
+        "--include-received",
+        "--yes",
+        "--timeout-ms",
+        "0"
+      ],
+      [
+        "peers",
+        "wait",
+        "--peer",
+        "sender",
+        "--id",
+        "task-1",
+        "--after",
+        "7",
+        "--timeout-ms",
+        "0"
+      ],
+      [
+        "watch",
+        "--follow",
+        "--quiet-panel",
+        "panel-1",
+        "--quiet-panel",
+        "panel-2"
       ]
     ],
     "topLevelHelpIncludes": [

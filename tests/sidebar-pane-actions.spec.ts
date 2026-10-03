@@ -61,7 +61,7 @@ test.describe('sidebar pane actions', () => {
     await row.click();
     await row.click({ button: 'right' });
     let menu = page.getByRole('menu', { name: 'Pane actions for Regular work' });
-    await expect(menu.getByRole('menuitem')).toHaveText(['Rename', 'Unpin', 'Archive']);
+    await expect(menu.getByRole('menuitem')).toHaveText(['Rename', 'Unpin', 'Move chat to Session…', 'Rename worktree…', 'Archive']);
     await expect(menu.getByRole('menuitem').first()).toBeFocused();
     await page.keyboard.press('End');
     await page.keyboard.press('ArrowDown');

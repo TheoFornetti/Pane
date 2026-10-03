@@ -25,7 +25,6 @@ import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileS
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
 import { consumeNativePushRoute, getNativePushStatus, installNativePushRouting, revokeNativePush, setupNativePush, updateNativePushControls, type NativePushRoute } from './runtime/nativePush';
 import { findFirstSessionId, useRemoteSessionStore } from './stores/remoteSessionStore';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { remoteCreationFailureSchema, remotePanelReferenceSchema, remotePanelSchema } from './runtime/remotePayloadSchemas';
 import { ErrorDialog } from '../components/ErrorDialog';

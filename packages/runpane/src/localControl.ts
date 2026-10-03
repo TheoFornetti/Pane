@@ -4090,4 +4090,3 @@ export async function runPanesHandoff(parsed: ParsedArgs): Promise<number> {
 
   return result.ok ? 0 : 1;
 }
-

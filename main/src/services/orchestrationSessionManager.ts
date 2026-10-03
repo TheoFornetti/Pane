@@ -48,7 +48,6 @@ import {
   DEFAULT_PANE_CHAT_AGENT,
   getPaneChatPanelId,
   normalizePaneChatAgent,
-  CLI_AGENT_LABELS,
   PANE_CHAT_SESSION_ID,
   type PaneChatAgent,
 } from '../../../shared/types/paneChat';

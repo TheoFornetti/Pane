@@ -27,6 +27,7 @@ function computerUseActionLabel(readiness: ComputerUseReadiness): string | null 
 /** "Computer use: <status>" in a fixed-height row; the indicator swaps inside one fixed box. */
 export function ComputerUseStatus({ readiness, now, onAction, className }: ComputerUseStatusProps) {
   const actionLabel = onAction ? computerUseActionLabel(readiness) : null;
+  const text = `Computer use: ${computerUseStatusText(readiness, now)}`;
   return (
     <div className={cn('flex h-5 min-w-0 items-center gap-2 text-xs', className)} aria-live="polite">
       <span className="flex h-4 w-4 flex-none items-center justify-center" aria-hidden="true">
@@ -34,9 +35,7 @@ export function ComputerUseStatus({ readiness, now, onAction, className }: Compu
           ? <Loader2 className="h-3.5 w-3.5 animate-spin text-text-tertiary" />
           : <span className={cn('h-2 w-2 rounded-full', DOT_CLASS[readiness.state])} />}
       </span>
-      <span className="min-w-0 truncate text-text-secondary">
-        Computer use: {computerUseStatusText(readiness, now)}
-      </span>
+      <span className="min-w-0 truncate text-text-secondary" title={text}>{text}</span>
       {actionLabel && (
         <>
           <span className="text-text-muted" aria-hidden="true">·</span>

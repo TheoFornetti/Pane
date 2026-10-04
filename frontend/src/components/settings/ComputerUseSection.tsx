@@ -60,60 +60,60 @@ export function ComputerUseSection({ connectionState }: { connectionState: Remot
         description={readiness
           ? guidance(readiness)
           : controller.unsupported ? 'Update Pane on this host to use computer use.' : 'Checking this machine…'}
-        align="start"
-      >
-        <div className="flex items-center justify-end gap-3">
-          <Select
-            value={readiness?.engineChoice ?? 'auto'}
-            disabled={!readiness || readiness.state === 'off' || busy}
-            onValueChange={(next) => {
-              if (isEngineChoice(next)) void act(() => controller.setEnabled(true, next));
-            }}
-          >
-            <SelectTrigger aria-label="Computer use engine" className="w-36"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {COMPUTER_USE_ENGINE_CHOICES.map((choice) => (
-                <SelectItem key={choice} value={choice}>{COMPUTER_USE_ENGINE_CHOICE_LABELS[choice]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Toggle
-            aria-label={`Computer use on ${machine}`}
-            checked={readiness !== null && readiness.state !== 'off'}
-            disabled={!readiness || busy}
-            onChange={(enabled) => void act(() => controller.setEnabled(enabled))}
-          />
-        </div>
-      </SettingRow>
-      {readiness && (
-        <div className="space-y-2 pb-4">
-          <div className="flex items-center justify-between gap-3">
+        status={readiness && (
+          <div className="space-y-2">
             <ComputerUseStatus
               readiness={readiness}
               now={controller.now}
               onAction={readiness.state === 'needs-permission' ? controller.openPermissionSettings : () => setShowDetails((open) => !open)}
             />
-            {readiness.state !== 'off' && readiness.state !== 'installing' && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                icon={<RefreshCw className="h-3.5 w-3.5" />}
-                disabled={busy}
-                onClick={() => void act(controller.recheck)}
-              >
-                Check again
-              </Button>
+            {readiness.state === 'failed' && showDetails && (
+              <pre className="whitespace-pre-wrap rounded-md border border-border-subtle bg-bg-secondary p-3 font-mono text-xs text-text-secondary">
+                {readiness.detail}
+              </pre>
             )}
+            {controller.error && <p className="text-xs text-status-error" role="alert">{controller.error}</p>}
           </div>
-          {readiness.state === 'failed' && showDetails && (
-            <pre className="whitespace-pre-wrap rounded-md border border-border-subtle bg-bg-secondary p-3 font-mono text-xs text-text-secondary">
-              {readiness.detail}
-            </pre>
+        )}
+        align="start"
+      >
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-3">
+            <Select
+              value={readiness?.engineChoice ?? 'auto'}
+              disabled={!readiness || readiness.state === 'off' || busy}
+              onValueChange={(next) => {
+                if (isEngineChoice(next)) void act(() => controller.setEnabled(true, next));
+              }}
+            >
+              <SelectTrigger aria-label="Computer use engine" className="w-36"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {COMPUTER_USE_ENGINE_CHOICES.map((choice) => (
+                  <SelectItem key={choice} value={choice}>{COMPUTER_USE_ENGINE_CHOICE_LABELS[choice]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Toggle
+              aria-label={`Computer use on ${machine}`}
+              checked={readiness !== null && readiness.state !== 'off'}
+              disabled={!readiness || busy}
+              onChange={(enabled) => void act(() => controller.setEnabled(enabled))}
+            />
+          </div>
+          {readiness && readiness.state !== 'off' && readiness.state !== 'installing' && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              disabled={busy}
+              onClick={() => void act(controller.recheck)}
+            >
+              Check again
+            </Button>
           )}
-          {controller.error && <p className="text-xs text-status-error" role="alert">{controller.error}</p>}
         </div>
-      )}
+      </SettingRow>
     </SettingsSection>
   );
 }

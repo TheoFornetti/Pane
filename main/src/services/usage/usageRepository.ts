@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3-multiple-ciphers';
-import type { UsageEvent, UsageProvider, UsageRateLimitSample } from '../../../../shared/types/usage';
+import { usageProviderFrom, type UsageEvent, type UsageProvider, type UsageRateLimitSample } from '../../../../shared/types/usage';
 import { usageEventId, type CodexContextSnapshot } from './usageParser';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 
@@ -62,11 +62,12 @@ export class UsageRepository {
     const row = this.db
       .prepare('SELECT * FROM usage_files WHERE path = ?')
       .get(path) as UsageFileRow | undefined;
-    if (!row) return null;
+    const provider = row ? usageProviderFrom(row.provider) : null;
+    if (!row || !provider) return null;
 
     return {
       path: row.path,
-      provider: row.provider === 'codex' ? 'codex' : 'claude',
+      provider,
       sizeBytes: row.size_bytes,
       mtimeMs: row.mtime_ms,
       offsetBytes: row.offset_bytes,
@@ -242,10 +243,11 @@ export class UsageRepository {
       const expired = row.resets_at_ms !== null
         ? row.resets_at_ms <= nowMs
         : windowMs > 0 && row.captured_at_ms + windowMs <= nowMs;
-      if (expired) continue;
+      const provider = usageProviderFrom(row.provider);
+      if (expired || !provider) continue;
 
       const sample: UsageRateLimitSample = {
-        provider: row.provider === 'codex' ? 'codex' : 'claude',
+        provider,
         limitId: row.limit_id,
         scope: row.scope === 'secondary' ? 'secondary' : 'primary',
         usedPercent: row.used_percent,

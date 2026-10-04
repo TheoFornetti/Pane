@@ -57,6 +57,14 @@ export const USAGE_PROVIDER_IDS =
   // Object.keys just loses that in its return type.
   Object.keys(USAGE_PROVIDER_CATALOG) as UsageProvider[];
 
+/**
+ * Stored provider text as a known provider, or null. The set is closed: a row
+ * written by a newer Pane is left out of reports, never counted as another provider.
+ */
+export function usageProviderFrom(value: string): UsageProvider | null {
+  return USAGE_PROVIDER_IDS.find(provider => provider === value) ?? null;
+}
+
 /** One assistant message's token accounting, normalised across providers. */
 export interface UsageEvent {
   provider: UsageProvider;

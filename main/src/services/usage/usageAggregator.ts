@@ -8,6 +8,8 @@ import {
   type UsageByModel,
   type UsageByProject,
   type UsageProvider,
+  USAGE_PROVIDER_IDS,
+  usageProviderFrom,
   type UsageReportRequest,
   type UsageTotals,
 } from '../../../../shared/types/usage';
@@ -129,15 +131,17 @@ function foldTotals(rows: TokenRow[]): UsageTotals {
   return foldCostSummary(rows).totals;
 }
 
+function byModelRows(rows: TokenRow[]): UsageByModel[] {
+  return rows.flatMap(row => {
+    const provider = usageProviderFrom(row.provider);
+    return provider ? [{ model: row.model, provider, ...foldTotals([row]) }] : [];
+  });
+}
+
 function foldPaneSlice(rows: TokenRow[]) {
   const { totals, cacheReadCostUsd } = foldCostSummary(rows);
   const denominator = totals.inputTokens + totals.cacheReadTokens;
-  const byModel = rows
-    .map(row => ({
-      model: row.model,
-      provider: row.provider === 'codex' ? 'codex' as const : 'claude' as const,
-      ...foldTotals([row]),
-    }))
+  const byModel = byModelRows(rows)
     .sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd);
   return {
     ...totals,
@@ -192,11 +196,7 @@ export class UsageAggregator {
       ORDER BY SUM(input_tokens + output_tokens) DESC
     `).all(...source.params) as TokenRow[];
 
-    return rows.map(row => ({
-      model: row.model,
-      provider: row.provider === 'codex' ? 'codex' : 'claude',
-      ...foldTotals([row]),
-    }));
+    return byModelRows(rows);
   }
 
   /**
@@ -488,10 +488,11 @@ export class UsageAggregator {
     return byPath;
   }
 
+  /** No filter means every known provider; rows from a provider this version lacks are left out. */
   private providerFilter(providers?: UsageProvider[]): ProviderFilter {
-    if (!providers || providers.length === 0) return { clause: '', params: [] };
-    const placeholders = providers.map(() => '?').join(', ');
-    return { clause: `AND provider IN (${placeholders})`, params: [...providers] };
+    const selected = providers && providers.length > 0 ? providers : USAGE_PROVIDER_IDS;
+    const placeholders = selected.map(() => '?').join(', ');
+    return { clause: `AND provider IN (${placeholders})`, params: [...selected] };
   }
 }
 

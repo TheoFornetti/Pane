@@ -66,6 +66,20 @@ beforeEach(() => {
 });
 
 describe('UsageRepository.getRateLimits', () => {
+  it('leaves out limits from a provider this version does not know', () => {
+    db.prepare(`
+      INSERT INTO usage_rate_limits (provider, limit_id, scope, used_percent, window_minutes, resets_at_ms, captured_at_ms)
+      VALUES ('gemini', 'daily', 'primary', 50, 1440, ?, ?)
+    `).run(NOW + HOUR_MS, NOW - HOUR_MS);
+    seedRateLimit({
+      provider: 'codex', limitId: 'weekly', scope: 'primary',
+      usedPercent: 20, windowMinutes: 300, resetsAtMs: NOW + HOUR_MS,
+      planType: 'plus', capturedAtMs: NOW - HOUR_MS,
+    });
+
+    expect(repo.getRateLimits(NOW).map(limit => limit.provider)).toEqual(['codex']);
+  });
+
   it('returns one row per provider+scope, newest wins', () => {
     seedRateLimit({
       provider: 'codex', limitId: 'old', scope: 'primary',

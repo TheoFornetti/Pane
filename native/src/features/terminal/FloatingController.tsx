@@ -7,6 +7,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withDelay, withTiming } fro
 import { useTheme, withAlpha } from '@/theme';
 import { Icon, Text } from '@/ui';
 
+import type { ControllerLayout } from './controllerLayout';
 import { KEYS } from './keys';
 import { ScrollJoystick } from './ScrollJoystick';
 
@@ -21,6 +22,8 @@ export interface FloatingControllerProps {
   /** Sends a key's bytes to the terminal. */
   onKey: (data: string) => void;
   onScroll: (lines: number) => void;
+  /** Where the joystick and D-pad sit (see `controllerLayout`). */
+  layout: ControllerLayout;
 }
 
 /**
@@ -30,7 +33,8 @@ export interface FloatingControllerProps {
  * of them opaque; 3 s after the last touch they fade back together, on one
  * shared timer.
  */
-export function FloatingController({ onKey, onScroll }: FloatingControllerProps) {
+export function FloatingController({ onKey, onScroll, layout }: FloatingControllerProps) {
+  const { joystickTop, padBottom } = layout;
   const opacity = useSharedValue(REST_OPACITY);
   // Worklets, so the joystick's gesture can call them on the UI thread too.
   const wake = () => {
@@ -46,10 +50,11 @@ export function FloatingController({ onKey, onScroll }: FloatingControllerProps)
 
   return (
     <View style={styles.layer} pointerEvents="box-none">
-      <Animated.View style={[styles.joystick, fade]}>
+      <Animated.View style={[styles.joystick, { top: joystickTop }, fade]}>
         <ScrollJoystick onScroll={onScroll} onTouchStart={wake} onTouchEnd={rest} />
       </Animated.View>
-      <Animated.View style={[styles.cluster, fade]} testID="terminal-controller">
+      {padBottom === null ? null : (
+      <Animated.View style={[styles.cluster, { bottom: padBottom }, fade]} testID="terminal-controller">
         <View style={styles.sideKeys}>
           <SideKey label="Esc" data={KEYS.esc} {...key} />
           <SideKey label="Tab" data={KEYS.tab} {...key} />
@@ -62,6 +67,7 @@ export function FloatingController({ onKey, onScroll }: FloatingControllerProps)
           <PadKey id="down" label="Down arrow" data={KEYS.down} ios="arrowtriangle.down.fill" android="arrow_drop_down" area={styles.down} {...key} />
         </View>
       </Animated.View>
+      )}
     </View>
   );
 }
@@ -151,8 +157,8 @@ const PAD = CELL * 3;
 
 const styles = StyleSheet.create({
   layer: { ...StyleSheet.absoluteFill },
-  joystick: { position: 'absolute', right: 8, top: 12 },
-  cluster: { position: 'absolute', right: 8, bottom: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  joystick: { position: 'absolute', right: 8 },
+  cluster: { position: 'absolute', right: 8, flexDirection: 'row', alignItems: 'center', gap: 10 },
   sideKeys: { gap: 10 },
   side: {
     width: SIDE_KEY,

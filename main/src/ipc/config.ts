@@ -324,8 +324,9 @@ function buildRemotePwaVoiceAffordance(config: AppConfig): RemotePwaAffordances[
   const fal = hasConfiguredValue(config.falApiKey, process.env.FAL_KEY);
   const deepgram = hasConfiguredValue(config.deepgramApiKey, process.env.DEEPGRAM_API_KEY);
   const openRouter = hasConfiguredValue(config.openRouterApiKey, process.env.OPENROUTER_API_KEY);
-  const recorded = fal && openRouter;
-  const streaming = deepgram && openRouter;
+  // OpenRouter only cleans up the text; each mode works without it.
+  const recorded = fal;
+  const streaming = deepgram;
   const availableModes: VoiceTranscriptionMode[] = [];
 
   if (streaming) {

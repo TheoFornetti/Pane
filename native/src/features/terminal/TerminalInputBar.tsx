@@ -25,6 +25,9 @@ export interface TerminalInputBarProps {
   onCopy: () => void;
   /** The mic, when the host lacks a voice key: asks for it, then records. */
   onSetupVoice: () => void;
+  /** Whether the floating D-pad and joystick show, and the button that shows or hides them. */
+  controllerShown: boolean;
+  onToggleController: () => void;
   /** Where the cursor is, so inserts land there. */
   onSelectionChange: (selection: { start: number; end: number }) => void;
   /** Moves the cursor after an insert; undefined leaves it to the user. */
@@ -39,7 +42,7 @@ export interface TerminalInputBarProps {
  * far show in the box, dimmed and read-only.
  */
 export function TerminalInputBar({
-  draft, onChangeDraft, onSubmit, voice, onAttach, onPaste, onShortcuts, onCopy, onSetupVoice, onSelectionChange, selection, disabled = false,
+  draft, onChangeDraft, onSubmit, voice, onAttach, onPaste, onShortcuts, onCopy, onSetupVoice, controllerShown, onToggleController, onSelectionChange, selection, disabled = false,
 }: TerminalInputBarProps) {
   const theme = useTheme();
   const { colors } = theme;
@@ -74,6 +77,16 @@ export function TerminalInputBar({
         <BoxAction testID="terminal-shortcuts" label="Shortcuts" hint="Inserts one of the host's shortcuts" ios="bolt" android="bolt" disabled={disabled} onPress={onShortcuts} />
         <BoxAction testID="terminal-copy" label="Copy from terminal" hint="Shows recent output to copy" ios="doc.on.doc" android="content_copy" disabled={disabled} onPress={onCopy} />
         <View style={styles.spacer} />
+        <BoxAction
+          testID="terminal-controller-toggle"
+          label={controllerShown ? 'Hide controller' : 'Show controller'}
+          hint="Shows or hides the arrow keys and scroll joystick over the terminal"
+          ios="gamecontroller"
+          android="sports_esports"
+          selected={controllerShown}
+          disabled={false}
+          onPress={onToggleController}
+        />
         <MicButton voice={voice} disabled={disabled} onSetup={onSetupVoice} />
         <SendButton hasText={draft.trim().length > 0} dimmed={disabled || voiceBusy} onPress={onSubmit} />
       </View>
@@ -81,7 +94,7 @@ export function TerminalInputBar({
   );
 }
 
-function BoxAction({ testID, label, hint, ios, android, tinted = false, disabled, onPress }: {
+function BoxAction({ testID, label, hint, ios, android, tinted: alwaysTinted = false, selected, disabled, onPress }: {
   testID: string;
   label: string;
   hint: string;
@@ -89,18 +102,21 @@ function BoxAction({ testID, label, hint, ios, android, tinted = false, disabled
   android: AndroidSymbol;
   /** The most-used action, drawn tinted. */
   tinted?: boolean;
+  /** A toggle that is on: drawn tinted and announced as selected. */
+  selected?: boolean;
   disabled: boolean;
   onPress: () => void;
 }) {
   const theme = useTheme();
   const { colors } = theme;
+  const tinted = alwaysTinted || selected === true;
   return (
     <Pressable
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={hint}
-      accessibilityState={{ disabled }}
+      accessibilityState={{ disabled, selected }}
       disabled={disabled}
       hitSlop={4}
       onPress={() => {

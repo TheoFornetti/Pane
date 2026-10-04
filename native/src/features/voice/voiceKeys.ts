@@ -3,10 +3,10 @@ import type { VoiceTranscriptionMode } from '@shared/types/voiceTranscription';
 
 export type VoiceKey = Exclude<keyof RemoteSettingsPatch, 'terminalShortcuts'>;
 
-/** Live streams to Deepgram, recorded sends a clip to fal; OpenRouter cleans up the text either way. */
-const MODE_KEYS: Record<VoiceTranscriptionMode, VoiceKey[]> = {
-  streaming: ['deepgramApiKey', 'openRouterApiKey'],
-  recorded: ['falApiKey', 'openRouterApiKey'],
+/** Live streams to Deepgram, recorded sends a clip to fal. OpenRouter only cleans up the text, in either mode. */
+const REQUIRED_KEY: Record<VoiceTranscriptionMode, VoiceKey> = {
+  streaming: 'deepgramApiKey',
+  recorded: 'falApiKey',
 };
 
 const CONFIGURED: Record<VoiceKey, keyof RemotePwaVoiceTranscriptionAffordance['configured']> = {
@@ -15,9 +15,13 @@ const CONFIGURED: Record<VoiceKey, keyof RemotePwaVoiceTranscriptionAffordance['
   falApiKey: 'fal',
 };
 
-/** Each key `mode` needs, and whether the host already has it. */
+/** The key `mode` needs, then the optional cleanup key, each with whether the host already has it. */
 export function voiceKeysFor(mode: VoiceTranscriptionMode, configured: RemotePwaVoiceTranscriptionAffordance['configured']) {
-  return MODE_KEYS[mode].map(key => ({ key, set: configured[CONFIGURED[key]] }));
+  return ([REQUIRED_KEY[mode], 'openRouterApiKey'] as const).map(key => ({
+    key,
+    set: configured[CONFIGURED[key]],
+    optional: key === 'openRouterApiKey',
+  }));
 }
 
 /** `message` with any of `secrets` masked, so an error can never show a key that was typed. */

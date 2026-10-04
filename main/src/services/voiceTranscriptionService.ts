@@ -169,9 +169,6 @@ export class VoiceTranscriptionService {
     if (!falApiKey) {
       throw new Error('Fal API key is not configured. Add it in Settings under Voice Transcription.');
     }
-    if (!openRouterApiKey) {
-      throw new Error('OpenRouter API key is not configured. Add it in Settings under Voice Transcription.');
-    }
 
     const startedAt = Date.now();
     if (this.configManager.isVerbose()) {
@@ -179,15 +176,13 @@ export class VoiceTranscriptionService {
     }
     const raw = await this.transcribeWithFal(input, request.language ?? 'en', falApiKey);
     const cleanupStartedAt = Date.now();
-    const cleanText = raw.text.trim().length > 0
-      ? await this.cleanTranscript(raw.text, openRouterApiKey)
-      : { text: raw.text };
+    const cleanText = await this.cleanIfConfigured(raw.text, openRouterApiKey);
     const completedAt = Date.now();
 
     const result: VoiceTranscriptionResult = {
       mode: 'recorded',
       provider: 'fal-ai/wizper',
-      cleanupModel: CLEANUP_MODEL,
+      cleanupModel: cleanText.model,
       text: cleanText.text.trim(),
       rawText: raw.text,
       chunks: raw.chunks,
@@ -212,6 +207,16 @@ export class VoiceTranscriptionService {
       console.log('[VoiceTranscription] Recorded pipeline completed', result.timings);
     }
     return result;
+  }
+
+  /** Cleans the transcript through OpenRouter when a key is set; without one, returns it as heard. */
+  private async cleanIfConfigured(rawText: string, openRouterApiKey: string | undefined): Promise<{
+    text: string;
+    usage?: ProviderUsage;
+    model?: typeof CLEANUP_MODEL;
+  }> {
+    if (!openRouterApiKey || rawText.trim().length === 0) return { text: rawText };
+    return { ...await this.cleanTranscript(rawText, openRouterApiKey), model: CLEANUP_MODEL };
   }
 
   async getDeepgramStreamingToken(): Promise<VoiceDeepgramTokenResult> {
@@ -241,10 +246,6 @@ export class VoiceTranscriptionService {
   async finalizeStreaming(request: VoiceStreamingFinalizeRequest): Promise<VoiceTranscriptionResult> {
     const input = validateVoiceStreamingFinalizeRequest(request);
     const openRouterApiKey = this.getOpenRouterApiKey();
-    if (!openRouterApiKey) {
-      throw new Error('OpenRouter API key is not configured. Add it in Settings under Voice Transcription.');
-    }
-
     const cleanupStartedAt = Date.now();
     if (this.configManager.isVerbose()) {
       console.log('[VoiceTranscription] Streaming cleanup started', {
@@ -253,9 +254,7 @@ export class VoiceTranscriptionService {
         firstTranscriptMs: input.timings?.firstTranscriptMs,
       });
     }
-    const cleanText = input.rawText.trim().length > 0
-      ? await this.cleanTranscript(input.rawText, openRouterApiKey)
-      : { text: input.rawText };
+    const cleanText = await this.cleanIfConfigured(input.rawText, openRouterApiKey);
     const completedAt = Date.now();
     const cleanupMs = completedAt - cleanupStartedAt;
     const asrMs = Math.max(0, Math.round(input.timings?.asrMs ?? 0));
@@ -264,7 +263,7 @@ export class VoiceTranscriptionService {
     const result: VoiceTranscriptionResult = {
       mode: 'streaming',
       provider: 'deepgram/nova-3',
-      cleanupModel: CLEANUP_MODEL,
+      cleanupModel: cleanText.model,
       text: cleanText.text.trim(),
       rawText: input.rawText,
       languages: ['en-US'],

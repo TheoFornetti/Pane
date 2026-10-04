@@ -113,7 +113,9 @@ export async function callComputerUseTool(
     }
     const { code, machine } = decodeBoundary(input, jsInputSchema);
     if (!isThisMachine(machine)) return errorText(OTHER_MACHINE_REFUSAL);
-    const run = invokeDaemon('computer-use:run', [{ connectionId, code }], runResultSchema, { timeoutMs: RUN_TIMEOUT_MS });
+    // Inside a Pane terminal, the run's steps and replay land in that Pane.
+    const sessionId = process.env.PANE_SESSION_ID?.trim() || undefined;
+    const run = invokeDaemon('computer-use:run', [{ connectionId, code, sessionId }], runResultSchema, { timeoutMs: RUN_TIMEOUT_MS });
     const result = await abortable(run, signal);
     const toolResult: ComputerUseToolResult = {
       content: [

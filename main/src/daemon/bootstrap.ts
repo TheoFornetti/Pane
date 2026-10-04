@@ -27,6 +27,7 @@ import { OrchestrationSessionManager } from '../services/orchestrationSessionMan
 import { TaskQueue } from '../services/taskQueue';
 import { registerIpcHandlers } from '../ipc';
 import { isLockOwnerLive } from '../ipc/runpane';
+import { getComputerUseEngine } from '../services/computerUse/activeEngine';
 import { PaneDaemonServer } from './server';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
@@ -54,7 +55,6 @@ import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { extractWorkspaceHeldInput } from '../services/workspaceHeldInput';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { ComputerUseReadinessService } from '../services/computerUse/readiness';
-import { getComputerUseEngine } from '../services/computerUse/activeEngine';
 import { installCuaDriver, selfTest } from '../services/computerUse/cuaDriver';
 import { syncPaneMcpForApp } from '../services/paneMcpRegistration';
 import { COMPUTER_USE_READINESS_CHANGED_EVENT } from '../../../shared/types/computerUse';

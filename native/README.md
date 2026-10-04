@@ -65,6 +65,10 @@ The pane screen runs xterm in a WebView. The page source is `terminal-web/page.t
 `panes.yaml` creates a pane, searches, pins, archives and deletes it; it needs at least one repository on the host. `permission.yaml` answers a permission request; queue one first with `node scripts/request-permission.mjs <pane-dir> <pane-id>`, which stands in for the agent's permission bridge.
 
 
+## Uploads
+
+The paperclip in the input sends photos, camera shots and files (any type, up to 50 MB each) to the host and inserts each file's host path at the cursor, the same path desktop's upload button pastes. Files go up in 128 KB chunks over `POST /invoke` (`terminal:upload-start`, `-chunk`, `-commit`, `-cancel`), so a slow or flaky link only ever resends one chunk: every reply carries the bytes the host has, and after a drop the phone calls `upload-start` again and continues from there. The host stages partial uploads in `<pane-dir>/uploads/`, deletes ones untouched for a day, and lands finished files in `<pane-dir>/images/` or `<pane-dir>/files/` through the same code as a desktop paste (`main/src/services/chunkedUploadStore.ts`, `main/src/ipc/panels.ts`). Hosts without these channels get the old single request, capped at about 12 MB. The upload loop is `src/features/upload/chunkedUpload.ts`.
+
 ## Notifications and links
 
 **Push.** The host sends APNs and FCM alerts itself when an agent is blocked or finishes a turn (`main/src/daemon/mobilePushSender.ts`, operator setup in `docs/NATIVE_MOBILE.md`). The app registers the raw device token from `getDevicePushTokenAsync`, not an Expo push token, through `mobile:push-status` and `mobile:push-register`. It registers on every connect, so a rotated token replaces the old one. It asks for notification permission only when the host reports that delivery is set up. Settings > Notifications shows the "Needs Input" and "Finished" switches (`mobile:push-controls`), and Sign Out revokes the registration before it deletes the token.

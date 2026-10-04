@@ -101,6 +101,7 @@ type RemoteRequestAuthResult =
 
 const MAX_UNAUTHENTICATED_REQUEST_BODY_BYTES = 1024 * 1024;
 const MAX_AUTHENTICATED_REQUEST_BODY_BYTES = 16 * 1024 * 1024;
+const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_REMOTE_DAEMON_HEARTBEAT_INTERVAL_MS = 5_000;
 const REMOTE_VISIBILITY_VIEWER_STALE_MS = 15 * 60 * 1000;
 const MIN_GZIP_BODY_BYTES = 1024;
@@ -290,6 +291,9 @@ export class PaneRemoteHttpApiServer {
         response.destroy(error instanceof Error ? error : new Error(message));
       });
     });
+    // Phones on slow links send uploads in chunks that can take minutes each;
+    // Node's default 300 s per request would cut one off on a bad link.
+    server.requestTimeout = REQUEST_TIMEOUT_MS;
     const voiceDeepgramWss = new WebSocketServer({ noServer: true });
     this.voiceDeepgramWss = voiceDeepgramWss;
     server.on('upgrade', (request, socket, head) => {

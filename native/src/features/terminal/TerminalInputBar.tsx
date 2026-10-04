@@ -14,6 +14,12 @@ export interface TerminalInputBarProps {
   /** Sends the draft followed by Enter. */
   onSubmit: () => void;
   voice: Voice;
+  /** Opens Photos, Camera and Files. */
+  onAttach: () => void;
+  /** Where the cursor is, so inserts land there. */
+  onSelectionChange: (selection: { start: number; end: number }) => void;
+  /** Moves the cursor after an insert; undefined leaves it to the user. */
+  selection?: { start: number; end: number };
   disabled?: boolean;
 }
 
@@ -22,7 +28,7 @@ export interface TerminalInputBarProps {
  * button beside it. Return adds a line; the send button sends. While dictating,
  * the words heard so far show in the box, dimmed and read-only.
  */
-export function TerminalInputBar({ draft, onChangeDraft, onSubmit, voice, disabled = false }: TerminalInputBarProps) {
+export function TerminalInputBar({ draft, onChangeDraft, onSubmit, voice, onAttach, onSelectionChange, selection, disabled = false }: TerminalInputBarProps) {
   const theme = useTheme();
   const { colors } = theme;
   const voiceBusy = voice.phase !== 'idle';
@@ -37,6 +43,8 @@ export function TerminalInputBar({ draft, onChangeDraft, onSubmit, voice, disabl
           testID="terminal-input"
           value={shown}
           onChangeText={text => !previewing && onChangeDraft(text)}
+          onSelectionChange={event => onSelectionChange(event.nativeEvent.selection)}
+          selection={previewing ? undefined : selection}
           editable={!disabled && !previewing}
           placeholder="Type command or prompt..."
           placeholderTextColor={colors.textMuted}
@@ -59,6 +67,21 @@ export function TerminalInputBar({ draft, onChangeDraft, onSubmit, voice, disabl
           ]}
         />
         <MicButton voice={voice} disabled={disabled} />
+        <Pressable
+          testID="terminal-attach"
+          accessibilityRole="button"
+          accessibilityLabel="Attach files"
+          accessibilityHint="Copies photos or files to the host and inserts their paths"
+          disabled={disabled}
+          hitSlop={4}
+          onPress={onAttach}
+          style={({ pressed }) => [
+            styles.attach,
+            { borderRadius: theme.radius.md, backgroundColor: pressed ? colors.surfacePressed : 'transparent', opacity: disabled ? 0.5 : 1 },
+          ]}
+        >
+          <Icon ios="paperclip" android="attach_file" size={18} color={colors.textSecondary} />
+        </Pressable>
       </View>
       <Pressable
         testID="terminal-send"
@@ -145,6 +168,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     borderWidth: 1,
   },
+  attach: { position: 'absolute', bottom: 8, right: 12, width: MIC, height: MIC, alignItems: 'center', justifyContent: 'center' },
   mic: { position: 'absolute', top: 12, right: 12, width: MIC, height: MIC, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   send: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
 });

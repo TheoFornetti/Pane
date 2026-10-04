@@ -138,6 +138,10 @@ const PANEL_CHANNELS = [
   'terminal:paste-image',
   'terminal:save-scrollback',
   'terminal:paste-file',
+  'terminal:upload-start',
+  'terminal:upload-chunk',
+  'terminal:upload-commit',
+  'terminal:upload-cancel',
 ] as const;
 
 const SCRIPT_CHANNELS = [

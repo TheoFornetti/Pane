@@ -76,12 +76,12 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
         setError(/\b(401|403)\b/.test(failure) ? 'The key was refused. Replace it and try again.' : maskSecrets(failure, secrets));
         return;
       }
-      // Drop the request from the mutation's memory too.
-      save.reset();
       onStarted();
     } catch (cause) {
       setError(maskSecrets(saveErrorMessage(cause, profile.label), secrets));
     } finally {
+      // Drop the request, keys included, from the mutation's memory whatever happened.
+      save.reset();
       setBusy(false);
     }
   };

@@ -2553,11 +2553,26 @@ async function checkPanesCostParity() {
     cacheCreationTokens: 0,
     totalTokens: 170,
     messageCount: 1,
+    unmeteredMessageCount: 0,
     estimatedCostUsd: 0.004,
     costIncomplete: false,
     cacheSavingsUsd: 0.0001,
   };
   const model = { ...totals, model: 'claude-sonnet-5', provider: 'claude' };
+  const cursorModel = {
+    model: 'cursor',
+    provider: 'cursor',
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    totalTokens: 0,
+    messageCount: 3,
+    unmeteredMessageCount: 3,
+    estimatedCostUsd: 0,
+    costIncomplete: true,
+    cacheSavingsUsd: 0,
+  };
   const payload = {
     ok: true,
     fromMs: 1,
@@ -2592,7 +2607,7 @@ async function checkPanesCostParity() {
       ...pane,
       estimatedCostUsd: 0,
       costIncomplete: true,
-      byModel: [incompleteModel],
+      byModel: [incompleteModel, cursorModel],
     })),
     unattributed: {
       ...payload.unattributed,
@@ -2687,6 +2702,10 @@ print(json.dumps({"calls": calls, "jsonOutputs": json_outputs, "textOutput": std
   assert.ok(incompleteTextOutput.some(line => line.includes('p1\tPane one\tn/a uncached\tn/a total')));
   assert.ok(incompleteTextOutput.some(line => line.includes('Unattributed\tn/a uncached\tn/a total')));
   assert.ok(incompleteTextOutput.some(line => line.includes('Total\tn/a\t')));
+  assert.ok(incompleteTextOutput.includes('  cursor\t3 messages, tokens not reported\tn/a'));
+  for (const [index, output] of jsonOutputs.entries()) {
+    assertMatchesJsonSchema(JSON.parse(output), contract.jsonSchemas.paneCostResult, `panes cost result ${index + 1}`);
+  }
   assert.deepStrictEqual(python.incompleteTextOutput, incompleteTextOutput);
 }
 

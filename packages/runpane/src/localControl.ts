@@ -375,6 +375,8 @@ interface UsageTotalsResult {
   cacheCreationTokens: number;
   totalTokens: number;
   messageCount: number;
+  /** Messages recorded without tokens (Cursor). Absent from apps that predate them. */
+  unmeteredMessageCount?: number;
   estimatedCostUsd: number;
   costIncomplete: boolean;
   cacheSavingsUsd: number;
@@ -382,7 +384,7 @@ interface UsageTotalsResult {
 
 interface UsageByModelResult extends UsageTotalsResult {
   model: string;
-  provider: 'claude' | 'codex';
+  provider: 'claude' | 'codex' | 'cursor';
 }
 
 interface PaneCostSliceResult extends UsageTotalsResult {
@@ -1288,19 +1290,21 @@ const usageTotalsResultSchema: BoundarySchema<UsageTotalsResult> = boundary.obje
   cacheCreationTokens: boundary.number,
   totalTokens: boundary.number,
   messageCount: boundary.number,
+  unmeteredMessageCount: boundary.optional(boundary.number),
   estimatedCostUsd: boundary.number,
   costIncomplete: boundary.boolean,
   cacheSavingsUsd: boundary.number,
 });
 const usageByModelResultSchema: BoundarySchema<UsageByModelResult> = boundary.object({
   model: boundary.string,
-  provider: boundary.enumeration('claude', 'codex'),
+  provider: boundary.enumeration('claude', 'codex', 'cursor'),
   inputTokens: boundary.number,
   outputTokens: boundary.number,
   cacheReadTokens: boundary.number,
   cacheCreationTokens: boundary.number,
   totalTokens: boundary.number,
   messageCount: boundary.number,
+  unmeteredMessageCount: boundary.optional(boundary.number),
   estimatedCostUsd: boundary.number,
   costIncomplete: boundary.boolean,
   cacheSavingsUsd: boundary.number,
@@ -1312,6 +1316,7 @@ const paneCostSliceResultSchema: BoundarySchema<PaneCostSliceResult> = boundary.
   cacheCreationTokens: boundary.number,
   totalTokens: boundary.number,
   messageCount: boundary.number,
+  unmeteredMessageCount: boundary.optional(boundary.number),
   estimatedCostUsd: boundary.number,
   costIncomplete: boundary.boolean,
   cacheSavingsUsd: boundary.number,
@@ -1333,6 +1338,7 @@ const paneCostEntryResultSchema: BoundarySchema<PaneCostEntryResult> = boundary.
   cacheCreationTokens: boundary.number,
   totalTokens: boundary.number,
   messageCount: boundary.number,
+  unmeteredMessageCount: boundary.optional(boundary.number),
   estimatedCostUsd: boundary.number,
   costIncomplete: boundary.boolean,
   cacheSavingsUsd: boundary.number,
@@ -3397,10 +3403,17 @@ function formatPaneCost(costUsd: number, costIncomplete: boolean): string {
   return costIncomplete ? 'n/a' : `$${costUsd.toFixed(4)}`;
 }
 
+/** A row whose every message was recorded without tokens (Cursor) has no token figure. */
+function formatModelTokens(model: UsageByModelResult): string {
+  const unmetered = model.unmeteredMessageCount ?? 0;
+  if (unmetered > 0 && unmetered === model.messageCount) return `${model.messageCount} messages, tokens not reported`;
+  return `${model.totalTokens} tokens`;
+}
+
 function printPaneCostModels(models: UsageByModelResult[]): void {
   for (const model of models) {
     const cost = model.costIncomplete ? 'n/a' : `$${model.estimatedCostUsd.toFixed(4)}`;
-    console.log(`  ${model.model}\t${model.totalTokens} tokens\t${cost}`);
+    console.log(`  ${model.model}\t${formatModelTokens(model)}\t${cost}`);
   }
 }
 

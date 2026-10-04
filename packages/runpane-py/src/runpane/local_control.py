@@ -1589,10 +1589,18 @@ def format_pane_cost(cost_usd: float, cost_incomplete: bool) -> str:
     return "n/a" if cost_incomplete else f"${cost_usd:.4f}"
 
 
+def format_model_tokens(model: Dict[str, Any]) -> str:
+    # A row whose every message was recorded without tokens (Cursor) has no token figure.
+    unmetered = model.get("unmeteredMessageCount", 0)
+    if unmetered > 0 and unmetered == model.get("messageCount"):
+        return f"{model.get('messageCount')} messages, tokens not reported"
+    return f"{model.get('totalTokens', 0)} tokens"
+
+
 def print_pane_cost_models(models: list[Dict[str, Any]]) -> None:
     for model in models:
         cost = "n/a" if model.get("costIncomplete") else f"${model.get('estimatedCostUsd', 0):.4f}"
-        print(f"  {model.get('model')}\t{model.get('totalTokens', 0)} tokens\t{cost}")
+        print(f"  {model.get('model')}\t{format_model_tokens(model)}\t{cost}")
 
 
 def print_pane_create_result(result: Dict[str, Any], dry_run: bool = False, action: str = "create") -> None:

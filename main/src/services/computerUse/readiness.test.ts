@@ -122,6 +122,48 @@ describe('ComputerUseReadinessService', () => {
     expect(service.get().state).toBe('off');
   });
 
+  it('turning on again during an install waits for the same install', async () => {
+    const { engine, setStatus } = fakeEngine({ installed: false });
+    let finishInstall = () => {};
+    const install = vi.fn(() => new Promise<void>((resolve) => { finishInstall = () => { setStatus({ installed: true }); resolve(); }; }));
+    const { service } = createService(engine, { install });
+
+    const first = service.set({ enabled: true });
+    await vi.waitFor(() => expect(service.get().state).toBe('installing'));
+    await service.set({ enabled: false });
+    const second = service.set({ enabled: true });
+    await vi.waitFor(() => expect(service.get().state).toBe('installing'));
+    finishInstall();
+    await Promise.all([first, second]);
+
+    expect(install).toHaveBeenCalledOnce();
+    expect(service.get().state).toBe('ready');
+  });
+
+  it('a check overtaken by turning off runs no self-test', async () => {
+    let releaseStatus = () => {};
+    const selfTest = vi.fn(async () => ({ ok: true }));
+    const engine: ComputerUseEngine = {
+      id: 'cua-driver',
+      status: () => new Promise<EngineStatus>((resolve) => {
+        releaseStatus = () => resolve({ installed: true, permissions: {}, desktopSession: true });
+      }),
+      call: async () => ({ ok: true }),
+      stop: async () => {},
+    };
+    const { service } = createService(engine, { selfTest });
+
+    const enabling = service.set({ enabled: true });
+    await vi.waitFor(() => expect(releaseStatus).not.toBe(undefined));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await service.set({ enabled: false });
+    releaseStatus();
+    await enabling;
+
+    expect(selfTest).not.toHaveBeenCalled();
+    expect(service.get().state).toBe('off');
+  });
+
   it('checks on daemon start only when the saved setting is on', async () => {
     const { service, deps } = createService(fakeEngine({}).engine, { getSetting: () => ({ enabled: true }) });
     await service.start();

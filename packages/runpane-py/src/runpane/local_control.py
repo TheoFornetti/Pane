@@ -222,15 +222,23 @@ def run_lock_list(parsed: Any) -> int:
     return 0
 
 
+COMPUTER_USE_SET_TIMEOUT_MS = 600_000
+
+
 def run_computer_use(parsed: Any, action: str) -> int:
-    """`runpane computer-use status|on|off`. Not an MCP tool: only a person turns computer use on."""
+    """`runpane computer-use status|on|off`. Not an MCP tool, and `on` refuses inside Pane terminals, where agents run."""
+    if parsed.engine and action != "on":
+        raise ValueError("--engine applies only to runpane computer-use on.")
+    if action == "on" and os.environ.get("PANE_SESSION_ID"):
+        raise ValueError("Turn computer use on from Pane's Remote Access settings, or from a shell outside Pane.")
     if action == "status":
         report = invoke_daemon("computer-use:readiness", [], pane_dir=parsed.pane_dir)
     else:
         request: Dict[str, Any] = {"enabled": action == "on"}
         if parsed.engine:
             request["engine"] = parsed.engine
-        report = invoke_daemon("computer-use:set", [request], pane_dir=parsed.pane_dir)
+        # Turning on waits for the engine install, which takes longer than the default call timeout.
+        report = invoke_daemon("computer-use:set", [request], pane_dir=parsed.pane_dir, timeout_ms=COMPUTER_USE_SET_TIMEOUT_MS)
     state = report.get("state")
     if parsed.json:
         print_json(report)

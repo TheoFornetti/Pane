@@ -59,7 +59,9 @@ export function ComputerUseSection({ connectionState }: { connectionState: Remot
         label={`Computer use on ${machine}`}
         description={readiness
           ? guidance(readiness)
-          : controller.unsupported ? 'Update Pane on this host to use computer use.' : 'Checking this machine…'}
+          : controller.unsupported
+            ? 'Update Pane on this host to use computer use.'
+            : controller.error ? `Pane could not read this machine's status: ${controller.error}` : 'Checking this machine…'}
         status={readiness && (
           <div className="space-y-2">
             <ComputerUseStatus
@@ -68,7 +70,7 @@ export function ComputerUseSection({ connectionState }: { connectionState: Remot
               onAction={readiness.state === 'needs-permission' ? controller.openPermissionSettings : () => setShowDetails((open) => !open)}
             />
             {readiness.state === 'failed' && showDetails && (
-              <pre className="whitespace-pre-wrap rounded-md border border-border-subtle bg-bg-secondary p-3 font-mono text-xs text-text-secondary">
+              <pre className="whitespace-pre-wrap rounded-md border border-border-primary bg-bg-secondary p-3 font-mono text-xs text-text-secondary">
                 {readiness.detail}
               </pre>
             )}

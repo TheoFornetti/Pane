@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComputerUseEngineChoice, ComputerUseReadiness } from '../../../shared/types/computerUse';
 
 const CLOCK_TICK_MS = 30_000;
+// A host whose Pane predates computer use has no handler for the channel.
+const UNSUPPORTED_HOST = /No Pane daemon command registered/;
 
 /**
  * Computer-use readiness of the machine Pane is connected to, pushed by its daemon.
@@ -13,15 +15,23 @@ export function useComputerUseReadiness(connectionKey: string) {
   const [error, setError] = useState<string | null>(null);
   const [unsupported, setUnsupported] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  // Bumped per request, so a response from before a host switch never lands under the new host.
+  const latestRequest = useRef(0);
 
   const refresh = useCallback(async () => {
+    const request = ++latestRequest.current;
     try {
-      setReadiness(await window.electronAPI.computerUseReadiness.get());
+      const next = await window.electronAPI.computerUseReadiness.get();
+      if (request !== latestRequest.current) return;
+      setReadiness(next);
       setUnsupported(false);
       setError(null);
-    } catch {
+    } catch (cause) {
+      if (request !== latestRequest.current) return;
+      const message = cause instanceof Error ? cause.message : String(cause);
       setReadiness(null);
-      setUnsupported(true);
+      setUnsupported(UNSUPPORTED_HOST.test(message));
+      setError(UNSUPPORTED_HOST.test(message) ? null : message);
     }
   }, []);
 
@@ -38,8 +48,11 @@ export function useComputerUseReadiness(connectionKey: string) {
   }, []);
 
   const run = useCallback(async (action: () => Promise<ComputerUseReadiness>) => {
+    const request = ++latestRequest.current;
     try {
-      setReadiness(await action());
+      const next = await action();
+      if (request !== latestRequest.current) return;
+      setReadiness(next);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

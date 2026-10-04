@@ -30,12 +30,19 @@ const reportSchema: BoundarySchema<ComputerUseReport> = boundary.object({
   checkedAt: boundary.optional(boundary.number),
 });
 
+// Turning on waits for the engine install, which takes longer than the default call timeout.
+const SET_TIMEOUT_MS = 600_000;
+
 /**
- * `runpane computer-use status|on|off`. Deliberately not an MCP tool: only a
- * person (here or in Settings) turns computer use on for a machine.
+ * `runpane computer-use status|on|off`. Not an MCP tool, and `on` refuses inside
+ * Pane terminals, where agents run. A shell outside Pane can still turn it on.
  */
 export async function runComputerUse(parsed: ParsedArgs, action: 'status' | 'on' | 'off'): Promise<number> {
-  const options = { paneDir: parsed.paneDir };
+  if (parsed.engine && action !== 'on') throw new Error('--engine applies only to runpane computer-use on.');
+  if (action === 'on' && process.env.PANE_SESSION_ID) {
+    throw new Error('Turn computer use on from Pane\'s Remote Access settings, or from a shell outside Pane.');
+  }
+  const options = { paneDir: parsed.paneDir, timeoutMs: action === 'status' ? undefined : SET_TIMEOUT_MS };
   const request: ComputerUseSetRequest = { enabled: action === 'on' };
   if (parsed.engine) request.engine = parsed.engine;
   const report = action === 'status'

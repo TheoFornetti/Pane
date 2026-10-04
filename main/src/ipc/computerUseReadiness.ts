@@ -34,8 +34,8 @@ function withStatusText(readiness: ComputerUseReadiness): ComputerUseReadiness &
 
 /**
  * Computer use is per machine, so these channels are daemon-owned: from the
- * host switcher they read and change the connected host. They are never MCP
- * tools, so an agent cannot turn computer use on for itself.
+ * host switcher they read and change the connected host. No MCP tool calls
+ * them; the runpane CLI does, and refuses to turn computer use on inside Pane terminals.
  */
 export function registerComputerUseReadinessHandlers(
   ipcMain: IpcMain,

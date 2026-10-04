@@ -2947,7 +2947,8 @@
         "",
         "Computer use lets agents see and operate apps on this machine through the Pane js tool.",
         "It is set per machine, off by default, and only from Pane's Remote Access settings or this command.",
-        "Turning it on installs Cua Driver, registers the Pane MCP server and skill, checks OS permissions, and runs a self-test."
+        "Turning it on installs Cua Driver, registers the Pane MCP server and skill, checks OS permissions, and runs a self-test.",
+        "`on` refuses inside Pane terminals, where agents run."
       ]
     },
     "pip": {
@@ -4047,7 +4048,8 @@
         "",
         "Computer use lets agents see and operate apps on this machine through the Pane js tool.",
         "It is set per machine, off by default, and only from Pane's Remote Access settings or this command.",
-        "Turning it on installs Cua Driver, registers the Pane MCP server and skill, checks OS permissions, and runs a self-test."
+        "Turning it on installs Cua Driver, registers the Pane MCP server and skill, checks OS permissions, and runs a self-test.",
+        "`on` refuses inside Pane terminals, where agents run."
       ]
     }
   },
@@ -13227,7 +13229,7 @@
       "computer-use on": {
         "name": "computer-use on",
         "summary": "Turn computer use on for this machine: install the engine, register the Pane MCP server and skill, check permissions, and self-test.",
-        "details": "For people setting up a machine, including headless hosts. It waits for the readiness step and prints the resulting status. Computer use cannot be turned on through the Pane MCP server.",
+        "details": "For people setting up a machine, including headless hosts. It waits for the readiness step and prints the resulting status. It refuses inside Pane terminals ($PANE_SESSION_ID set), where agents run, and it is not a Pane MCP tool.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [

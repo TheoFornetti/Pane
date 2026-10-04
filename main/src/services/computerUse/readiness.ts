@@ -36,6 +36,8 @@ export class ComputerUseReadinessService {
   /** Bumped by every check and by turning off, so a stale check never overwrites a newer state. */
   private generation = 0;
   private recheckTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The install in flight, shared by every check so turning on twice never runs two installers. */
+  private installing: Promise<void> | null = null;
 
   constructor(private readonly deps: ComputerUseReadinessDeps) {
     this.readiness = { state: 'off', engineChoice: this.engineChoice() };
@@ -47,19 +49,21 @@ export class ComputerUseReadinessService {
 
   /** Rechecks on daemon start while computer use is on. */
   async start(): Promise<void> {
-    if (this.deps.getSetting()?.enabled === true) await this.check();
+    if (this.deps.getSetting()?.enabled !== true) return;
+    this.deps.syncAgentSetup();
+    await this.check();
   }
 
   async set(update: { enabled: boolean; engine?: ComputerUseEngineChoice }): Promise<ComputerUseReadiness> {
     const setting: ComputerUseSetting = { ...this.deps.getSetting(), enabled: update.enabled };
     if (update.engine) setting.engine = update.engine;
     await this.deps.saveSetting(setting);
+    this.deps.syncAgentSetup();
     if (update.enabled) return this.check();
 
     this.generation += 1;
     this.clearRecheck();
     this.update({ state: 'off', engineChoice: this.engineChoice() });
-    this.deps.syncAgentSetup();
     await this.deps.stopEngine();
     return this.readiness;
   }
@@ -71,25 +75,29 @@ export class ComputerUseReadinessService {
     this.clearRecheck();
     const engineChoice = this.engineChoice();
     const engine = this.deps.engine();
+    // A newer check or turning off supersedes this one: it stops before its next side effect.
+    const stale = () => generation !== this.generation;
     const settle = (next: ComputerUseReadiness): ComputerUseReadiness => {
-      if (generation === this.generation) this.update(next);
+      if (!stale()) this.update(next);
       return this.readiness;
     };
 
     try {
       let status = await engine.status();
+      if (stale()) return this.readiness;
       if (!status.installed) {
         settle({ state: 'installing', engineChoice });
         try {
-          await this.deps.install();
+          this.installing ??= this.deps.install().finally(() => { this.installing = null; });
+          await this.installing;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           return settle({ state: 'failed', engineChoice, detail: `Install failed: ${message}` });
         }
-        if (generation !== this.generation) return this.readiness;
+        if (stale()) return this.readiness;
         status = await engine.status();
+        if (stale()) return this.readiness;
       }
-      this.deps.syncAgentSetup();
 
       if (!status.desktopSession) return settle({ state: 'no-desktop', engineChoice });
       if (!status.installed) {
@@ -97,9 +105,9 @@ export class ComputerUseReadinessService {
       }
       const missing = missingPermission(status.permissions);
       if (missing) {
-        const result = settle({ state: 'needs-permission', engineChoice, permission: missing, appName: ENGINE_APP_NAME });
-        if (generation === this.generation) this.scheduleRecheck();
-        return result;
+        settle({ state: 'needs-permission', engineChoice, permission: missing, appName: ENGINE_APP_NAME });
+        this.scheduleRecheck();
+        return this.readiness;
       }
 
       const test = await this.deps.selfTest(engine);

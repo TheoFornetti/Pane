@@ -7,6 +7,7 @@ import { databaseService } from '../database';
 import { UsageRepository } from './usageRepository';
 import { UsageAggregator, resolveReportRange } from './usageAggregator';
 import { isFileUnchanged, resolveStartOffset, scanJsonlFile } from './jsonlScanner';
+import { cursorChatIdFromTranscript, listPaneCursorChats, type PaneCursorChat } from './cursorChats';
 import { getPricingSource } from './modelPricing';
 import { OpenRouterPriceProvider } from './openRouterPriceProvider';
 import { getAppDirectory } from '../../utils/appDirectory';
@@ -28,6 +29,19 @@ interface TranscriptRoot {
   path: string;
 }
 
+/** Which files under each root are transcripts. */
+const TRANSCRIPT_GLOBS: Record<UsageProvider, string> = {
+  claude: '**/*.jsonl',
+  codex: '**/*.jsonl',
+  cursor: '**/agent-transcripts/**/*.jsonl',
+};
+
+/** The Pane chat a Cursor transcript belongs to, which its lines never name. */
+interface TranscriptAttribution {
+  agentSessionId: string;
+  cwd: string | null;
+}
+
 interface PaneCostsReport {
   fromMs: number;
   toMs: number;
@@ -47,6 +61,7 @@ function transcriptRoots(): TranscriptRoot[] {
   return [
     { provider: 'claude', path: join(home, '.claude', 'projects') },
     { provider: 'codex', path: join(home, '.codex', 'sessions') },
+    { provider: 'cursor', path: join(home, '.cursor', 'projects') },
   ];
 }
 
@@ -55,7 +70,10 @@ function transcriptRoots(): TranscriptRoot[] {
  * rolling-window utilisation.
  *
  * Read-only by construction: it never writes to, creates or deletes anything
- * under `~/.claude` or `~/.codex`.
+ * under `~/.claude`, `~/.codex` or `~/.cursor`.
+ *
+ * Cursor transcripts are read only for chats Pane launched (see
+ * `listPaneCursorChats`), and record messages without tokens.
  *
  * Known limitation: only the Electron host's home directory is scanned. On
  * Windows with WSL-based projects the agents write inside the distro's home,
@@ -67,6 +85,7 @@ export class UsageManager {
     repository?: UsageRepository;
     scanFile?: typeof scanJsonlFile;
     createPriceProvider?: () => Pick<OpenRouterPriceProvider, 'start' | 'stop'>;
+    cursorChats?: () => readonly PaneCursorChat[];
   } = {}) {}
 
   // Resolved on first use, not in the constructor: this module is imported at
@@ -220,19 +239,31 @@ export class UsageManager {
       this.status.rootsChecked = roots.length;
       this.status.missingRoots = roots.filter(root => !existsSync(root.path)).map(root => root.path);
 
-      const files: Array<{ path: string; provider: UsageProvider }> = [];
+      const files: Array<{ path: string; provider: UsageProvider; attribution?: TranscriptAttribution }> = [];
+      let cursorChats: Map<string, PaneCursorChat> | null = null;
       for (const root of roots) {
         if (!existsSync(root.path)) continue;
-        const matches = await glob('**/*.jsonl', { cwd: root.path, absolute: true, nodir: true });
+        const matches = await glob(TRANSCRIPT_GLOBS[root.provider], { cwd: root.path, absolute: true, nodir: true });
         if (generation !== this.generation) return;
-        for (const path of matches) files.push({ path, provider: root.provider });
+        if (root.provider !== 'cursor') {
+          for (const path of matches) files.push({ path, provider: root.provider });
+          continue;
+        }
+        cursorChats ??= this.readCursorChats();
+        for (const path of matches) {
+          const chatId = cursorChatIdFromTranscript(path);
+          const chat = chatId ? cursorChats.get(chatId) : undefined;
+          // Chats Pane did not launch, such as the Cursor editor's, are never read.
+          if (!chat) continue;
+          files.push({ path, provider: 'cursor', attribution: { agentSessionId: chat.chatId, cwd: chat.cwd } });
+        }
       }
 
       this.status.filesTotal = files.length;
       for (const file of files) {
         if (generation !== this.generation) return;
         try {
-          await this.scanOne(file.path, file.provider, generation);
+          await this.scanOne(file.path, file.provider, generation, file.attribution);
         } catch (error) {
           if (generation !== this.generation) return;
           // Keep indexing readable files, but report the pass as incomplete.
@@ -269,7 +300,23 @@ export class UsageManager {
    * and mtime are unchanged are skipped without being opened, which is what
    * makes subsequent launches fast.
    */
-  private async scanOne(path: string, provider: UsageProvider, generation: number): Promise<void> {
+  /** Pane-launched Cursor chats by id; none when Pane's own records cannot be read. */
+  private readCursorChats(): Map<string, PaneCursorChat> {
+    try {
+      const chats = this.dependencies.cursorChats?.() ?? listPaneCursorChats(databaseService.getDb());
+      return new Map(chats.map(chat => [chat.chatId, chat]));
+    } catch (error) {
+      console.warn('[Usage] Skipped Cursor transcripts:', error instanceof Error ? error.message : error);
+      return new Map();
+    }
+  }
+
+  private async scanOne(
+    path: string,
+    provider: UsageProvider,
+    generation: number,
+    attribution?: TranscriptAttribution,
+  ): Promise<void> {
     try {
       const stats = await stat(path);
       if (generation !== this.generation) return;
@@ -303,7 +350,12 @@ export class UsageManager {
           parserVersion: USAGE_PARSER_VERSION,
           parseContext: scanned.context,
         },
-        scanned.events,
+        attribution ? scanned.events.map(({ event, byteOffset }) => ({
+          // Cursor lines carry no time. The transcript's last write is the
+          // latest any of them can be, so the messages read in this pass get it.
+          event: { ...event, ...attribution, timestampMs: Math.floor(stats.mtimeMs) },
+          byteOffset,
+        })) : scanned.events,
         Date.now()
       );
 

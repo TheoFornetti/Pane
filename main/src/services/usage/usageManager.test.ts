@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3-multiple-ciphers';
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, stat, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { UsageManager } from './usageManager';
@@ -133,6 +133,51 @@ afterEach(async () => {
   vi.restoreAllMocks();
   db.close();
   await rm(home, { recursive: true, force: true });
+});
+
+const PANE_CHAT = '8ff011fb-7f01-4e74-bbe1-e026d47ea50f';
+const NESTED_CHAT = '11111111-2222-4333-8444-555555555555';
+const OUTSIDE_CHAT = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
+function cursorLines(...roles: string[]): string {
+  return roles.map(role => JSON.stringify({ role, message: { content: [{ type: 'text', text: 'x' }] } })).join('\n') + '\n';
+}
+
+describe('Cursor transcripts', () => {
+  it('indexes only chats Pane launched, as unmetered messages at the file time, and keeps them after the panel goes', async () => {
+    const transcripts = join(home, '.cursor/projects/work-pane/agent-transcripts');
+    await mkdir(join(transcripts, NESTED_CHAT), { recursive: true });
+    const paneFile = join(transcripts, `${PANE_CHAT}.jsonl`);
+    await writeFile(paneFile, cursorLines('user', 'assistant', 'assistant') + JSON.stringify({ type: 'turn_ended' }) + '\n');
+    await writeFile(join(transcripts, NESTED_CHAT, `${NESTED_CHAT}.jsonl`), cursorLines('assistant'));
+    await writeFile(join(transcripts, `${OUTSIDE_CHAT}.jsonl`), cursorLines('assistant', 'assistant'));
+    let chats = [{ chatId: PANE_CHAT, cwd: '/work/pane' }, { chatId: NESTED_CHAT, cwd: '/work/nested' }];
+    manager = new UsageManager({
+      roots: () => [{ provider: 'cursor', path: join(home, '.cursor/projects') }],
+      repository,
+      cursorChats: () => chats,
+      createPriceProvider: () => ({ start() {}, stop() {} }),
+    });
+
+    await manager.start();
+    await vi.waitFor(() => expect(repository.countEvents()).toBe(3));
+
+    // SAFETY: The projection names every column of the row type.
+    const rows = () => db.prepare(`
+      SELECT provider, metered, agent_session_id, cwd, timestamp_ms FROM usage_events ORDER BY agent_session_id
+    `).all() as Array<{ provider: string; metered: number; agent_session_id: string; cwd: string; timestamp_ms: number }>;
+    const mtimeMs = Math.floor((await stat(paneFile)).mtimeMs);
+    expect(rows()).toEqual([
+      { provider: 'cursor', metered: 0, agent_session_id: NESTED_CHAT, cwd: '/work/nested', timestamp_ms: expect.any(Number) },
+      { provider: 'cursor', metered: 0, agent_session_id: PANE_CHAT, cwd: '/work/pane', timestamp_ms: mtimeMs },
+      { provider: 'cursor', metered: 0, agent_session_id: PANE_CHAT, cwd: '/work/pane', timestamp_ms: mtimeMs },
+    ]);
+
+    chats = [];
+    await appendFile(paneFile, cursorLines('assistant'));
+    await manager.rescan();
+    expect(rows().map(row => row.agent_session_id)).toEqual([NESTED_CHAT, PANE_CHAT, PANE_CHAT]);
+  });
 });
 
 describe('usage polling', () => {

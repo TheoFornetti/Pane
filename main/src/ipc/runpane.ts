@@ -4110,8 +4110,8 @@ async function assertRemovableWorktree(services: AppServices, pane: Session, rem
 /**
  * Archives the Pane through `sessions:delete`, exactly like the UI, and waits
  * for its worktree to be removed. A large worktree reports `completed` with
- * `trashDeletion: 'pending'`: git has forgotten it and its path is free, and
- * its files are being deleted from the trash in the background.
+ * `trashDeletion: 'pending'`: git has forgotten it and its files are being
+ * deleted from quarantine. Durable cleanup reserves its path until finished.
  */
 async function archivePaneAndRemoveWorktree(
   services: AppServices,
@@ -4303,7 +4303,7 @@ function waitForArchiveProgressCompletion(
 
     const onProgress = (payload: { tasks: ArchiveProgressTask[] }) => {
       const task = payload.tasks.find(candidate => candidate.sessionId === paneId);
-      if (task?.status === 'completed') {
+      if (task?.status === 'completed' || (task?.cleanupId && task.trashDeletion === 'pending' && task.status !== 'failed')) {
         finish({ worktreeCleanup: 'completed', trashDeletion: task.trashDeletion });
       } else if (task?.status === 'failed') {
         finish({ worktreeCleanup: 'failed' });

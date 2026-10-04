@@ -102,6 +102,7 @@ export const DAEMON_OWNED_CHANNEL_PREFIXES = [
 
 export const DAEMON_OWNED_EXACT_CHANNELS = [
   'archive:get-progress',
+  'archive:retry-cleanup',
   'git:cancel-status-for-project',
   'git:clone-repo',
   'git:commit',

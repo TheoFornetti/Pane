@@ -8,6 +8,7 @@ import { DatabaseService } from '../database/database';
 import { AnalyticsManager } from '../services/analyticsManager';
 import { SessionManager } from '../services/sessionManager';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
+import { ArchiveCleanupManager } from '../services/archiveCleanupManager';
 import { SpotlightManager } from '../services/spotlightManager';
 import { PermissionIpcServer } from '../services/permissionIpcServer';
 import { WorktreeManager } from '../services/worktreeManager';
@@ -314,6 +315,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     log: (message, error) => logger.warn(message, error),
   });
 
+  const archiveCleanupManager = new ArchiveCleanupManager(databaseService, sessionManager, archiveProgressManager);
+  worktreeManager.setArchivePathGuard(target => archiveCleanupManager.assertPathAvailable(target));
   const daemonServices: DaemonHostServices = {
     configManager,
     databaseService,
@@ -334,6 +337,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     getMainWindow: options.getMainWindow,
     logger,
     archiveProgressManager,
+    archiveCleanupManager,
     analyticsManager,
     spotlightManager,
     workspaceJournal,
@@ -389,6 +393,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   );
 
   setupEventListeners(services);
+  archiveCleanupManager.start();
 
   const { logsManager } = await import('../services/panels/logPanel/logsManager');
   logsManager.setAnalyticsManager(analyticsManager);
@@ -427,6 +432,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     },
     permissionIpcServer,
     async shutdown(): Promise<void> {
+      await archiveCleanupManager.stop();
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();
       resourceMonitorService.stop();

@@ -70,6 +70,16 @@ Agent status (working, idle, blocked) is derived in
 - Worktrees go in `<repo>/worktrees/` unless the project sets another folder
   (`worktreeManager.ts`). `worktreePoolManager.ts` keeps empty reserve
   worktrees on `_reserve/<hex>` branches so new panes open fast.
+- Archive cleanup intents live in SQLite's `archive_cleanup_jobs`, atomically
+  committed with the session archive flag. `ArchiveCleanupManager` resumes only
+  those intents, validates physical directory/Git identity, and serializes work
+  per repository with two global slots. Awaited, cooperative purge batches use
+  Electron's `original-fs` and job-level busy retries. There are no detached
+  deletion helpers or timed-out deletions left running. Failed jobs remain
+  visible through ArchiveProgress; interrupted scripts require explicit skip
+  on retry. Create/remove share the repository lock and cleanup path guard;
+  Restore is blocked until cleanup completes. Quarantine lives under
+  `<git-common-dir>/pane-archive-cleanup`, separate from legacy trash sweeps.
 - Per-repo setup, run and archive scripts come from `pane.json` and friends:
   [CONFIG_FILES.md](CONFIG_FILES.md).
 

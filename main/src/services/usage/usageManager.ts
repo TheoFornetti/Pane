@@ -30,11 +30,11 @@ interface TranscriptRoot {
 }
 
 /** Which files under each root are transcripts. */
-const TRANSCRIPT_GLOBS: Record<UsageProvider, string> = {
+const TRANSCRIPT_GLOBS = {
   claude: '**/*.jsonl',
   codex: '**/*.jsonl',
   cursor: '**/agent-transcripts/**/*.jsonl',
-};
+} satisfies Record<UsageProvider, string>;
 
 /** The Pane chat a Cursor transcript belongs to, which its lines never name. */
 interface TranscriptAttribution {

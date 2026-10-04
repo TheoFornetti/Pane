@@ -293,7 +293,7 @@ export function parseCodexLine(
 }
 
 /** Cursor's transcripts name no model, so every Cursor message is filed under this one. */
-export const CURSOR_MODEL = 'cursor';
+const CURSOR_MODEL = 'cursor';
 
 /**
  * Cursor agent transcript line: `{role, message}` entries and `{type:
@@ -301,7 +301,7 @@ export const CURSOR_MODEL = 'cursor';
  * assistant line is one unmetered message at the caller's fallback time. Its
  * chat id and cwd come from Pane's launch record, not from the line.
  */
-export function parseCursorLine(value: JsonValue, fallbackTimestampMs: number): UsageEvent | null {
+function parseCursorLine(value: JsonValue, fallbackTimestampMs: number): UsageEvent | null {
   if (asObject(value)?.role !== 'assistant') return null;
   return {
     provider: 'cursor',

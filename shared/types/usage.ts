@@ -1,10 +1,12 @@
 /**
  * Token usage, cost and rate-limit types.
  *
- * Pane runs Claude and Codex as PTY terminals, so no structured usage flows
- * through the app itself. The authoritative record is each CLI's own transcript
- * (`~/.claude/projects/**\/*.jsonl`, `~/.codex/sessions/**\/*.jsonl`), which
- * Pane reads read-only and indexes incrementally.
+ * Pane runs Claude, Codex and Cursor as PTY terminals, so no structured usage
+ * flows through the app itself. The authoritative record is each CLI's own
+ * transcript (`~/.claude/projects/**\/*.jsonl`, `~/.codex/sessions/**\/*.jsonl`,
+ * and for chats Pane launched, `~/.cursor/projects/**\/agent-transcripts/`),
+ * which Pane reads read-only and indexes incrementally. Cursor's transcripts
+ * record messages without tokens, so its events are unmetered.
  */
 
 interface UsageProviderMeta {

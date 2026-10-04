@@ -1,6 +1,6 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
-import { boundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { ComputerUseEngine, EngineImage, EngineResult } from './engine';
 import type { ChildMessage, ParentMessage } from './scriptHostProtocol';
 
@@ -40,6 +40,7 @@ interface Host {
   lastUsedAt: Date;
   idleTimer?: ReturnType<typeof setTimeout>;
   finishRun?: (result: ScriptRunResult) => void;
+  onStep?: (step: JsonValue) => void;
 }
 
 /**
@@ -63,9 +64,10 @@ export class ScriptHosts {
     this.maxOutputChars = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
   }
 
-  run(connectionId: string, code: string): Promise<ScriptRunResult> {
+  /** `onStep` gets each step the script reports while this run is in flight. */
+  run(connectionId: string, code: string, onStep?: (step: JsonValue) => void): Promise<ScriptRunResult> {
     const host = this.hosts.get(connectionId) ?? this.startHost(connectionId);
-    const result = host.queue.then(() => this.runOnHost(connectionId, host, code));
+    const result = host.queue.then(() => this.runOnHost(connectionId, host, code, onStep));
     host.queue = result.catch(() => undefined);
     return result;
   }
@@ -119,12 +121,13 @@ export class ScriptHosts {
     return host;
   }
 
-  private runOnHost(connectionId: string, host: Host, code: string): Promise<ScriptRunResult> {
+  private runOnHost(connectionId: string, host: Host, code: string, onStep?: (step: JsonValue) => void): Promise<ScriptRunResult> {
     if (host.closed) {
       return Promise.resolve({ ok: false, text: 'The script state was reset before this script ran.', images: [] });
     }
     if (host.idleTimer) clearTimeout(host.idleTimer);
     host.running = true;
+    host.onStep = onStep;
     host.lastUsedAt = new Date();
     const runId = this.nextRunId++;
     return new Promise<ScriptRunResult>((resolve) => {
@@ -134,6 +137,7 @@ export class ScriptHosts {
       host.finishRun = (result) => {
         clearTimeout(timeout);
         host.finishRun = undefined;
+        host.onStep = undefined;
         host.running = false;
         host.lastUsedAt = new Date();
         if (this.hosts.get(connectionId) === host) {
@@ -148,6 +152,10 @@ export class ScriptHosts {
   private onChildMessage(host: Host, message: ChildMessage): void {
     if (message.type === 'done') {
       host.finishRun?.({ ok: message.ok, text: message.text, images: message.images });
+      return;
+    }
+    if (message.type === 'step') {
+      host.onStep?.(message.step);
       return;
     }
     void this.inLane(laneFor(message.args), () => this.callEngine(message.tool, message.args)).then((result) => {

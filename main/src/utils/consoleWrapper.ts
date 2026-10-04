@@ -1,6 +1,8 @@
 // Simple console wrapper to reduce logging in production
 // This follows the existing pattern in the codebase
+import { format } from 'util';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { redactDeliveredSecrets } from './deliveredSecrets';
 
 const runtimeGlobal = decodeBoundary(global, boundary.object({
   isPackaged: boundary.optional(boundary.boolean),
@@ -18,7 +20,7 @@ const originalConsole = {
 
 function writeOriginalConsole(method: (...args: unknown[]) => void, args: unknown[]): void {
   try {
-    method(...args);
+    method(redactDeliveredSecrets(format(...args)));
   } catch (error) {
     let code: string | undefined;
     try {

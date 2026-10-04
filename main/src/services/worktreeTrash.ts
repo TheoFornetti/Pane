@@ -191,10 +191,25 @@ async function removeWithGit(
     } catch (renameError) {
       console.warn(`[WorktreeTrash] leftover_rename_failed worktreePath=${JSON.stringify(worktreePath)}:`, renameError);
     }
-    await fs.rmdir(worktreePath)
+    await removeEmptyRootWhileBusy(worktreePath, busyRetryMs)
       .catch(error => console.warn(`[WorktreeTrash] leftover_delete_failed worktreePath=${JSON.stringify(worktreePath)}:`, error));
     if (await exists(worktreePath)) throw gitError;
     return false;
+  }
+}
+
+async function removeEmptyRootWhileBusy(target: string, budgetMs: number): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    try {
+      await fs.rmdir(target);
+      return;
+    } catch (error) {
+      const failure = decodeOptionalBoundary(error, boundary.object({ code: boundary.string }));
+      if (failure?.code === 'ENOENT') return;
+      if (!failure || !BUSY_ERROR_CODES.has(failure.code) || Date.now() >= deadline) throw error;
+      await delay(BUSY_RETRY_DELAY_MS);
+    }
   }
 }
 

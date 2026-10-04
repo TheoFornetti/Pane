@@ -165,9 +165,12 @@ describe('removeWorktreeViaTrash', () => {
     expect(readdirSync(join(repo, '.git', 'pane-trash'))).toEqual([]);
   });
 
-  it('deletes the empty directory in place when it cannot be moved either', async () => {
+  it('retries a busy empty directory in place when it cannot be moved either', async () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();
     vi.spyOn(fsPromises, 'rename').mockRejectedValue(busyError());
+    const realRmdir = fsPromises.rmdir.bind(fsPromises);
+    const rmdir = vi.spyOn(fsPromises, 'rmdir').mockRejectedValueOnce(busyError())
+      .mockImplementationOnce(target => realRmdir(target));
     const realExecFile = runner.execFile.bind(runner);
     vi.spyOn(runner, 'execFile').mockImplementation(async (file, args, cwd, options) => {
       if (file !== 'git' || args[0] !== 'worktree' || args[1] !== 'remove') {
@@ -180,6 +183,7 @@ describe('removeWorktreeViaTrash', () => {
     const outcome = await removeWorktreeViaTrash(worktree, repo, resolver, runner, { busyRetryMs: 10 });
 
     expect(outcome).toBe('done');
+    expect(rmdir).toHaveBeenCalledTimes(2);
     expect(existsSync(worktree)).toBe(false);
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
   });
@@ -279,6 +283,36 @@ describe('removeWorktreeViaTrash', () => {
     await expect(removeWorktreeViaTrash(repo, repo, resolver, runner)).rejects.toThrow();
 
     expect(existsSync(join(repo, '.git'))).toBe(true);
+  });
+});
+
+describe('archive callback lifetime', () => {
+  it('keeps failed cleanup active until artifacts settle, then publishes failure', async () => {
+    vi.useFakeTimers();
+    const manager = new ArchiveProgressManager();
+    let release = () => {};
+    const artifacts = new Promise<void>(resolve => { release = resolve; });
+    try {
+      manager.addTask('failed', 'pane', 'worktree', 'project', async () => {
+        manager.updateTaskStatus('failed', 'failed', 'Worktree remains busy');
+        manager.updateTaskStatus('failed', 'cleaning-artifacts');
+        await artifacts;
+        manager.updateTaskStatus('failed', 'completed');
+      });
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(manager.hasActiveTasks()).toBe(true);
+      expect(manager.getProgress().activeCount).toBe(1);
+      expect(manager.getActiveTasks()[0]).toMatchObject({ status: 'cleaning-artifacts', error: 'Worktree remains busy' });
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(manager.hasActiveTasks()).toBe(false);
+      expect(manager.getActiveTasks()[0]).toMatchObject({ status: 'failed', error: 'Worktree remains busy' });
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(manager.getActiveTasks()).toEqual([]);
+    } finally {
+      release();
+      vi.useRealTimers();
+    }
   });
 });
 

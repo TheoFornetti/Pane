@@ -209,6 +209,7 @@ const report = {
     lastScanFinishedMs: Date.now(),
     filesTracked: 3,
     eventsIndexed: 42,
+    rootsChecked: 2,
     missingRoots: [],
     scanning: false,
     filesScanned: 3,
@@ -434,12 +435,20 @@ test('missing transcript roots name every provider and the paths that were check
   const missingRoots = ['/home/test/.claude/projects', '/home/test/.codex/sessions'];
   await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: { ...report, index: { ...report.index, missingRoots } }, activeProjectId: project.id });
   await page.goto('/');
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Settings categories' })
-    .getByRole('button', { name: 'Usage & Limits', exact: true }).click();
+  await openUsageAndLimits(page);
   await expect(page.getByRole('heading', { name: 'No agent transcripts found' })).toBeVisible();
-  await expect(page.getByText(/Usage is read from the Claude and Codex transcript files/)).toBeVisible();
+  await expect(page.getByText(/Usage is read from the Claude Code and Codex transcript files/)).toBeVisible();
   for (const root of missingRoots) await expect(page.getByText(root, { exact: true })).toBeVisible();
+});
+
+test('one missing transcript root still shows the dashboard', async ({ page }) => {
+  const missingRoots = ['/home/test/.codex/sessions'];
+  await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: { ...report, index: { ...report.index, missingRoots } }, activeProjectId: project.id });
+  await page.goto('/');
+  await openUsageAndLimits(page);
+  await expect(page.getByRole('region', { name: 'Provider limits' })).toBeVisible();
+  await expect(page.getByText(`Not found: ${missingRoots[0]}`)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'No agent transcripts found' })).toHaveCount(0);
 });
 
 test('rescan completion keeps the latest filter and late requests cannot replace it', async ({ page }) => {

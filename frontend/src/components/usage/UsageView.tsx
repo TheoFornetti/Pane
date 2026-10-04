@@ -39,7 +39,7 @@ const PROVIDER_OPTIONS: Array<{ value: UsageProvider | 'all'; label: string }> =
   ...USAGE_PROVIDERS,
 ];
 
-const AGENT_NAMES = joinLabels(USAGE_PROVIDERS.map(entry => entry.label));
+const CLI_NAMES = joinLabels(USAGE_PROVIDERS.map(entry => entry.cliLabel));
 const VENDOR_NAMES = joinLabels(USAGE_PROVIDERS.map(entry => entry.vendorLabel));
 
 /** Chart palette, matching the graph view's lane colours. */
@@ -413,7 +413,8 @@ export function UsageView() {
   }, [report]);
 
   const missingRoots = report?.index.missingRoots ?? [];
-  const allRootsMissing = missingRoots.length >= USAGE_PROVIDERS.length;
+  const rootsChecked = report?.index.rootsChecked ?? 0;
+  const allRootsMissing = rootsChecked > 0 && missingRoots.length === rootsChecked;
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
@@ -581,7 +582,7 @@ export function UsageView() {
           <div className="mx-auto max-w-lg rounded border border-border-primary bg-surface-secondary p-6 text-center">
             <h2 className="mb-2 text-sm font-medium text-text-primary">No agent transcripts found</h2>
             <p className="text-xs text-text-secondary">
-              Usage is read from the {AGENT_NAMES} transcript files in your home directory.
+              Usage is read from the {CLI_NAMES} transcript files in your home directory.
               None of these exist yet: {missingRoots.map((root, index) => (
                 <span key={root}>
                   {index > 0 && ', '}

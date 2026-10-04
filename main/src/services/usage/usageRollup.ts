@@ -23,6 +23,8 @@ function rollupHourOf(column: string): string {
  * so a crash can never leave an empty rollup next to existing events.
  */
 export function ensureUsageRollup(db: Database): void {
+  const startedMs = Date.now();
+  let rebuilt = false;
   db.transaction(() => {
     const exists = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'usage_hourly'")
@@ -38,6 +40,7 @@ export function ensureUsageRollup(db: Database): void {
         DROP TRIGGER IF EXISTS usage_hourly_delete;
         DROP TABLE usage_hourly;
       `);
+      rebuilt = true;
     }
 
     const key = (row: 'NEW' | 'OLD') =>
@@ -97,4 +100,9 @@ export function ensureUsageRollup(db: Database): void {
       GROUP BY 1, 2, 3, 4;
     `);
   })();
+  if (rebuilt) {
+    // SAFETY: COUNT(*) always returns one numeric n column.
+    const { n } = db.prepare('SELECT COUNT(*) AS n FROM usage_events').get() as { n: number };
+    console.log(`[Usage] Rebuilt the hourly usage rollup from ${n} events in ${Date.now() - startedMs}ms`);
+  }
 }

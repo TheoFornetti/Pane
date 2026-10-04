@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3-multiple-ciphers';
 import type { UsageProvider, UsageTotals } from '../../../../shared/types/usage';
 import { UsageAggregator } from './usageAggregator';
@@ -250,7 +250,10 @@ describe('ensureUsageRollup', () => {
       VALUES ('a', 'cursor', ?, 'cursor', 0, '/t.jsonl'), ('b', 'cursor', ?, 'cursor', 0, '/t.jsonl')
     `).run(START + HOUR_MS, START + HOUR_MS + 1);
 
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     ensureUsageRollup(db);
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/^\[Usage\] Rebuilt the hourly usage rollup from 2 events in \d+ms$/));
+    log.mockRestore();
     db.prepare(`
       INSERT INTO usage_events (id, provider, timestamp_ms, model, metered, source_path)
       VALUES ('c', 'cursor', ?, 'cursor', 0, '/t.jsonl')

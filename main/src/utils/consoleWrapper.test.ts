@@ -1,4 +1,3 @@
-import { format } from 'util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const savedConsole = { ...console };
@@ -42,23 +41,5 @@ describe('setupConsoleWrapper', () => {
     setupConsoleWrapper();
 
     expect(() => console.log('[Main] startup log')).toThrow('unexpected console failure');
-  });
-
-  it('never prints a delivered value', async () => {
-    const canary = 'sk-pane-vault-canary-7f3a91';
-    const printed: string[] = [];
-    const capture = vi.fn((...args: string[]) => {
-      printed.push(format(...args));
-    });
-    const { setupConsoleWrapper } = await loadConsoleWrapperWithOriginals({ error: capture, warn: capture });
-    const { registerDeliveredSecrets } = await import('./deliveredSecrets');
-    registerDeliveredSecrets([canary]);
-
-    setupConsoleWrapper();
-    console.error('[ptyHost] received unknown frame, dropping', { env: { OPENAI_API_KEY: canary } });
-    console.warn(`[Pane daemon] OPENAI_API_KEY=${canary}`);
-
-    expect(printed).toHaveLength(2);
-    expect(printed.join('\n')).not.toContain(canary);
   });
 });

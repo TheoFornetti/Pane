@@ -41,5 +41,6 @@ describe('Logger', () => {
     expect(written).toContain('OPENAI_API_KEY=[redacted]');
     expect(written).not.toContain(CANARY);
     expect(consoleLines.join('\n')).not.toContain(CANARY);
+    fs.rmSync(paneDir, { recursive: true, force: true });
   });
 });

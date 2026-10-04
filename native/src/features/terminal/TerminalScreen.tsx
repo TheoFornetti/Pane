@@ -33,6 +33,8 @@ import { TerminalTouchSurface } from './TerminalTouchSurface';
 import { TerminalWebView } from './TerminalWebView';
 import { useTerminal } from './useTerminal';
 
+/** Space between the box and the keyboard while it is up. */
+const KEYBOARD_GAP = 8;
 /** How long "Voice keys saved" stays above the box. */
 const NOTICE_MS = 4000;
 const PANEL_EVENTS = ['panel:created', 'panel:updated', 'panel:deleted', 'panel:activeChanged'];
@@ -137,7 +139,8 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
           )}
         </View>
       )}
-      <View style={{ height: keyboardVisible ? 0 : insets.bottom }} />
+      {/* The box sits on the home indicator's safe area, or a hair above the keyboard. */}
+      <View style={{ height: keyboardVisible ? KEYBOARD_GAP : insets.bottom }} />
     </KeyboardAvoidingView>
   );
 }
@@ -372,5 +375,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   notice: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1 },
-  inputArea: { borderTopWidth: 1, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 8, gap: 8 },
+  inputArea: { borderTopWidth: 1, paddingHorizontal: 12, paddingTop: 10, gap: 8 },
 });

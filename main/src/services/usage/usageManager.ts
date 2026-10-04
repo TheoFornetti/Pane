@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, type Stats } from 'fs';
 import { stat } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -8,6 +8,7 @@ import { UsageRepository } from './usageRepository';
 import { UsageAggregator, resolveReportRange } from './usageAggregator';
 import { isFileUnchanged, resolveStartOffset, scanJsonlFile } from './jsonlScanner';
 import { cursorChatIdFromTranscript, listPaneCursorChats, type PaneCursorChat } from './cursorChats';
+import { usageEventId } from './usageParser';
 import { getPricingSource } from './modelPricing';
 import { OpenRouterPriceProvider } from './openRouterPriceProvider';
 import { getAppDirectory } from '../../utils/appDirectory';
@@ -295,6 +296,50 @@ export class UsageManager {
     }
   }
 
+  /**
+   * Cursor transcripts are re-read in full whenever they change, because Cursor
+   * may rewrite one in place and a resumed offset would land mid-line. Each
+   * assistant line is identified by its position in the file, so a re-read
+   * keeps the time a message was first indexed. Lines carry no time, so a new
+   * message gets the transcript's last write, the latest it can be.
+   */
+  private async scanCursorTranscript(
+    path: string,
+    stats: Stats,
+    attribution: TranscriptAttribution,
+    generation: number,
+  ): Promise<void> {
+    const recorded = this.repository.getFileCursor(path);
+    if (recorded?.parserVersion === USAGE_PARSER_VERSION && isFileUnchanged(recorded, stats)) return;
+
+    const scanned = await (this.dependencies.scanFile ?? scanJsonlFile)(path, 'cursor', 0, stats.mtimeMs, null);
+    if (generation !== this.generation) return;
+
+    const indexedAt = this.repository.eventTimes(path);
+    const writtenAt = Math.floor(stats.mtimeMs);
+    const events = scanned.events.map(({ event }, position) => {
+      const placed = { ...event, ...attribution, messageId: `${path}#${position}` };
+      return {
+        event: { ...placed, timestampMs: indexedAt.get(usageEventId(placed, path, 0)) ?? writtenAt },
+        byteOffset: 0,
+      };
+    });
+    this.repository.replaceFile(
+      {
+        path,
+        provider: 'cursor',
+        sizeBytes: stats.size,
+        mtimeMs: stats.mtimeMs,
+        offsetBytes: scanned.nextOffsetBytes,
+        lastScannedMs: Date.now(),
+        parserVersion: USAGE_PARSER_VERSION,
+        parseContext: null,
+      },
+      events,
+      Date.now(),
+    );
+  }
+
   /** Pane-launched Cursor chats by id; none when Pane's own records cannot be read. */
   private readCursorChats(): Map<string, PaneCursorChat> {
     try {
@@ -320,6 +365,10 @@ export class UsageManager {
     try {
       const stats = await stat(path);
       if (generation !== this.generation) return;
+      if (attribution) {
+        await this.scanCursorTranscript(path, stats, attribution, generation);
+        return;
+      }
       let recorded = this.repository.getFileCursor(path);
 
       // A parser fix must reach transcripts that were already indexed, so a
@@ -332,10 +381,6 @@ export class UsageManager {
       if (isFileUnchanged(recorded, stats)) return;
 
       const startOffset = resolveStartOffset(recorded, stats.size);
-      // Cursor lines have no message id, so their rows are keyed by byte offset.
-      // A rewritten transcript moves its lines, and only dropping the old rows
-      // keeps them from being counted twice.
-      if (attribution && recorded && startOffset === 0) this.repository.forgetFile(path);
       // A file being re-read from the top states its own attribution again, and
       // a stored context would describe bytes that are no longer there — this is
       // the rotation and truncation case.
@@ -354,12 +399,7 @@ export class UsageManager {
           parserVersion: USAGE_PARSER_VERSION,
           parseContext: scanned.context,
         },
-        attribution ? scanned.events.map(({ event, byteOffset }) => ({
-          // Cursor lines carry no time. The transcript's last write is the
-          // latest any of them can be, so the messages read in this pass get it.
-          event: { ...event, ...attribution, timestampMs: Math.floor(stats.mtimeMs) },
-          byteOffset,
-        })) : scanned.events,
+        scanned.events,
         Date.now()
       );
 

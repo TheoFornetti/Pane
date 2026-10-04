@@ -320,4 +320,24 @@ export class UsageRepository {
       this.db.prepare('DELETE FROM usage_files WHERE path = ?').run(path);
     })();
   }
+
+  /** When each of a file's events was recorded, by event id. */
+  eventTimes(path: string): Map<string, number> {
+    // SAFETY: The projection names the primary key and its integer timestamp.
+    const rows = this.db.prepare('SELECT id, timestamp_ms FROM usage_events WHERE source_path = ?')
+      .all(path) as Array<{ id: string; timestamp_ms: number }>;
+    return new Map(rows.map(row => [row.id, row.timestamp_ms]));
+  }
+
+  /** Swap all of a file's events for a fresh full read, in one transaction. */
+  replaceFile(
+    cursor: UsageFileCursor,
+    events: Array<{ event: UsageEvent; byteOffset: number }>,
+    nowMs: number
+  ): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM usage_events WHERE source_path = ?').run(cursor.path);
+      this.commitFile(cursor, events, nowMs);
+    })();
+  }
 }

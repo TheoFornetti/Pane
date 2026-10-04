@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3-multiple-ciphers';
-import { appendFile, mkdir, mkdtemp, rm, stat, writeFile } from 'fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { UsageManager } from './usageManager';
@@ -215,6 +215,60 @@ describe('Cursor transcripts', () => {
     await manager.rescan();
 
     expect(repository.countEvents()).toBe(2);
+  });
+
+  describe('message times', () => {
+    const file = () => join(home, '.cursor/projects/work-pane/agent-transcripts', `${PANE_CHAT}.jsonl`);
+    const at = (iso: string) => new Date(iso);
+    // SAFETY: The projection names the one integer column.
+    const times = () => (db.prepare(`
+      SELECT timestamp_ms FROM usage_events ORDER BY timestamp_ms
+    `).all() as Array<{ timestamp_ms: number }>).map(row => row.timestamp_ms);
+
+    async function writeAt(content: string, mtime: Date, append = false) {
+      await (append ? appendFile : writeFile)(file(), content);
+      await utimes(file(), mtime, mtime);
+    }
+
+    beforeEach(async () => {
+      await mkdir(dirname(file()), { recursive: true });
+      await writeAt(cursorLines('assistant', 'assistant'), at('2026-09-01T10:00:00Z'));
+      manager = new UsageManager({
+        roots: () => [{ provider: 'cursor', path: join(home, '.cursor/projects') }],
+        repository,
+        cursorChats: () => [{ chatId: PANE_CHAT, cwd: '/work/pane' }],
+        createPriceProvider: () => ({ start() {}, stop() {} }),
+      });
+      await manager.start();
+      await vi.waitFor(() => expect(repository.countEvents()).toBe(2));
+    });
+
+    it('times appended messages at the later write and keeps the earlier ones', async () => {
+      await writeAt(cursorLines('assistant'), at('2026-09-02T10:00:00Z'), true);
+      await manager.rescan();
+
+      expect(times()).toEqual([
+        Date.parse('2026-09-01T10:00:00Z'),
+        Date.parse('2026-09-01T10:00:00Z'),
+        Date.parse('2026-09-02T10:00:00Z'),
+      ]);
+    });
+
+    it('keeps message times when a parser change re-reads the transcript', async () => {
+      db.prepare('UPDATE usage_files SET parser_version = 0').run();
+      await utimes(file(), at('2026-09-03T10:00:00Z'), at('2026-09-03T10:00:00Z'));
+      await manager.rescan();
+
+      expect(times()).toEqual([Date.parse('2026-09-01T10:00:00Z'), Date.parse('2026-09-01T10:00:00Z')]);
+    });
+
+    it('recounts a rewrite that keeps or grows the file size', async () => {
+      const padding = JSON.stringify({ role: 'user', message: { content: 'x'.repeat(400) } });
+      await writeAt(`${padding}\n${cursorLines('assistant')}`, at('2026-09-04T10:00:00Z'));
+      await manager.rescan();
+
+      expect(times()).toEqual([Date.parse('2026-09-01T10:00:00Z')]);
+    });
   });
 });
 

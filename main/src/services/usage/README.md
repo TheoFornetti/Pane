@@ -19,9 +19,18 @@ already indexed stay when their panel is removed.
 Cursor's transcripts hold `{role, message}` lines and turn markers: no model,
 time, or token counts. Each assistant line is one event with `metered = 0`,
 model `cursor`, zero placeholder tokens, and the chat id and worktree from
-Pane's launch record. The lines carry no time, so each message is timed at the
-transcript's modification time when the scan read it. A chat's earlier messages
-indexed in one pass therefore all land at its latest write.
+Pane's launch record.
+
+The lines carry no time, so a message is timed at the transcript's modification
+time in the scan that first indexed it, the latest it can have been written.
+Cursor may rewrite a transcript in place, so a changed transcript is re-read
+from the top. Each assistant line is identified by its position in the file
+(`<path>#<n>`), so a re-read, including one after a parser change, keeps the
+time already stored for every position it has seen and times only new
+positions. For a chat scanned as it grows, a message lands between when it was
+written and the next scan (startup, every four hours, or Refresh). A chat's
+history indexed for the first time, for example on the first scan after
+upgrading, all lands at the transcript's last write.
 
 Unmetered messages are counted, never priced: totals carry
 `unmeteredMessageCount`, and any slice holding one has `costIncomplete`. The

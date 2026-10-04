@@ -182,6 +182,21 @@ describe('Cursor transcripts', () => {
     expect(rows().map(row => row.agent_session_id)).toEqual([NESTED_CHAT, PANE_CHAT, PANE_CHAT]);
   });
 
+  it('checks the Cursor transcript root alongside Claude and Codex by default', async () => {
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    manager = new UsageManager({ repository, cursorChats: () => [], createPriceProvider: () => ({ start() {}, stop() {} }) });
+    await manager.start();
+    await manager.rescan();
+    expect(manager.getStatus()).toMatchObject({ rootsChecked: 3 });
+    expect(manager.getStatus().missingRoots).toContain(join(home, '.cursor', 'projects'));
+
+    await mkdir(join(home, '.cursor', 'projects'), { recursive: true });
+    await manager.rescan();
+    expect(manager.getStatus().missingRoots).not.toContain(join(home, '.cursor', 'projects'));
+    vi.unstubAllEnvs();
+  });
+
   it('recounts a transcript rewritten in place instead of adding its messages again', async () => {
     const file = join(home, '.cursor/projects/work-pane/agent-transcripts', `${PANE_CHAT}.jsonl`);
     await mkdir(dirname(file), { recursive: true });

@@ -73,7 +73,7 @@ Shortcuts live on the host, in its `terminalShortcuts` config, the same list des
 
 The mic records through the host. When the host lacks a voice key, the mic opens a sheet that asks for the one key the mode needs (live mode: Deepgram; recorded mode: fal). OpenRouter is an optional row: with it the host cleans up the transcript, without it the host returns the words as heard. The sheet saves the keys with `remote:settings:update`, and starts recording in the same tap. A live start from the sheet waits 2.5 s for Deepgram to accept the key, so a refused key shows on the sheet. Keys travel only in that request's body; the phone clears them after the save, and the host reports them only as set (`src/features/voice/VoiceSetupSheet.tsx`).
 
-The terminal's right edge carries the scroll joystick, a D-pad with Enter in its center, and Esc and Tab. They rest at 18% opacity; touching any of them makes all of them opaque, and 3 s after the last touch they fade back together (`src/features/terminal/FloatingController.tsx`).
+The terminal's right edge carries the scroll joystick, a D-pad with Enter in its center, and Esc and Tab. They rest at 18% opacity; touching any of them makes all of them opaque, and 3 s after the last touch they fade back together (`src/features/terminal/FloatingController.tsx`). The D-pad sits five rows above the bottom, clear of an agent's input box and status line, and hides when the terminal is too short for that, as with the keyboard up (`controllerLayout.ts`). The controller button beside the mic shows or hides them; the choice is kept on the device.
 
 ## Uploads
 

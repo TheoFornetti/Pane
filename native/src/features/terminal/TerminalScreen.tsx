@@ -13,7 +13,11 @@ import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
 import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
+import { insertAtSelection, type Selection } from '../composer/insertText';
 import { useMarkPaneSeen } from '../panes/hooks';
+import { AttachSheet } from '../upload/AttachSheet';
+import { UploadReceipts } from '../upload/UploadReceipts';
+import { useUploads } from '../upload/useUploads';
 import { useVoiceDictation } from '../voice/useVoiceDictation';
 import { pickPanel, sessionWorkspacePanels, terminalPanels } from './panels';
 import { PanelTabs } from './PanelTabs';
@@ -71,8 +75,10 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id);
   const title = session ? session.session.name || 'Untitled' : pane.data?.name ?? '';
 
-  const [draft, setDraft] = useState('');
-  const voice = useVoiceDictation(text => setDraft(current => (current ? `${current} ${text}` : text)));
+  const composer = useComposerDraft();
+  const { draft, setDraft } = composer;
+  const voice = useVoiceDictation(composer.insert);
+  const uploads = useUploads(paneId, composer.insert);
 
   const selectPanel = (next: ToolPanel) => {
     router.setParams({ panelId: next.id });
@@ -98,6 +104,8 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
           panel={panel}
           draft={draft}
           onChangeDraft={setDraft}
+          composer={composer}
+          uploads={uploads}
           voice={voice}
           shortcuts={affordances.data?.terminalShortcuts ?? []}
           shortcutsLoading={affordances.isPending}
@@ -123,10 +131,12 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   );
 }
 
-function TerminalPanel({ panel, draft, onChangeDraft, voice, shortcuts, shortcutsLoading, onOpenShortcuts }: {
+function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, shortcuts, shortcutsLoading, onOpenShortcuts }: {
   panel: ToolPanel;
   draft: string;
   onChangeDraft: Dispatch<SetStateAction<string>>;
+  composer: ReturnType<typeof useComposerDraft>;
+  uploads: ReturnType<typeof useUploads>;
   voice: ReturnType<typeof useVoiceDictation>;
   shortcuts: RemotePwaAffordances['terminalShortcuts'];
   shortcutsLoading: boolean;
@@ -135,6 +145,7 @@ function TerminalPanel({ panel, draft, onChangeDraft, voice, shortcuts, shortcut
   const theme = useTheme();
   const terminal = useTerminal(panel.id, panel.sessionId);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showAttach, setShowAttach] = useState(false);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const disabled = terminal.status !== 'ready';
 
@@ -149,7 +160,7 @@ function TerminalPanel({ panel, draft, onChangeDraft, voice, shortcuts, shortcut
     void terminal.sendInput(`${text}\r`).catch(() => onChangeDraft(text));
   };
   const insertText = (text: string) => {
-    onChangeDraft(current => current + text);
+    composer.insert(text);
     setClipboardError(null);
     voice.clearError();
   };
@@ -219,11 +230,15 @@ function TerminalPanel({ panel, draft, onChangeDraft, voice, shortcuts, shortcut
         ) : null}
       </View>
       <View style={[styles.inputArea, { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.border }]}>
+        <UploadReceipts receipts={uploads.receipts} onCancel={uploads.cancel} onRetry={uploads.retry} />
         <TerminalInputBar
           draft={draft}
           onChangeDraft={onChangeDraft}
           onSubmit={submit}
           voice={voice}
+          onAttach={() => setShowAttach(true)}
+          onSelectionChange={composer.onSelectionChange}
+          selection={composer.selection}
           disabled={disabled}
         />
         <QuickKeys
@@ -238,14 +253,50 @@ function TerminalPanel({ panel, draft, onChangeDraft, voice, shortcuts, shortcut
           disabled={disabled}
         />
         {clipboardError ? <Text variant="footnote" tone="danger">{clipboardError}</Text> : null}
+        {uploads.pickError ? (
+          <Pressable testID="upload-pick-error" onPress={uploads.clearPickError} accessibilityHint="Dismiss">
+            <Text variant="footnote" tone="danger">{uploads.pickError}</Text>
+          </Pressable>
+        ) : null}
         {voice.error ? (
           <Pressable testID="voice-error" onPress={voice.clearError} accessibilityHint="Dismiss">
             <Text variant="footnote" tone="danger">{voice.error}</Text>
           </Pressable>
         ) : null}
       </View>
+      <AttachSheet visible={showAttach} onClose={() => setShowAttach(false)} onPick={source => void uploads.attach(source)} />
     </>
   );
+}
+
+interface DraftState {
+  text: string;
+  /** Last known cursor; null means the end. */
+  cursor: Selection | null;
+  /** A cursor move the input should apply once, after an insert. */
+  moveTo: Selection | undefined;
+}
+
+/**
+ * The draft and its cursor, kept together so uploads, dictation, paste and
+ * shortcuts land where the person was typing, even when two arrive at once.
+ */
+function useComposerDraft() {
+  const [state, setState] = useState<DraftState>({ text: '', cursor: null, moveTo: undefined });
+  return {
+    draft: state.text,
+    selection: state.moveTo,
+    setDraft: (next: SetStateAction<string>) => setState(current => {
+      const text = typeof next === 'function' ? next(current.text) : next;
+      return { text, cursor: text === '' ? null : current.cursor, moveTo: undefined };
+    }),
+    onSelectionChange: (cursor: Selection) => setState(current => ({ ...current, cursor, moveTo: undefined })),
+    insert: (insert: string) => setState(current => {
+      const result = insertAtSelection(current.text, current.cursor, insert);
+      const cursor = { start: result.cursor, end: result.cursor };
+      return { text: result.text, cursor, moveTo: cursor };
+    }),
+  };
 }
 
 function useKeyboardVisible(): boolean {

@@ -2103,6 +2103,16 @@ Version: 57.0.3
 Author: 650 Industries, Inc.
 Homepage: https://docs.expo.dev/versions/latest/sdk/haptics/
 
+Package: expo-image-loader
+Version: 57.0.1
+Author: 650 Industries, Inc.
+Homepage: https://github.com/expo/expo/tree/main/packages/expo-image-loader
+
+Package: expo-image-picker
+Version: 57.0.20
+Author: 650 Industries, Inc.
+Homepage: https://docs.expo.dev/versions/latest/sdk/imagepicker/
+
 Package: expo-json-utils
 Version: 57.0.2
 Author: 650 Industries, Inc.
@@ -31178,7 +31188,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ================================================================================
 
 Package: Pane
-Version: 2.4.150
+Version: 2.4.157
 Author: Dcouple Inc
 License: AGPL-3.0
 

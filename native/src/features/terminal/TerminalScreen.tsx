@@ -9,7 +9,7 @@ import type { OrchestrationSessionView } from '@shared/types/orchestrationSessio
 import type { ToolPanel } from '@shared/types/panels';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
-import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
+import { invokeChannel, useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
 import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
@@ -19,9 +19,10 @@ import { AttachSheet } from '../upload/AttachSheet';
 import { UploadReceipts } from '../upload/UploadReceipts';
 import { useUploads } from '../upload/useUploads';
 import { useVoiceDictation } from '../voice/useVoiceDictation';
+import { CopySheet } from './CopySheet';
+import { KEYS } from './keys';
 import { pickPanel, sessionWorkspacePanels, terminalPanels } from './panels';
 import { PanelTabs } from './PanelTabs';
-import { QuickKeys } from './QuickKeys';
 import { ScrollJoystick } from './ScrollJoystick';
 import { ShortcutsPanel } from './ShortcutsPanel';
 import { TerminalInputBar } from './TerminalInputBar';
@@ -34,7 +35,7 @@ const PANEL_EVENTS = ['panel:created', 'panel:updated', 'panel:deleted', 'panel:
 
 /**
  * A pane's terminals, laid out like the web app on a phone: the host bar and
- * tabs on top, xterm in the middle, the input and its keys below. With a
+ * tabs on top, xterm in the middle, the composer box below. With a
  * `session`, it shows that Session's workspace pane, its agent chat first.
  */
 export function TerminalScreen({ paneId, session }: { paneId: string; session?: OrchestrationSessionView }) {
@@ -80,6 +81,13 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const voice = useVoiceDictation(composer.insert);
   const uploads = useUploads(paneId, composer.insert);
 
+  // Clearing remounts the terminal, which redraws it from the host's copy.
+  const [clears, setClears] = useState(0);
+  const clearScrollback = async (panelId: string) => {
+    await invokeChannel(client, 'terminal:clearScrollback', [panelId]).catch(() => undefined);
+    setClears(count => count + 1);
+  };
+
   const selectPanel = (next: ToolPanel) => {
     router.setParams({ panelId: next.id });
     setActive.mutate([paneId, next.id]);
@@ -91,16 +99,17 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
       behavior="padding"
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
-      <TerminalTopBar paneName={title} />
+      <TerminalTopBar paneName={title} onClearScrollback={panel ? () => void clearScrollback(panel.id) : undefined} />
       <PanelTabs
         panels={panels}
         selectedId={panel?.id ?? null}
         onSelect={selectPanel}
         onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
+        onStop={panel ? () => void invokeChannel(client, 'terminal:input', [panel.id, KEYS.stop]).catch(() => undefined) : undefined}
       />
       {panel ? (
         <TerminalPanel
-          key={panel.id}
+          key={`${panel.id}:${clears}`}
           panel={panel}
           draft={draft}
           onChangeDraft={setDraft}
@@ -146,18 +155,16 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
   const terminal = useTerminal(panel.id, panel.sessionId);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
+  const [showCopy, setShowCopy] = useState(false);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const disabled = terminal.status !== 'ready';
 
-  const sendKey = (data: string) => {
-    terminal.scrollToBottom();
-    void terminal.sendInput(data).catch(() => undefined);
-  };
+  // An empty box sends a bare Enter, to answer a menu or confirm a prompt.
   const submit = () => {
     const text = draft;
     onChangeDraft('');
     terminal.scrollToBottom();
-    void terminal.sendInput(`${text}\r`).catch(() => onChangeDraft(text));
+    void terminal.sendInput(`${text}${KEYS.enter}`).catch(() => onChangeDraft(text));
   };
   const insertText = (text: string) => {
     composer.insert(text);
@@ -237,19 +244,11 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
           onSubmit={submit}
           voice={voice}
           onAttach={() => setShowAttach(true)}
+          onPaste={() => void paste()}
+          onShortcuts={toggleShortcuts}
+          onCopy={() => setShowCopy(true)}
           onSelectionChange={composer.onSelectionChange}
           selection={composer.selection}
-          disabled={disabled}
-        />
-        <QuickKeys
-          onKey={sendKey}
-          onPaste={() => void paste()}
-          onReset={() => {
-            terminal.scrollToBottom();
-            void terminal.clearScrollback().catch(() => undefined);
-          }}
-          shortcutsOpen={showShortcuts}
-          onToggleShortcuts={toggleShortcuts}
           disabled={disabled}
         />
         {clipboardError ? <Text variant="footnote" tone="danger">{clipboardError}</Text> : null}
@@ -265,6 +264,7 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
         ) : null}
       </View>
       <AttachSheet visible={showAttach} onClose={() => setShowAttach(false)} onPick={source => void uploads.attach(source)} />
+      <CopySheet visible={showCopy} onClose={() => setShowCopy(false)} panelId={panel.id} screenText={terminal.screenText} />
     </>
   );
 }
@@ -329,5 +329,5 @@ const styles = StyleSheet.create({
     height: 36,
     borderWidth: 1,
   },
-  inputArea: { borderTopWidth: 1, padding: 12, gap: 8 },
+  inputArea: { borderTopWidth: 1, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 8, gap: 8 },
 });

@@ -12,7 +12,14 @@ export type ComputerUseReadiness =
   | { state: 'needs-permission'; engineChoice: ComputerUseEngineChoice; permission: ComputerUsePermission; appName: string }
   | { state: 'no-desktop'; engineChoice: ComputerUseEngineChoice }
   | { state: 'failed'; engineChoice: ComputerUseEngineChoice; detail: string }
-  | { state: 'ready'; engineChoice: ComputerUseEngineChoice; engine: ComputerUseEngineName; checkedAt: number };
+  | {
+      state: 'ready';
+      engineChoice: ComputerUseEngineChoice;
+      engine: ComputerUseEngineName;
+      checkedAt: number;
+      /** Set when Auto runs on Cua Driver: why the Codex runtime wasn't used. */
+      detail?: string;
+    };
 
 export type ComputerUseState = ComputerUseReadiness['state'];
 

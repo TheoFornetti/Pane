@@ -19,11 +19,14 @@ function isEngineChoice(value: string): value is ComputerUseEngineChoice {
   return COMPUTER_USE_ENGINE_CHOICES.some((choice) => choice === value);
 }
 
+const AGENTS_CAN = 'Agents can see and operate apps on this machine in the background with the Pane js tool. Each step leaves a screenshot in the session.';
+
 function guidance(readiness: ComputerUseReadiness): string {
   switch (readiness.state) {
     case 'off':
+      return AGENTS_CAN;
     case 'ready':
-      return 'Agents can see and operate apps on this machine in the background with the Pane js tool. Each step leaves a screenshot in the session.';
+      return readiness.detail ? `${AGENTS_CAN} ${readiness.detail}` : AGENTS_CAN;
     case 'installing':
       return 'Installing Cua Driver, the engine that reads and operates apps.';
     case 'needs-permission':

@@ -23,6 +23,8 @@ import { useUploads } from '../upload/useUploads';
 import { useVoiceDictation } from '../voice/useVoiceDictation';
 import { VoiceSetupSheet } from '../voice/VoiceSetupSheet';
 import { CopySheet } from './CopySheet';
+import { controllerLayout } from './controllerLayout';
+import { useControllerShown } from './controllerPreference';
 import { FloatingController } from './FloatingController';
 import { KEYS } from './keys';
 import { pickPanel, sessionWorkspacePanels, terminalPanels } from './panels';
@@ -170,6 +172,8 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   const [showAttach, setShowAttach] = useState(false);
   const [showCopy, setShowCopy] = useState(false);
   const [showVoiceSetup, setShowVoiceSetup] = useState(false);
+  const [controllerShown, setControllerShown] = useControllerShown();
+  const [terminalHeight, setTerminalHeight] = useState(0);
   const [voiceSaved, setVoiceSaved] = useState(false);
   useEffect(() => {
     if (!voiceSaved) return;
@@ -223,7 +227,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
 
   return (
     <>
-      <View style={[styles.fill, { backgroundColor: theme.terminal.background }]}>
+      <View style={[styles.fill, { backgroundColor: theme.terminal.background }]} onLayout={event => setTerminalHeight(event.nativeEvent.layout.height)}>
         <View style={styles.screen}>
           <TerminalTouchSurface rows={terminal.rows} onScrollLines={terminal.scrollLines}>
             <TerminalWebView
@@ -243,8 +247,8 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
             )}
           </View>
         ) : null}
-        {terminal.status === 'ready' ? (
-          <FloatingController onKey={sendKey} onScroll={terminal.scrollLines} />
+        {terminal.status === 'ready' && controllerShown ? (
+          <FloatingController onKey={sendKey} onScroll={terminal.scrollLines} layout={controllerLayout(terminalHeight, terminal.rows)} />
         ) : null}
         {terminal.status === 'ready' && !terminal.atBottom ? (
           <Pressable
@@ -277,6 +281,8 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
           onShortcuts={openShortcuts}
           onCopy={() => setShowCopy(true)}
           onSetupVoice={() => setShowVoiceSetup(true)}
+          controllerShown={controllerShown}
+          onToggleController={() => setControllerShown(!controllerShown)}
           onSelectionChange={composer.onSelectionChange}
           selection={composer.selection}
           disabled={disabled}

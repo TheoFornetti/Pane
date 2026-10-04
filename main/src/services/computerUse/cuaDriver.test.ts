@@ -6,17 +6,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
+import { getPaneDaemonSocketDirectory } from '../../daemon/socketPath';
 import { CUA_DRIVER_VERSION, createCuaDriverEngine, installCuaDriver, selfTest } from './cuaDriver';
 import type { ComputerUseEngine } from './engine';
 
 // A stand-in `cua-driver` that speaks the daemon's line protocol: it answers
-// `metadata`, replies to `call` from a canned map, logs each request, and
-// exits on `shutdown`.
+// `metadata`, replies to `call` from a canned map, logs its start and each
+// request with its pid, and exits on `shutdown`.
 const FAKE_DRIVER = `#!/usr/bin/env node
 const fs = require('fs');
 const net = require('net');
 const socketPath = process.argv[process.argv.indexOf('--socket') + 1];
 const replies = JSON.parse(fs.readFileSync(process.env.FAKE_CUA_REPLIES, 'utf8'));
+const log = (entry) => fs.appendFileSync(process.env.FAKE_CUA_LOG, JSON.stringify({ ...entry, pid: process.pid }) + '\\n');
+log({ method: 'started' });
 try { fs.unlinkSync(socketPath); } catch {}
 const server = net.createServer((conn) => {
   let buffer = '';
@@ -24,7 +27,7 @@ const server = net.createServer((conn) => {
     buffer += chunk;
     if (!buffer.includes('\\n')) return;
     const request = JSON.parse(buffer.slice(0, buffer.indexOf('\\n')));
-    fs.appendFileSync(process.env.FAKE_CUA_LOG, JSON.stringify(request) + '\\n');
+    log(request);
     let reply;
     if (request.method === 'metadata') reply = { ok: true, result: { driver_version: process.env.FAKE_CUA_VERSION, pid: process.pid } };
     else if (request.method === 'shutdown') reply = { ok: true, result: { shutdown: true } };
@@ -33,7 +36,7 @@ const server = net.createServer((conn) => {
     if (request.method === 'shutdown') { server.close(); process.exit(0); }
   });
 });
-server.listen(socketPath);
+setTimeout(() => server.listen(socketPath), Number(process.env.FAKE_CUA_LISTEN_DELAY_MS ?? 0));
 `;
 
 const describeUnix = process.platform === 'win32' ? describe.skip : describe;
@@ -50,9 +53,27 @@ describeUnix('Cua Driver engine', () => {
     process.env.FAKE_CUA_REPLIES = file;
   }
 
-  function requests(): Array<{ method: string; name?: string; args?: unknown }> {
+  function requests(): Array<{ method: string; name?: string; args?: unknown; pid: number }> {
     if (!fs.existsSync(logFile)) return [];
     return fs.readFileSync(logFile, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  }
+
+  function helperPids(): number[] {
+    return requests().filter((r) => r.method === 'started').map((r) => r.pid);
+  }
+
+  function isAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function waitUntilGone(pid: number): Promise<boolean> {
+    for (let i = 0; i < 50 && isAlive(pid); i += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+    return !isAlive(pid);
   }
 
   function installFakeDriver(): void {
@@ -75,6 +96,8 @@ describeUnix('Cua Driver engine', () => {
     await engine.stop();
     process.env = { ...savedEnv };
     fs.rmSync(appDirectory, { recursive: true, force: true });
+    const socketDirectory = getPaneDaemonSocketDirectory(appDirectory, 'linux');
+    if (socketDirectory) fs.rmSync(socketDirectory, { recursive: true, force: true });
   });
 
   it('reports not installed before the helper is installed', async () => {
@@ -143,14 +166,40 @@ describeUnix('Cua Driver engine', () => {
     process.env.FAKE_CUA_VERSION = CUA_DRIVER_VERSION;
     const updated = createCuaDriverEngine({ appDirectory, platform: 'linux' });
     expect((await updated.status()).version).toBe(CUA_DRIVER_VERSION);
-    expect(requests().filter((r) => r.method === 'shutdown')).toHaveLength(1);
+    const [oldHelper, newHelper] = helperPids();
+    expect(await waitUntilGone(oldHelper)).toBe(true);
+    expect(isAlive(newHelper)).toBe(true);
+    await updated.stop();
   });
 
   it('stops the helper', async () => {
     installFakeDriver();
     await engine.status();
     await engine.stop();
-    expect(requests().at(-1)?.method).toBe('shutdown');
+    expect(await waitUntilGone(helperPids()[0])).toBe(true);
+  });
+
+  it('stops a helper that is still starting, and drops the action that was waiting on it', async () => {
+    installFakeDriver();
+    process.env.FAKE_CUA_LISTEN_DELAY_MS = '600';
+    const pending = engine.call('click', { pid: 1, window_id: 2 });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    await engine.stop();
+
+    expect(await pending).toMatchObject({ ok: false, error: { code: 'engine_stopped' } });
+    expect(await waitUntilGone(helperPids()[0])).toBe(true);
+    expect(requests().some((r) => r.method === 'call')).toBe(false);
+  });
+
+  it('reads a multi-megabyte screenshot reply', async () => {
+    installFakeDriver();
+    const screenshot = 'A'.repeat(6 * 1024 * 1024);
+    useReplies({ screenshot: { ok: true, result: { content: [{ type: 'image', data: screenshot, mimeType: 'image/png' }] } } });
+
+    const result = await engine.call('screenshot', { pid: 1, window_id: 2 });
+
+    expect(result.images?.[0]?.base64.length).toBe(screenshot.length);
   });
 
   it('reports a Linux host with no display and refuses calls without starting the helper', async () => {

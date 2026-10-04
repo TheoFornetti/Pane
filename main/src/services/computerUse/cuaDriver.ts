@@ -31,7 +31,7 @@ const ARCHIVES = new Map<string, { file: string; sha256: string }>(Object.entrie
 
 /** Cua AI's Apple Developer ID team, and the Authenticode signer on Windows. */
 const MAC_TEAM_ID = 'YCK386LBJ7';
-const WINDOWS_SIGNER = 'Cua AI, Inc.';
+const WINDOWS_SIGNER = /^CN="?Cua AI, Inc\."?(,|$)/;
 
 /** Upstream defaults these on; Pane pins the version and keeps usage local. */
 const DAEMON_ENV = {
@@ -41,6 +41,8 @@ const DAEMON_ENV = {
 };
 
 const START_TIMEOUT_MS = 20_000;
+const DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
+const PERMISSION_REQUEST_TIMEOUT_MS = 180_000;
 const CALL_TIMEOUT_MS = 120_000;
 
 interface CuaDriverOptions {
@@ -145,8 +147,14 @@ async function installOnce(layout: Layout, releaseUrl: string): Promise<void> {
     }
     await verifySignature(layout, unpacked);
 
-    fs.rmSync(layout.versionDir, { recursive: true, force: true });
-    fs.renameSync(unpacked, layout.versionDir);
+    // A running helper locks its files on Windows and would keep the replaced binary on the others.
+    await shutdownHelper(layout);
+    try {
+      fs.rmSync(layout.versionDir, { recursive: true, force: true });
+      fs.renameSync(unpacked, layout.versionDir);
+    } catch (error) {
+      throw new Error(`Couldn't replace the installed Cua Driver: ${error instanceof Error ? error.message : String(error)}`);
+    }
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
   }
@@ -156,7 +164,11 @@ async function installOnce(layout: Layout, releaseUrl: string): Promise<void> {
 async function download(url: string, target: string, expectedSha256: string): Promise<void> {
   let response: Response;
   try {
-    response = await fetch(url, { redirect: 'follow', headers: { 'user-agent': 'pane-computer-use' } });
+    response = await fetch(url, {
+      redirect: 'follow',
+      headers: { 'user-agent': 'pane-computer-use' },
+      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    });
   } catch (error) {
     throw new Error(`Couldn't download Cua Driver: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -184,7 +196,12 @@ async function extract(platform: NodeJS.Platform, archivePath: string, into: str
   }
 }
 
-/** Checks the vendor signature: Developer ID on macOS, Authenticode on Windows. Linux ships unsigned binaries, so the pinned checksum is the check there. */
+/**
+ * Checks the vendor signature: Developer ID on macOS, Authenticode on every
+ * Windows binary. Linux ships unsigned binaries, so there the pinned checksum
+ * at download is the only check and an existing install is trusted like any
+ * other file in Pane's directory.
+ */
 async function verifySignature(layout: Layout, dir: string): Promise<void> {
   if (layout.platform === 'darwin') {
     const app = path.join(dir, 'CuaDriver.app');
@@ -197,13 +214,28 @@ async function verifySignature(layout: Layout, dir: string): Promise<void> {
     return;
   }
   if (layout.platform === 'win32') {
-    for (const exe of ['cua-driver.exe', 'cua-driver-uia.exe']) {
-      const file = path.join(dir, exe).replace(/'/g, "''");
-      const script = `$s = Get-AuthenticodeSignature -LiteralPath '${file}'; "$($s.Status)|$($s.SignerCertificate.Subject)"`;
-      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true });
-      const [status, subject = ''] = stdout.trim().split('|');
-      if (status !== 'Valid' || !subject.includes(WINDOWS_SIGNER)) {
-        throw new Error(`Cua Driver's ${exe} isn't validly signed by ${WINDOWS_SIGNER} (${stdout.trim()}).`);
+    const literal = dir.replace(/'/g, "''");
+    const script = [
+      `Get-ChildItem -LiteralPath '${literal}' -File | Where-Object { $_.Extension -in '.exe', '.dll', '.node' } | ForEach-Object {`,
+      '  $s = Get-AuthenticodeSignature -LiteralPath $_.FullName',
+      '  "$($_.Name)|$($s.Status)|$($s.SignerCertificate.Subject)"',
+      '}',
+    ].join('\n');
+    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+    const { stdout } = await execFileAsync(
+      path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      // A PowerShell 7 module path inherited from the parent hides Get-AuthenticodeSignature from Windows PowerShell 5.1.
+      { windowsHide: true, env: { ...process.env, PSModulePath: '' } },
+    );
+    const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+    if (!lines.some((line) => line.startsWith('cua-driver.exe|'))) {
+      throw new Error(`Couldn't check Cua Driver's Windows signature (${stdout.trim() || 'no output'}).`);
+    }
+    for (const line of lines) {
+      const [name, status, subject = ''] = line.split('|');
+      if (status !== 'Valid' || !WINDOWS_SIGNER.test(subject)) {
+        throw new Error(`Cua Driver's ${name} isn't validly signed by Cua AI, Inc. (${status}, ${subject}).`);
       }
     }
   }
@@ -270,6 +302,13 @@ function sendRequest(endpoint: string, request: JsonObject, timeoutMs = CALL_TIM
       if (error) reject(error);
       else if (response) resolve(response);
     };
+    const settle = () => {
+      try {
+        finish(null, decodeBoundary(JSON.parse(Buffer.concat(chunks).toString('utf8')), daemonResponseSchema));
+      } catch (error) {
+        finish(new Error(`Cua Driver sent an unreadable reply: ${error instanceof Error ? error.message : String(error)}`));
+      }
+    };
     socket.on('connect', () => socket.write(`${JSON.stringify(request)}\n`));
     socket.on('data', (chunk: Buffer) => {
       const newline = chunk.indexOf(0x0a);
@@ -278,14 +317,17 @@ function sendRequest(endpoint: string, request: JsonObject, timeoutMs = CALL_TIM
         return;
       }
       chunks.push(chunk.subarray(0, newline));
-      try {
-        finish(null, decodeBoundary(JSON.parse(Buffer.concat(chunks).toString('utf8')), daemonResponseSchema));
-      } catch (error) {
-        finish(new Error(`Cua Driver sent an unreadable reply: ${error instanceof Error ? error.message : String(error)}`));
-      }
+      settle();
     });
     socket.on('error', (error) => finish(error));
-    socket.on('end', () => finish(new Error('Cua Driver closed the connection without replying.')));
+    socket.on('end', () => {
+      if (chunks.length === 0) {
+        finish(new Error('Cua Driver closed the connection without replying.'));
+        return;
+      }
+      // Like Cua's own client, treat EOF after data as the end of the reply.
+      settle();
+    });
   });
 }
 
@@ -302,7 +344,7 @@ async function readMetadata(endpoint: string): Promise<DaemonMetadata | null> {
 function toEngineResult(response: DaemonResponse): EngineResult {
   if (!response.ok) {
     const message = response.error ?? 'Cua Driver failed without a message.';
-    const code = /^([a-z_]+): /.exec(message)?.[1] ?? 'engine_error';
+    const code = /^([a-z]+(?:_[a-z]+)+): /.exec(message)?.[1] ?? 'engine_error';
     return { ok: false, error: { code, message } };
   }
   const result = decodeBoundary(response.result ?? {}, toolResultSchema);
@@ -325,13 +367,74 @@ function toEngineResult(response: DaemonResponse): EngineResult {
 // ---------------------------------------------------------------------------
 // Engine
 
+/**
+ * Stops whichever helper owns this Pane's socket: politely over the socket,
+ * then by the pid it reported or wrote to its pid file. This also reaps a
+ * helper that is still binding or no longer answers.
+ */
+async function shutdownHelper(layout: Layout): Promise<void> {
+  const metadata = await readMetadata(layout.endpoint);
+  if (metadata) {
+    await sendRequest(layout.endpoint, { method: 'shutdown' }, 2_000).catch(() => undefined);
+    const exited = await poll(async () => ((await readMetadata(layout.endpoint)) ? null : true), 3_000);
+    if (exited) return;
+  }
+  const pid = metadata?.pid ?? readPidFile(layout);
+  if (pid !== null && (await isCuaDriverProcess(pid))) {
+    killQuietly(pid);
+  }
+}
+
+function readPidFile(layout: Layout): number | null {
+  try {
+    const pid = Number.parseInt(fs.readFileSync(layout.pidFile, 'utf8').trim(), 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Guards against killing an unrelated process that reused a stale pid. */
+async function isCuaDriverProcess(pid: number): Promise<boolean> {
+  try {
+    const { stdout } =
+      process.platform === 'win32'
+        ? await execFileAsync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { windowsHide: true })
+        : await execFileAsync('ps', ['-p', String(pid), '-o', 'comm=']);
+    return stdout.includes('cua-driver');
+  } catch {
+    return false;
+  }
+}
+
+function killQuietly(pid: number): void {
+  try {
+    process.kill(pid);
+  } catch {
+    // Already gone.
+  }
+}
+
+/** Polls until `read` returns a value, or gives up with null. */
+async function poll<T>(read: () => Promise<T | null>, timeoutMs: number): Promise<T | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await read();
+    if (value !== null || Date.now() >= deadline) return value;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
 class CuaDriverEngine implements ComputerUseEngine {
   readonly id = 'cua-driver' as const;
   private starting: Promise<DaemonMetadata> | null = null;
   private child: ChildProcess | null = null;
+  /** Bumped by stop(), so a call that was waiting on a start never acts after it. */
+  private generation = 0;
 
   constructor(private readonly options: CuaDriverOptions) {}
 
+  /** Reports live state. It starts the helper when installed, since only the helper can read its own permissions. */
   async status(): Promise<EngineStatus> {
     const layout = resolveLayout(this.options);
     const desktopSession = hasDesktopSession(layout);
@@ -341,22 +444,22 @@ class CuaDriverEngine implements ComputerUseEngine {
     if (!desktopSession) {
       return { installed: true, permissions: {}, desktopSession, detail: 'No desktop session (DISPLAY and WAYLAND_DISPLAY are unset).' };
     }
-    let metadata: DaemonMetadata;
+    const status: EngineStatus = { installed: true, permissions: {}, desktopSession };
     try {
-      metadata = await this.ensureDaemon();
-    } catch (error) {
-      return { installed: true, permissions: {}, desktopSession, detail: error instanceof Error ? error.message : String(error) };
-    }
-    const status: EngineStatus = { installed: true, version: metadata.driver_version, permissions: {}, desktopSession };
-    if (layout.platform === 'darwin') {
-      const check = toEngineResult(await sendRequest(layout.endpoint, { method: 'call', name: 'check_permissions', args: { prompt: false } }));
-      const grants = check.ok ? decodeBoundary(check.data, grantsSchema) : null;
-      // Only the daemon running as CuaDriver.app can answer for its own grants.
-      if (grants?.source?.attribution === 'driver-daemon') {
-        status.permissions = { accessibility: grants.accessibility === true, screenRecording: grants.screen_recording === true };
-      } else {
-        status.detail = check.error?.message ?? 'Cua Driver could not read its own macOS permissions.';
+      const metadata = await this.ensureDaemon();
+      status.version = metadata.driver_version;
+      if (layout.platform === 'darwin') {
+        const check = toEngineResult(await sendRequest(layout.endpoint, { method: 'call', name: 'check_permissions', args: { prompt: false } }));
+        const grants = check.ok ? decodeBoundary(check.data ?? {}, grantsSchema) : null;
+        // Only the helper running as CuaDriver.app can answer for its own grants.
+        if (grants?.source?.attribution === 'driver-daemon') {
+          status.permissions = { accessibility: grants.accessibility === true, screenRecording: grants.screen_recording === true };
+        } else {
+          status.detail = check.error?.message ?? 'Cua Driver could not read its own macOS permissions.';
+        }
       }
+    } catch (error) {
+      status.detail = error instanceof Error ? error.message : String(error);
     }
     return status;
   }
@@ -366,8 +469,12 @@ class CuaDriverEngine implements ComputerUseEngine {
     if (!hasDesktopSession(layout)) {
       return { ok: false, error: { code: 'no_desktop_session', message: 'This machine has no desktop session for computer use.' } };
     }
+    const generation = this.generation;
     try {
       await this.ensureDaemon();
+      if (generation !== this.generation) {
+        return { ok: false, error: { code: 'engine_stopped', message: 'Computer use stopped before this action ran.' } };
+      }
       return toEngineResult(await sendRequest(layout.endpoint, { method: 'call', name: tool, args }));
     } catch (error) {
       return { ok: false, error: { code: 'engine_unavailable', message: error instanceof Error ? error.message : String(error) } };
@@ -375,13 +482,10 @@ class CuaDriverEngine implements ComputerUseEngine {
   }
 
   async stop(): Promise<void> {
-    const layout = resolveLayout(this.options);
-    const metadata = await readMetadata(layout.endpoint);
-    if (metadata) {
-      await sendRequest(layout.endpoint, { method: 'shutdown' }, 2_000).catch(() => undefined);
-      const exited = await poll(async () => ((await readMetadata(layout.endpoint)) ? null : true), 3_000);
-      if (!exited) killQuietly(metadata.pid);
-    }
+    this.generation += 1;
+    // Let a start in progress finish binding, so the helper it launched is the one shut down.
+    await this.starting?.catch(() => undefined);
+    await shutdownHelper(resolveLayout(this.options));
     this.child?.kill();
     this.child = null;
   }
@@ -398,10 +502,11 @@ class CuaDriverEngine implements ComputerUseEngine {
     const layout = resolveLayout(this.options);
     const running = await readMetadata(layout.endpoint);
     if (running?.driver_version === CUA_DRIVER_VERSION) return running;
-    if (running) await this.stop();
     if (!fs.existsSync(layout.executable)) {
       throw new Error('Cua Driver is not installed.');
     }
+    // Clears an old-version helper, or one that never answered, before a new one takes the socket.
+    await shutdownHelper(layout);
 
     if (layout.endpoint.startsWith('/')) {
       fs.mkdirSync(path.dirname(layout.endpoint), { recursive: true, mode: 0o700 });
@@ -433,35 +538,22 @@ class CuaDriverEngine implements ComputerUseEngine {
 
     const metadata = await poll(() => readMetadata(layout.endpoint), START_TIMEOUT_MS);
     if (!metadata) {
+      await shutdownHelper(layout);
+      this.child?.kill();
+      this.child = null;
       throw new Error(`Cua Driver didn't start within ${START_TIMEOUT_MS / 1000} s. See ${layout.log}.`);
     }
     return metadata;
   }
 }
 
-/** Polls until `read` returns a value, or gives up with null. */
-async function poll<T>(read: () => Promise<T | null>, timeoutMs: number): Promise<T | null> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = await read();
-    if (value !== null || Date.now() >= deadline) return value;
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-}
-
-function killQuietly(pid: number): void {
-  try {
-    process.kill(pid);
-  } catch {
-    // Already gone.
-  }
-}
-
 /**
  * macOS: asks for Accessibility and Screen Recording on behalf of CuaDriver.app,
- * which adds it to both lists in System Settings. Cua only raises these prompts
- * from a LaunchServices-launched host that writes its answer to a file in the
- * user's private temp directory, never from the daemon socket.
+ * which adds it to both lists in System Settings, and returns the current
+ * grants. macOS prompts at most once per app; after that the user grants in
+ * System Settings and status() picks it up. Cua only raises these prompts from a
+ * LaunchServices-launched host that writes its answer to a file in the user's
+ * private temp directory, never from the daemon socket.
  */
 export async function requestCuaDriverPermissions(options: CuaDriverOptions = {}): Promise<EngineStatus['permissions']> {
   const layout = resolveLayout(options);
@@ -471,8 +563,10 @@ export async function requestCuaDriverPermissions(options: CuaDriverOptions = {}
   const resultFile = path.join(stdout.trim(), `cua-driver-permissions-${process.pid}-${randomUUID()}.json`);
   fs.writeFileSync(resultFile, '', { mode: 0o600 });
   try {
-    await execFileAsync('open', ['-n', '-g', layout.app, '--args', '__permissions-host-request', '--result-file', resultFile]);
-    const text = await poll(async () => fs.readFileSync(resultFile, 'utf8').trim() || null, 30_000);
+    await execFileAsync('open', ['-n', '-W', '-g', layout.app, '--args', '__permissions-host-request', '--result-file', resultFile], {
+      timeout: PERMISSION_REQUEST_TIMEOUT_MS,
+    });
+    const text = fs.readFileSync(resultFile, 'utf8').trim();
     if (!text) throw new Error("Cua Driver didn't answer the permission request.");
     const grants = decodeBoundary(decodeBoundary(JSON.parse(text), toolResultSchema).structuredContent ?? {}, grantsSchema);
     return { accessibility: grants.accessibility === true, screenRecording: grants.screen_recording === true };

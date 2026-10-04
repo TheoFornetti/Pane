@@ -350,6 +350,45 @@ test('session remount retains full recovery', async ({ page }) => {
   expect(await maskAppearances(page, panel)).not.toEqual([]);
 });
 
+for (const alternateScreen of [false, true]) {
+  test(`Windows hot activation (${alternateScreen ? 'alternate' : 'normal'}) waits for backstop resize then only lingers once`, async ({ page }) => {
+    const { panel } = await bootFixture(page, 'performance', false, false, 'win32');
+    if (alternateScreen) {
+      await xtermEvaluate(panel, terminal => new Promise<void>(resolve => terminal.write('\x1b[?1049h\x1b[2Jhot alternate buffer', resolve)));
+    }
+    const before = await readSnapshot(panel);
+    await page.getByRole('tab', { name: secondaryPanel.title, exact: true }).click();
+    await expect(page.getByRole('tabpanel', { name: secondaryPanel.title }).getByTestId('terminal-activation-mask')).toHaveCount(0);
+    await pauseClock(page);
+    const stateCallsBefore = await mockEvaluate(page, mock => mock.getInvokeCalls('terminal:getState').length);
+    await page.evaluate(panelId => {
+      const invoke = window.electronAPI.invoke;
+      let backstopStarted = false;
+      window.electronAPI.invoke = async (channel, ...args) => {
+        if (channel === 'console:log' && JSON.stringify(args).includes(`Delayed activation refresh for panel ${panelId}`)) {
+          backstopStarted = true;
+        }
+        if (channel === 'terminal:resize' && args[0] === panelId && backstopStarted) {
+          backstopStarted = false;
+          await new Promise<void>(resolve => { window.__resumeTerminalRequest = resolve; });
+        }
+        return invoke(channel, ...args);
+      };
+    }, primaryPanel.id);
+    await page.getByRole('tab', { name: primaryPanel.title, exact: true }).click();
+    await advanceActivation(page);
+    expect(await page.evaluate(() => window.__resumeTerminalRequest !== undefined)).toBe(true);
+    await expect(panel.getByTestId('terminal-activation-mask')).toHaveCount(1);
+    await page.evaluate(() => { window.__resumeTerminalRequest?.(); });
+    // Two paint frames, then the existing 150 ms overlay linger. The previous
+    // additional 200 ms hot-path timer would still have the mask up here.
+    for (let elapsed = 0; elapsed < 250; elapsed += 25) await page.clock.runFor(25);
+    await expect(panel.getByTestId('terminal-activation-mask')).toHaveCount(0);
+    expect(await mockEvaluate(page, mock => mock.getInvokeCalls('terminal:getState').length)).toBe(stateCallsBefore);
+    expect(await readSnapshot(panel)).toEqual(before);
+  });
+}
+
 for (const pendingRequest of ['refocus-resize', 'forced-resize'] as const) {
   test(`switching sessions during ${pendingRequest} does not produce a disposed-terminal error`, async ({ page }) => {
     const { panel } = await bootFixture(page, 'performance', pendingRequest === 'forced-resize');

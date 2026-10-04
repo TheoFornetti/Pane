@@ -2036,9 +2036,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             if (!hotActivation) return;
             await waitForNextPaint();
             if (cancelled) return;
-            hideOverlayTimer = setTimeout(() => {
-              if (!cancelled) setIsRefreshing(false);
-            }, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS);
+            // The live buffer has now completed both reconciles and the delayed
+            // paint. The overlay's own linger still shields presentation; adding
+            // the full-replay settle timer here only delays an already hot view.
+            setIsRefreshing(false);
           })();
         }, REFOCUS_DELAYED_REFRESH_MS);
 

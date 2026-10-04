@@ -552,3 +552,24 @@ test('filters to Cursor and shows its messages without tokens or a cost', async 
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
   await capture(page, testInfo, '06-usage-cursor-filter.png');
 });
+
+test('per-pane footnote says when Tokens / pane leaves out Cursor-only panes', async ({ page }) => {
+  const values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 1000];
+  const panes = values.map((value, i) => ({
+    ...report.byPane.panes[0], paneId: `sample-${i}`, paneName: `Sample ${i}`,
+    inputTokens: value * 1000, outputTokens: 0, cacheCreationTokens: 0, totalTokens: value * 1000, messageCount: value,
+  }));
+  panes.push({ ...cursorReport.byPane.panes[0] });
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialUsageReport: { ...report, byPane: { ...report.byPane, panes } }, activeProjectId: project.id,
+  });
+  await page.goto('/');
+  await openUsageAndLimits(page);
+  const summary = page.getByTestId('pane-usage-summary');
+  await expect(summary).toContainText('11 panes with recorded usage');
+  await expect(summary).toContainText('Tokens / pane averages the 10 panes that recorded tokens.');
+
+  await summary.getByRole('button', { name: 'Trim 10%' }).click();
+  await expect(summary).toContainText('Tokens / pane drops 1 from each end, so 8 panes remain.');
+  await expect(summary).toContainText('Cost and messages drop 1 highest and 1 lowest values; 9 panes remain.');
+});

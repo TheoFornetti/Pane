@@ -1,5 +1,6 @@
 import type { UsageByPaneReport } from '../../../../shared/types/usage';
 import { formatTokens, formatUsd } from '../ui/charts/chartScales';
+import { tokensUnreported } from './usageMetering';
 
 export function PaneUsageSummary({ byPane, trim, onTrimChange }: {
   byPane: UsageByPaneReport;
@@ -15,16 +16,22 @@ export function PaneUsageSummary({ byPane, trim, onTrimChange }: {
     return sample.reduce((sum, value) => sum + value, 0) / retained;
   };
   const costIncomplete = panes.some(pane => pane.costIncomplete);
+  const unmetered = panes.some(pane => pane.unmeteredMessageCount > 0);
+  const allUnreported = count > 0 && panes.every(tokensUnreported);
   const metrics = [
     {
       label: 'Tokens / pane',
-      value: count ? formatTokens(mean(panes.map(pane => pane.inputTokens + pane.outputTokens + pane.cacheCreationTokens))) : '—',
-      detail: 'Input + output + cache writes; excludes cache reads',
+      value: !count ? '—' : allUnreported ? 'Not reported' : formatTokens(mean(panes.map(pane => pane.inputTokens + pane.outputTokens + pane.cacheCreationTokens))),
+      detail: unmetered
+        ? 'Input + output + cache writes; Cursor messages carry no tokens'
+        : 'Input + output + cache writes; excludes cache reads',
     },
     {
       label: 'Est. cost / pane',
       value: !count ? '—' : costIncomplete ? 'n/a' : formatUsd(mean(panes.map(pane => pane.estimatedCostUsd))),
-      detail: costIncomplete ? 'Missing model prices in this sample' : 'All tokens at API rates, not subscription charges',
+      detail: unmetered
+        ? 'Cursor messages carry no tokens to price'
+        : costIncomplete ? 'Missing model prices in this sample' : 'All tokens at API rates, not subscription charges',
     },
     {
       label: 'Messages / pane',

@@ -60,6 +60,8 @@ type ElectronApiMockOptions = {
   initialTerminalStates?: Record<string, JsonObject>;
   initialAgentUsage?: JsonObject;
   initialUsageReport?: JsonObject;
+  /** Report returned when the page filters to exactly one provider, keyed by provider. */
+  usageReportByProvider?: Record<string, JsonObject>;
   initialLeaderboardStatus?: JsonObject;
   initialLeaderboard?: JsonObject;
   forcedAgentUsageError?: string;
@@ -546,7 +548,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         shareImage: () => success({ method: 'clipboard' }),
       }),
       usage: namespace({
-        getReport: () => success(clone(mockOptions.initialUsageReport ?? {
+        getReport: (request?: { providers?: string[] }) => success(clone(
+          (request?.providers?.length === 1 ? mockOptions.usageReportByProvider?.[request.providers[0]] : undefined)
+          ?? mockOptions.initialUsageReport ?? {
           totals: {
             inputTokens: 0,
             outputTokens: 0,
@@ -554,6 +558,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             cacheCreationTokens: 0,
             totalTokens: 0,
             messageCount: 0,
+            unmeteredMessageCount: 0,
             estimatedCostUsd: 0,
             costIncomplete: false,
             cacheSavingsUsd: 0,
@@ -570,6 +575,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
               cacheCreationTokens: 0,
               totalTokens: 0,
               messageCount: 0,
+              unmeteredMessageCount: 0,
               estimatedCostUsd: 0,
               costIncomplete: false,
               cacheSavingsUsd: 0,

@@ -20,10 +20,10 @@ import { UploadReceipts } from '../upload/UploadReceipts';
 import { useUploads } from '../upload/useUploads';
 import { useVoiceDictation } from '../voice/useVoiceDictation';
 import { CopySheet } from './CopySheet';
+import { FloatingController } from './FloatingController';
 import { KEYS } from './keys';
 import { pickPanel, sessionWorkspacePanels, terminalPanels } from './panels';
 import { PanelTabs } from './PanelTabs';
-import { ScrollJoystick } from './ScrollJoystick';
 import { ShortcutsPanel } from './ShortcutsPanel';
 import { TerminalInputBar } from './TerminalInputBar';
 import { TerminalTopBar } from './TerminalTopBar';
@@ -159,6 +159,10 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const disabled = terminal.status !== 'ready';
 
+  const sendKey = (data: string) => {
+    terminal.scrollToBottom();
+    void terminal.sendInput(data).catch(() => undefined);
+  };
   // An empty box sends a bare Enter, to answer a menu or confirm a prompt.
   const submit = () => {
     const text = draft;
@@ -208,9 +212,7 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
           </View>
         ) : null}
         {terminal.status === 'ready' ? (
-          <View style={styles.joystick} pointerEvents="box-none">
-            <ScrollJoystick onScroll={terminal.scrollLines} />
-          </View>
+          <FloatingController onKey={sendKey} onScroll={terminal.scrollLines} />
         ) : null}
         {terminal.status === 'ready' && !terminal.atBottom ? (
           <Pressable
@@ -317,7 +319,6 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   // The web app insets xterm 8 pt from the sides and top.
   screen: { flex: 1, paddingHorizontal: 8, paddingTop: 8 },
-  joystick: { position: 'absolute', right: 8, top: 0, bottom: 0, justifyContent: 'center' },
   toBottom: {
     position: 'absolute',
     bottom: 12,

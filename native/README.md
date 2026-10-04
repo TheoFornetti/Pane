@@ -65,9 +65,15 @@ The pane screen runs xterm in a WebView. The page source is `terminal-web/page.t
 `panes.yaml` creates a pane, searches, pins, archives and deletes it; it needs at least one repository on the host. `permission.yaml` answers a permission request; queue one first with `node scripts/request-permission.mjs <pane-dir> <pane-id>`, which stands in for the agent's permission bridge.
 
 
+## The composer
+
+The pane screen's text box holds every action: Attach, Paste, Shortcuts and Copy on the left, the mic and one Send/Enter button on the right. An empty box sends a bare Enter, which answers an agent's menu; with text, the button sends the text and then Enter. Stop (Ctrl+C) sits in the tab bar, and Clear scrollback in the "…" menu. Copy shows the terminal's recent output as selectable text, and Last 200 lines swaps in the host's clean scrollback (`terminal:getScrollbackClean`).
+
+The terminal's right edge carries the scroll joystick, a D-pad with Enter in its center, and Esc and Tab. They rest at 18% opacity; touching any of them makes all of them opaque, and 3 s after the last touch they fade back together (`src/features/terminal/FloatingController.tsx`).
+
 ## Uploads
 
-The paperclip in the input sends photos, camera shots and files (any type, up to 50 MB each) to the host and inserts each file's host path at the cursor, the same path desktop's upload button pastes. Files go up in 128 KB chunks over `POST /invoke` (`terminal:upload-start`, `-chunk`, `-commit`, `-cancel`), so a slow or flaky link only ever resends one chunk: every reply carries the bytes the host has, and after a drop the phone calls `upload-start` again and continues from there. The host stages partial uploads in `<pane-dir>/uploads/`, deletes ones untouched for a day, and lands finished files in `<pane-dir>/images/` or `<pane-dir>/files/` through the same code as a desktop paste (`main/src/services/chunkedUploadStore.ts`, `main/src/ipc/panels.ts`). Hosts without these channels get the old single request, capped at about 12 MB. The upload loop is `src/features/upload/chunkedUpload.ts`.
+The paperclip in the composer sends photos, camera shots and files (any type, up to 50 MB each) to the host and inserts each file's host path at the cursor, the same path desktop's upload button pastes. Files go up in 128 KB chunks over `POST /invoke` (`terminal:upload-start`, `-chunk`, `-commit`, `-cancel`), so a slow or flaky link only ever resends one chunk: every reply carries the bytes the host has, and after a drop the phone calls `upload-start` again and continues from there. The host stages partial uploads in `<pane-dir>/uploads/`, deletes ones untouched for a day, and lands finished files in `<pane-dir>/images/` or `<pane-dir>/files/` through the same code as a desktop paste (`main/src/services/chunkedUploadStore.ts`, `main/src/ipc/panels.ts`). Hosts without these channels get the old single request, capped at about 12 MB. The upload loop is `src/features/upload/chunkedUpload.ts`.
 
 ## Notifications and links
 

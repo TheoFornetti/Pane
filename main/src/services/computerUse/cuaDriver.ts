@@ -100,8 +100,19 @@ function hasDesktopSession(layout: Layout): boolean {
  * Installs the pinned Cua Driver release under Pane's directory, or re-verifies
  * an existing install. Idempotent. Throws an Error with a user-readable message.
  */
-export async function installCuaDriver(options: CuaDriverOptions = {}): Promise<void> {
+export function installCuaDriver(options: CuaDriverOptions = {}): Promise<void> {
   const layout = resolveLayout(options);
+  let install = installsInFlight.get(layout.root);
+  if (!install) {
+    install = installOnce(layout, options.releaseUrl ?? RELEASE_URL).finally(() => installsInFlight.delete(layout.root));
+    installsInFlight.set(layout.root, install);
+  }
+  return install;
+}
+
+const installsInFlight = new Map<string, Promise<void>>();
+
+async function installOnce(layout: Layout, releaseUrl: string): Promise<void> {
   const archive = ARCHIVES.get(`${layout.platform}-${layout.arch}`);
   if (!archive) {
     throw new Error(`Cua Driver has no release for ${layout.platform} ${layout.arch}.`);
@@ -122,7 +133,7 @@ export async function installCuaDriver(options: CuaDriverOptions = {}): Promise<
   try {
     const fileName = `cua-driver-rs-${CUA_DRIVER_VERSION}-${archive.file}`;
     const archivePath = path.join(staging, fileName);
-    await download(`${options.releaseUrl ?? RELEASE_URL}/${fileName}`, archivePath, archive.sha256);
+    await download(`${releaseUrl}/${fileName}`, archivePath, archive.sha256);
 
     const extracted = path.join(staging, 'extracted');
     fs.mkdirSync(extracted);

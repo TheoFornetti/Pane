@@ -11,17 +11,20 @@ export function PaneUsageSummary({ byPane, trim, onTrimChange }: {
   const count = panes.length;
   const cut = trim ? Math.floor(count * 0.1) : 0;
   const retained = count - cut * 2;
+  // Trimmed per metric, since a metric may average a subset of the panes.
   const mean = (values: number[]): number => {
-    const sample = values.sort((a, b) => a - b).slice(cut, count - cut);
-    return sample.reduce((sum, value) => sum + value, 0) / retained;
+    const cut = trim ? Math.floor(values.length * 0.1) : 0;
+    const sample = values.sort((a, b) => a - b).slice(cut, values.length - cut);
+    return sample.reduce((sum, value) => sum + value, 0) / sample.length;
   };
   const costIncomplete = panes.some(pane => pane.costIncomplete);
   const unmetered = panes.some(pane => pane.unmeteredMessageCount > 0);
-  const allUnreported = count > 0 && panes.every(tokensUnreported);
+  // Panes whose messages recorded no tokens (Cursor) would average in as 0.
+  const tokenPanes = panes.filter(pane => !tokensUnreported(pane));
   const metrics = [
     {
       label: 'Tokens / pane',
-      value: !count ? '—' : allUnreported ? 'Not reported' : formatTokens(mean(panes.map(pane => pane.inputTokens + pane.outputTokens + pane.cacheCreationTokens))),
+      value: !count ? '—' : tokenPanes.length === 0 ? 'Not reported' : formatTokens(mean(tokenPanes.map(pane => pane.inputTokens + pane.outputTokens + pane.cacheCreationTokens))),
       detail: unmetered
         ? 'Input + output + cache writes; Cursor messages carry no tokens'
         : 'Input + output + cache writes; excludes cache reads',
@@ -29,9 +32,11 @@ export function PaneUsageSummary({ byPane, trim, onTrimChange }: {
     {
       label: 'Est. cost / pane',
       value: !count ? '—' : costIncomplete ? 'n/a' : formatUsd(mean(panes.map(pane => pane.estimatedCostUsd))),
-      detail: unmetered
-        ? 'Cursor messages carry no tokens to price'
-        : costIncomplete ? 'Missing model prices in this sample' : 'All tokens at API rates, not subscription charges',
+      detail: !costIncomplete
+        ? 'All tokens at API rates, not subscription charges'
+        : panes.some(pane => pane.costIncomplete && pane.unmeteredMessageCount === 0)
+          ? unmetered ? 'Missing model prices, and Cursor messages carry no tokens' : 'Missing model prices in this sample'
+          : 'Cursor messages carry no tokens to price',
     },
     {
       label: 'Messages / pane',

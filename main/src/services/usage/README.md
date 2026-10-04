@@ -25,8 +25,10 @@ indexed in one pass therefore all land at its latest write.
 
 Unmetered messages are counted, never priced: totals carry
 `unmeteredMessageCount`, and any slice holding one has `costIncomplete`. The
-dashboard, `runpane panes cost` and the leaderboard show them as "N messages,
-tokens not reported". There are no Cursor limit bars.
+dashboard and `runpane panes cost` show them as "N messages, tokens not
+reported". The leaderboard receives each model's message count with zero tokens
+and `costIncomplete`, so runpane.com marks the total as estimated. There are no
+Cursor limit bars.
 
 Measured Cursor tokens are a follow-up: a Cursor `stop` hook that records each
 turn's usage by `conversation_id`, pending a spike on a machine with Cursor.

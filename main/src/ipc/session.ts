@@ -357,12 +357,19 @@ export function registerSessionHandlers(
     }
   });
 
-  const teardownArchivedSession = async (sessionId: string): Promise<void> => {
-    if (databaseService.getSession(sessionId)) await sessionManager.archiveSession(sessionId);
-    await terminalPanelManager.terminateSessionTerminals(sessionId);
+  const archiveProcessRoots = (sessionId: string): number[] => [
+      ...(terminalPanelManager.getSessionPids().get(sessionId) ?? []),
+      ...sessionManager.getArchiveProcessPids(sessionId),
+      ...runCommandManager.getArchiveProcessPids(sessionId),
+  ];
+  services.archiveCleanupManager?.setProcessRootsHandler(archiveProcessRoots);
+  const teardownArchivedSession = async (sessionId: string, tracker: import('../services/archiveProcessTracker').ArchiveProcessTracker): Promise<void> => {
+    await tracker.capture(archiveProcessRoots(sessionId));
+    if (databaseService.getSession(sessionId)) await sessionManager.archiveSession(sessionId, { trackedTeardown: true });
+    await terminalPanelManager.retireSessionTerminalsForArchive(sessionId);
     await panelManager.cleanupSessionPanelsInMemory(sessionId);
     gitStatusManager.clearSessionCache(sessionId);
-    await runCommandManager.stopRunCommands(sessionId);
+    await runCommandManager.retireRunCommandsForArchive(sessionId);
     sessionImageCounters.delete(sessionId);
   };
   services.archiveCleanupManager?.setTeardownHandler(teardownArchivedSession);
@@ -404,7 +411,7 @@ export function registerSessionHandlers(
         const cleanup = services.archiveCleanupManager;
         const job = await cleanup.prepare(dbSession, removesWorktree, options?.removeExternalWorktree === true);
         if (!databaseService.archiveSession(sessionId, job)) throw new Error('Session not found');
-        cleanup.enqueue(job, () => teardownArchivedSession(sessionId));
+        cleanup.enqueue(job, tracker => teardownArchivedSession(sessionId, tracker));
         return { success: true };
       }
       await sessionManager.archiveSession(sessionId);

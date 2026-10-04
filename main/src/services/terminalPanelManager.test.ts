@@ -10,6 +10,9 @@ import type { TerminalPanelState } from '../../../shared/types/panels';
 import { TerminalPanelManager } from './terminalPanelManager';
 import { ShellDetector } from '../utils/shellDetector';
 import { panelManager } from '../test/setup';
+import { RunCommandManager } from './runCommandManager';
+import type { DatabaseService } from '../database/database';
+import { ArchiveProcessTracker, type ArchiveProcessIdentity, type ArchiveProcessObservation } from './archiveProcessTracker';
 
 vi.spyOn(panelManager, 'emitPanelEvent');
 vi.spyOn(panelManager, 'getPanel');
@@ -123,7 +126,7 @@ type ShellPromptSchedulerAccess = {
   }, callback: () => void): void;
 };
 
-function testAccess<Access>(manager: TerminalPanelManager): Access {
+function testAccess<Access>(manager: TerminalPanelManager | RunCommandManager): Access {
   // SAFETY: Each access type above mirrors the exact private members exercised
   // by its tests; this helper keeps that deliberate test-only seam in one place.
   return manager as Access;
@@ -176,6 +179,59 @@ function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnd
     ...overrides,
   };
 }
+
+describe('strict archive process teardown', () => {
+  it('retains surviving descendants after real terminal/run-command map retirement and retries them', async () => {
+    const manager = new TerminalPanelManager();
+    const terminal = createTerminal({ outputBuffer: '' });
+    terminal.pty.pid = 1000001;
+    terminal.outputFlushTimer = setTimeout(() => {}, 60000);
+    const dispose = vi.fn();
+    terminal.screenEmulator = partialMock<RemoteTerminalEmulator>({ dispose });
+    testAccess<SnapshotAccess>(manager).terminals.set(terminal.panelId, terminal);
+    const commands = new RunCommandManager(partialMock<DatabaseService>({}));
+    const runKill = vi.fn();
+    // SAFETY: This fixture supplies precisely the process members consumed by
+    // archive PID collection and retirement, without starting a real PTY host.
+    const access = testAccess<{ processes: Map<string, Array<{ process: { pid: number; kill: () => void } }>> }>(commands);
+    access.processes.set(terminal.sessionId, [{ process: { pid: 1000003, kill: runKill } }]);
+    const birth = (n: number) => process.platform === 'win32' ? String(100 + n) : `2026-10-03T00:00:0${n}Z`;
+    let table: ArchiveProcessObservation[] = [
+      { pid: 1000001, parent: 0, started: birth(1), exited: false },
+      { pid: 1000002, parent: 1000001, started: birth(2), exited: false },
+      { pid: 1000003, parent: 0, started: birth(3), exited: false },
+      { pid: 1000004, parent: 1000003, started: birth(4), exited: false },
+    ];
+    let persisted: ArchiveProcessIdentity[] = [];
+    const save = (identities: ArchiveProcessIdentity[]) => { persisted = structuredClone(identities); };
+    const read = async () => table;
+    const failedKill = vi.fn(async () => {});
+    const tracker = new ArchiveProcessTracker([], save, read, failedKill);
+    await tracker.capture([
+      ...(manager.getSessionPids().get(terminal.sessionId) ?? []),
+      ...commands.getArchiveProcessPids(terminal.sessionId),
+    ]);
+    expect(persisted).toHaveLength(4);
+    terminal.pty.kill.mockImplementation(() => { table = table.filter(item => item.pid !== 1000001); });
+    runKill.mockImplementation(() => { table = table.filter(item => item.pid !== 1000003); });
+    await manager.retireSessionTerminalsForArchive(terminal.sessionId);
+    await commands.retireRunCommandsForArchive(terminal.sessionId);
+    expect(manager.getSessionPids().size).toBe(0);
+    expect(commands.getArchiveProcessPids(terminal.sessionId)).toEqual([]);
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(terminal.outputFlushTimer).toBeNull();
+    await tracker.terminateSurvivors();
+    await expect(tracker.verifyExited(0)).rejects.toThrow('1000002, 1000004');
+    expect(persisted.map(item => item.pid)).toEqual([1000002, 1000004]);
+    // Retry after restart has only persisted identities; maps are already empty.
+    const retryKill = vi.fn(async (_identities: readonly ArchiveProcessIdentity[]) => { table = []; });
+    const retry = new ArchiveProcessTracker(persisted, save, read, retryKill);
+    await retry.terminateSurvivors();
+    await retry.verifyExited(0);
+    expect(retryKill.mock.calls[0][0].map((item: ArchiveProcessIdentity) => item.pid)).toEqual([1000004, 1000002]);
+    expect(persisted).toEqual([]);
+  });
+});
 
 describe('TerminalPanelManager keyboard input', () => {
   it.each([

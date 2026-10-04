@@ -2214,6 +2214,13 @@ export class TerminalPanelManager extends EventEmitter {
     }
   }
 
+  /** Preserve normal terminal resource retirement. ArchiveProcessTracker
+   * captures beforehand, then escalates and verifies matching survivors. */
+  async retireSessionTerminalsForArchive(sessionId: string): Promise<void> {
+    const terminals = [...this.terminals.values()].filter(terminal => terminal.sessionId === sessionId);
+    await Promise.all(terminals.map(terminal => this.destroyTerminal(terminal.panelId)));
+  }
+
   destroyTerminal(panelId: string, options: { saveState?: boolean } = {}): Promise<void> {
     const terminal = this.terminals.get(panelId);
     if (!terminal) return Promise.resolve();

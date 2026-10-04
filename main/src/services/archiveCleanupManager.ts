@@ -11,7 +11,8 @@ import { stopFsmonitorDaemon } from './gitPerformanceConfig';
 import { detectProjectConfig } from './projectConfigDetector';
 import { archiveFs, archiveErrorCode, archivePathKey, directoryIdentity, purgeArchiveBatch, type ArchivePurgeCursor } from './archiveCleanupFilesystem';
 import { getAppSubdirectory } from '../utils/appDirectory';
-import { withLock } from '../utils/mutex';
+import { withArchiveRepositoryKey } from './archiveRepositoryLock';
+import { ArchiveProcessTracker } from './archiveProcessTracker';
 
 type CleanupStore = Pick<DatabaseService, 'getArchiveCleanupJobs' | 'saveArchiveCleanupJob' | 'getSession'>;
 type CleanupSessions = Pick<SessionManager, 'getProjectContextByProjectId' | 'runArchiveScript'>;
@@ -23,8 +24,9 @@ export class ArchiveCleanupManager {
   private repositories = new Set<string>();
   private waitingForTeardown = new Set<string>();
   private inFlight = new Set<Promise<void>>();
-  private teardownCallbacks = new Map<string, () => Promise<void>>();
-  private teardownSession?: (sessionId: string) => Promise<void>;
+  private teardownCallbacks = new Map<string, (tracker: ArchiveProcessTracker) => Promise<void>>();
+  private teardownSession?: (sessionId: string, tracker: ArchiveProcessTracker) => Promise<void>;
+  private processRoots: (sessionId: string) => number[] = () => [];
   private purgeCursors = new Map<string, ArchivePurgeCursor>();
   private timer?: ReturnType<typeof setTimeout>;
   private stopped = false;
@@ -39,11 +41,25 @@ export class ArchiveCleanupManager {
     return context?.pathResolver.environment !== 'wsl' && !context?.commandRunner.wslContext;
   }
 
-  setTeardownHandler(handler: (sessionId: string) => Promise<void>): void {
+  setTeardownHandler(handler: (sessionId: string, tracker: ArchiveProcessTracker) => Promise<void>): void {
     this.teardownSession = handler;
   }
 
+  setProcessRootsHandler(handler: (sessionId: string) => number[]): void {
+    this.processRoots = handler;
+  }
+
   async prepare(session: Session, removeWorktree: boolean, externalRemovalApproved: boolean): Promise<ArchiveCleanupJob> {
+    const job = await this.preparePath(session, removeWorktree, externalRemovalApproved);
+    // Capture before the atomic archive/intent commit. A capture failure leaves
+    // the session active; a crash after commit retains the known process tree.
+    job.processes = [];
+    await new ArchiveProcessTracker([], identities => { job.processes = identities; })
+      .capture(this.processRoots(session.id));
+    return job;
+  }
+
+  private async preparePath(session: Session, removeWorktree: boolean, externalRemovalApproved: boolean): Promise<ArchiveCleanupJob> {
     const context = session.project_id ? this.sessions.getProjectContextByProjectId(session.project_id) : null;
     const id = randomUUID();
     const job: ArchiveCleanupJob = {
@@ -53,7 +69,7 @@ export class ArchiveCleanupManager {
       repository: `artifacts:${session.id}`, quarantine: '', gitDirectory: '', identity: '',
       removeWorktree, externalRemovalApproved, status: 'queued', phase: 'script',
       scriptStarted: false, scriptFinished: false, attempts: 0, nextAttempt: 0,
-      startTime: new Date().toISOString(), endTime: undefined, error: undefined,
+      startTime: new Date().toISOString(), endTime: undefined, error: undefined, processes: undefined,
     };
     if (!removeWorktree) return job;
     try {
@@ -94,12 +110,21 @@ export class ArchiveCleanupManager {
   }
 
   /** Called immediately after the atomic archive/intent commit, before awaiting teardown. */
-  enqueue(job: ArchiveCleanupJob, teardown: () => Promise<void>): void {
+  enqueue(job: ArchiveCleanupJob, teardown: (tracker: ArchiveProcessTracker) => Promise<void>): void {
     this.jobs.set(job.sessionId, job);
     this.teardownCallbacks.set(job.sessionId, teardown);
     this.waitingForTeardown.add(job.sessionId);
     this.publish();
-    const pending = Promise.resolve().then(teardown);
+    const tracker = new ArchiveProcessTracker([...(job.processes ?? [])], identities => {
+      job.processes = identities;
+      this.save(job);
+    });
+    const pending = Promise.resolve().then(async () => {
+      if (job.processes === undefined) throw new Error('Process capture is missing; automatic cleanup cannot verify pre-crash processes');
+      await teardown(tracker);
+      await tracker.terminateSurvivors();
+      await tracker.verifyExited();
+    });
     const waiting = pending.then(() => {
       this.waitingForTeardown.delete(job.sessionId);
       this.publish();
@@ -119,7 +144,7 @@ export class ArchiveCleanupManager {
       } else {
         job.status = 'queued';
         this.save(job);
-        if (this.teardownSession) this.enqueue(job, () => this.teardownSession!(job.sessionId));
+        this.enqueue(job, tracker => this.teardownSession?.(job.sessionId, tracker) ?? Promise.resolve());
       }
     }
     this.schedule();
@@ -147,9 +172,9 @@ export class ArchiveCleanupManager {
     job.endTime = undefined;
     this.save(job);
     const teardown = this.teardownCallbacks.get(sessionId)
-      ?? (this.teardownSession ? () => this.teardownSession!(sessionId) : undefined);
+      ?? (this.teardownSession ? (tracker: ArchiveProcessTracker) => this.teardownSession!(sessionId, tracker) : undefined);
     if (teardown) this.enqueue(job, teardown);
-    else this.schedule();
+    else this.enqueue(job, async () => {});
   }
 
   assertRestorable(sessionId: string): void {
@@ -282,7 +307,7 @@ export class ArchiveCleanupManager {
         this.save(job);
       }
       if (job.phase === 'detach') {
-        await withLock(`archive-repository:${archivePathKey(job.repository)}`, () => this.detach(job));
+        await withArchiveRepositoryKey(job.repository, () => this.detach(job));
         job.phase = 'purge';
         this.save(job);
       }

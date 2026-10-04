@@ -25,6 +25,9 @@ const jobSchema = boundary.object({
   startTime: boundary.string,
   endTime: boundary.optional(boundary.string),
   error: boundary.optional(boundary.string),
+  processes: boundary.optional(boundary.array(boundary.object({
+    pid: boundary.number, parent: boundary.number, started: boundary.string,
+  }))),
 });
 
 type DecodedJob = ReturnType<typeof jobSchema.decode>;

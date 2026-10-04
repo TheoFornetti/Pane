@@ -1,4 +1,5 @@
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
+import { once } from 'events';
 import { createRequire } from 'module';
 import { mkdtempSync, mkdirSync, writeFileSync, renameSync, existsSync, rmSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
@@ -12,6 +13,7 @@ import { PathResolver } from '../../utils/pathResolver';
 import { archiveFs, directoryIdentity, purgeArchiveBatch } from '../archiveCleanupFilesystem';
 import { WorktreeManager } from '../worktreeManager';
 import { withArchiveRepositoryLock } from '../archiveRepositoryLock';
+import { worktreePoolManager } from '../worktreePoolManager';
 
 const fixtures: Array<{ root: string; close: () => Promise<void> }> = [];
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -69,6 +71,64 @@ afterEach(async () => {
 });
 
 describe('durable archive cleanup', () => {
+  it('queues pool background creation and orphan cleanup behind repository mutations', async () => {
+    const f = fixture();
+    const calls = vi.spyOn(f.runner, 'execFile');
+    let release = () => {};
+    let entered = () => {};
+    const enteredPromise = new Promise<void>(resolve => { entered = resolve; });
+    const owner = withArchiveRepositoryLock(f.repo, f.runner, async () => {
+      entered();
+      await new Promise<void>(resolve => { release = resolve; });
+    });
+    await enteredPromise;
+    const pool = worktreePoolManager.createReserve(f.repo, 'HEAD', undefined, new PathResolver(f.project), f.runner);
+    const cleanup = worktreePoolManager.cleanupOrphanedReserves(f.repo, f.runner);
+    try {
+      await vi.waitFor(() => expect(calls.mock.calls.filter(call => call[1][0] === 'rev-parse')).toHaveLength(3));
+      expect(calls.mock.calls.some(call => call[1][0] === 'worktree')).toBe(false);
+    } finally {
+      release();
+      await Promise.all([owner, pool, cleanup]);
+    }
+    expect(worktreePoolManager.hasReserve(f.repo, 'HEAD')).toBe(true);
+    const mutations = calls.mock.calls.filter(call => call[1][0] === 'worktree').map(call => call[1][1]);
+    expect(mutations).toEqual(['add', 'list']);
+  });
+
+  it('fails closed after restart when an old intent has no process capture', async () => {
+    const f = fixture();
+    const job = await f.manager.prepare(f.session, true, false);
+    job.processes = undefined;
+    f.db.archiveSession(f.session.id, job);
+    f.restart();
+    await settled(f, 'failed');
+    expect(f.db.getArchiveCleanupJobs()[0].error).toContain('Process capture is missing');
+    expect(existsSync(f.source)).toBe(true);
+  });
+
+  it('captures before commit and terminates retained processes after a commit-before-enqueue crash', async () => {
+    const f = fixture();
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
+    const exited = once(child, 'exit');
+    await once(child, 'spawn');
+    try {
+      f.manager.setProcessRootsHandler(() => [child.pid!]);
+      const job = await f.manager.prepare(f.session, true, false);
+      expect(job.processes?.some(item => item.pid === child.pid)).toBe(true);
+      f.db.archiveSession(f.session.id, job);
+      // No enqueue/callback ran before the simulated crash. Restart has no PTYs.
+      f.restart();
+      await settled(f, 'completed');
+      await exited;
+      expect(existsSync(f.source)).toBe(false);
+      expect(f.db.getArchiveCleanupJobs()[0].processes).toEqual([]);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      await exited;
+    }
+  }, 30000);
+
   it('leaves the repository mutation lock available while an archive script runs', async () => {
     const f = fixture();
     f.project.archive_script = 'held script';

@@ -799,7 +799,11 @@ export class SessionManager extends EventEmitter {
     }));
   }
 
-  async archiveSession(id: string): Promise<void> {
+  getArchiveProcessPids(id: string): number[] {
+    return this.terminalSessionManager.getArchiveProcessPids(id);
+  }
+
+  async archiveSession(id: string, options: { trackedTeardown?: boolean } = {}): Promise<void> {
     // Track session archival with analytics before archiving
     if (this.analyticsManager) {
       const dbSession = this.db.getSession(id);
@@ -821,7 +825,8 @@ export class SessionManager extends EventEmitter {
     }
 
     // Close terminal session if it exists
-    await this.terminalSessionManager.closeTerminalSession(id);
+    if (options.trackedTeardown) this.terminalSessionManager.retireForArchive(id);
+    else await this.terminalSessionManager.closeTerminalSession(id);
     
     this.activeSessions.delete(id);
     this.emit('session-deleted', { id }); // Keep the same event name for frontend compatibility

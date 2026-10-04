@@ -357,6 +357,9 @@ replayed; its retry button explicitly skips that script. Native worktrees are
 moved to a private quarantine before files are removed in small batches. Busy
 operations retry up to three times; cross-volume renames, locked worktrees,
 and identity mismatches preserve the remaining files and show a failure.
+Cleanup also waits for known terminal and run-command processes to exit.
+If termination fails, the job retains their identities across restart and
+**Retry cleanup** retries termination before removing files.
 WSL worktrees retain the existing Git cleanup route without restart recovery.
 Unsupported native paths fail before archiving. A CLI wait timeout does not
 cancel a persisted job. Individual filesystem calls are awaited; batch budgets

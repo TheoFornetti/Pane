@@ -64,6 +64,8 @@ type ElectronApiMockOptions = {
   usageReportByProvider?: Record<string, JsonObject>;
   initialLeaderboardStatus?: JsonObject;
   initialLeaderboard?: JsonObject;
+  /** Error the leaderboard submit returns, as the server's rejection would surface. */
+  leaderboardSendError?: string;
   forcedAgentUsageError?: string;
   detectedBranch?: string | null;
   detectedBranchByPath?: Record<string, string | null>;
@@ -635,7 +637,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         })),
         join: () => success({ rank: 1, displayName: '@testuser', verified: true, total: 1, installs: 1 }),
         leave: () => success(undefined),
-        sendNow: () => success({ rank: 1, displayName: '@testuser', verified: true, total: 1, installs: 1 }),
+        sendNow: () => mockOptions.leaderboardSendError
+          ? Promise.resolve({ success: false, error: mockOptions.leaderboardSendError })
+          : success({ rank: 1, displayName: '@testuser', verified: true, total: 1, installs: 1 }),
         fetch: () => success(clone(mockOptions.initialLeaderboard ?? {
           windowDays: 30,
           total: 0,

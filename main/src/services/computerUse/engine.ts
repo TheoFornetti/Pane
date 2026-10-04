@@ -4,7 +4,7 @@ import type { JsonObject, JsonValue } from '../../../../shared/validation/bounda
  * The contract every computer-use engine implements. Cua Driver (M1) and the
  * Codex runtime (M3) sit behind it; the script host and our layer only see this.
  */
-export type EngineId = 'cua-driver' | 'codex';
+type EngineId = 'cua-driver' | 'codex';
 
 export interface EngineStatus {
   installed: boolean;

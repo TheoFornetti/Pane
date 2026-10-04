@@ -16,7 +16,3 @@ const unavailableEngine: ComputerUseEngine = {
 export function getComputerUseEngine(): ComputerUseEngine {
   return unavailableEngine;
 }
-
-export async function stopComputerUseEngine(): Promise<void> {
-  await getComputerUseEngine().stop();
-}

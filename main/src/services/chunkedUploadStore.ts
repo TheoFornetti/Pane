@@ -3,9 +3,9 @@ import { promises as fs } from 'fs';
 import path from 'path';
 
 /** Same cap as `terminal:paste-file` and desktop's upload button. */
-export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 /** Partial uploads untouched this long are deleted. */
-export const ABANDONED_UPLOAD_MS = 24 * 60 * 60 * 1000;
+const ABANDONED_UPLOAD_MS = 24 * 60 * 60 * 1000;
 
 export interface UploadStart {
   uploadId: string;

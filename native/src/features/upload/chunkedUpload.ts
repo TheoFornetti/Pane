@@ -1,7 +1,7 @@
 /** Same cap as the host's upload store and desktop's upload button. */
-export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 /** About 27 s per chunk at 50 kbps once base64-encoded, well inside every timeout on the way. */
-export const CHUNK_BYTES = 128 * 1024;
+const CHUNK_BYTES = 128 * 1024;
 /** A chunk that hasn't finished by then is treated as lost and retried. */
 const CHUNK_TIMEOUT_MS = 3 * 60 * 1000;
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000, 30000];

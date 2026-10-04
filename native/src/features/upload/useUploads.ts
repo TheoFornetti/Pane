@@ -12,7 +12,7 @@ const DONE_VISIBLE_MS = 4000;
 /** Hosts without chunked upload take one request, capped at 16 MB of base64. */
 const SINGLE_REQUEST_MAX_BYTES = 12 * 1024 * 1024;
 
-export type ReceiptState = 'queued' | 'uploading' | 'retrying' | 'failed' | 'done';
+type ReceiptState = 'queued' | 'uploading' | 'retrying' | 'failed' | 'done';
 
 export interface UploadReceipt {
   id: string;

@@ -86,6 +86,24 @@ function withUnmeteredCount(totals: Omit<UsageTotals, 'unmeteredMessageCount'> &
   return { ...totals, unmeteredMessageCount: totals.unmeteredMessageCount ?? 0 };
 }
 
+function sumTotals(rows: UsageTotals[]): UsageTotals {
+  return rows.reduce<UsageTotals>((sum, row) => ({
+    inputTokens: sum.inputTokens + row.inputTokens,
+    outputTokens: sum.outputTokens + row.outputTokens,
+    cacheReadTokens: sum.cacheReadTokens + row.cacheReadTokens,
+    cacheCreationTokens: sum.cacheCreationTokens + row.cacheCreationTokens,
+    totalTokens: sum.totalTokens + row.totalTokens,
+    messageCount: sum.messageCount + row.messageCount,
+    unmeteredMessageCount: sum.unmeteredMessageCount + row.unmeteredMessageCount,
+    estimatedCostUsd: sum.estimatedCostUsd + row.estimatedCostUsd,
+    costIncomplete: sum.costIncomplete || row.costIncomplete,
+    cacheSavingsUsd: sum.cacheSavingsUsd + row.cacheSavingsUsd,
+  }), {
+    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, totalTokens: 0,
+    messageCount: 0, unmeteredMessageCount: 0, estimatedCostUsd: 0, costIncomplete: false, cacheSavingsUsd: 0,
+  });
+}
+
 function buildSubmission(
   report: Pick<UsageReport, 'totals' | 'byModel'>,
   identity: AnalyticsIdentity,
@@ -137,13 +155,13 @@ export class LeaderboardService {
       success: true, data: (this.dependencies.usage ?? usageManager).getReport(request),
     }));
     const report = readUsageResponse(decodeBoundary(response, usageResponseSchema), usageReportSchema);
-    return {
-      totals: withUnmeteredCount(report.totals),
-      byModel: report.byModel.flatMap(row => {
-        const provider = usageProviderFrom(row.provider);
-        return provider ? [{ ...withUnmeteredCount(row), model: row.model, provider }] : [];
-      }),
-    };
+    const byModel = report.byModel.flatMap(row => {
+      const provider = usageProviderFrom(row.provider);
+      return provider ? [{ ...withUnmeteredCount(row), model: row.model, provider }] : [];
+    });
+    // The report's totals fold every row, so once a row is skipped they are rebuilt from the rest.
+    const totals = byModel.length === report.byModel.length ? withUnmeteredCount(report.totals) : sumTotals(byModel);
+    return { totals, byModel };
   }
 
   private async getUsageStatus(): Promise<{ scanning: boolean }> {

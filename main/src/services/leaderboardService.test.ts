@@ -135,6 +135,29 @@ describe('LeaderboardService usage source', () => {
     expect(submittedBody().byModel).toHaveLength(1);
   });
 
+  it('leaves a skipped provider out of the submitted totals too', async () => {
+    mocks.invoke.mockResolvedValue({
+      success: true,
+      data: {
+        totals: { ...totals(1700), messageCount: 2, estimatedCostUsd: 3, costIncomplete: true },
+        byModel: [
+          { ...totals(1200), model: 'gpt-5', provider: 'codex' },
+          { ...totals(500), model: 'gemini-3-pro', provider: 'gemini', estimatedCostUsd: 2, costIncomplete: true },
+        ],
+      },
+    });
+
+    await service.submit();
+
+    expect(submittedBody()).toMatchObject({
+      totalTokens: 1200,
+      inputTokens: 1198,
+      messageCount: 1,
+      estimatedCostUsd: 1,
+      costIncomplete: false,
+    });
+  });
+
   it('reports a rejected submission with the server status and reason', async () => {
     fetchMock.mockResolvedValue(new Response('{"error":"invalid byModel entry"}', { status: 400 }));
 

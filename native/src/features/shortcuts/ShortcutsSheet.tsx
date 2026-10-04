@@ -2,7 +2,7 @@ import { LegendList } from '@legendapp/list/react-native';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import type { RemotePwaTerminalShortcut } from '@shared/types/remoteDaemon';
 
@@ -10,7 +10,8 @@ import { useDaemon } from '@/daemon';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
-import { ComposerSheet } from '../composer/ComposerSheet';
+import { ComposerSheet, useAfterSheetCloses } from '../composer/ComposerSheet';
+import { KeyBadge } from './KeyBadge';
 import { filterShortcuts } from './shortcuts';
 
 export interface ShortcutsSheetProps {
@@ -30,28 +31,22 @@ export function ShortcutsSheet({ visible, onClose, shortcuts, loading, onPick }:
   const { profile } = useDaemon();
   const [query, setQuery] = useState('');
   const shown = filterShortcuts(shortcuts, query);
-  // iOS can't push a screen while this sheet is still sliding away.
-  const [editing, setEditing] = useState(false);
+  const { afterClose, onDismiss } = useAfterSheetCloses();
 
   const close = () => {
     setQuery('');
     onClose();
   };
   const edit = () => {
+    afterClose(() => router.push('/settings/shortcuts'));
     close();
-    if (Platform.OS === 'ios') setEditing(true);
-    else router.push('/settings/shortcuts');
   };
 
   return (
     <ComposerSheet
       visible={visible}
       onClose={close}
-      onDismiss={() => {
-        if (!editing) return;
-        setEditing(false);
-        router.push('/settings/shortcuts');
-      }}
+      onDismiss={onDismiss}
       testID="shortcuts-sheet"
     >
       <View style={styles.header}>
@@ -104,9 +99,7 @@ export function ShortcutsSheet({ visible, onClose, shortcuts, loading, onPick }:
               }}
               style={({ pressed }) => [styles.item, { borderRadius: theme.radius.md, backgroundColor: pressed ? colors.surfacePressed : 'transparent' }]}
             >
-              <View style={[styles.badge, { borderColor: colors.border }]}>
-                <Text variant="footnote" tone="muted" style={styles.badgeText}>{item.key.toUpperCase()}</Text>
-              </View>
+              <KeyBadge letter={item.key} style={styles.badge} />
               <View style={styles.body}>
                 <Text variant="callout" numberOfLines={1}>{item.label}</Text>
                 <Text variant="footnote" tone="muted" numberOfLines={2}>{item.text}</Text>
@@ -128,7 +121,6 @@ const styles = StyleSheet.create({
   message: { paddingHorizontal: 16, paddingVertical: 20 },
   list: { marginTop: 6 },
   item: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginHorizontal: 6, paddingHorizontal: 10, paddingVertical: 9 },
-  badge: { marginTop: 2, borderWidth: 1, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 },
-  badgeText: { fontSize: 11, lineHeight: 14, fontWeight: '600' },
+  badge: { marginTop: 2 },
   body: { flex: 1, minWidth: 0 },
 });

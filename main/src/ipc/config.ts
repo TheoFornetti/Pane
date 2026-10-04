@@ -3,7 +3,8 @@ import { execFile } from 'child_process';
 import type { AppServices } from './types';
 import type { AppConfig, UpdateConfigRequest } from '../types/config';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
-import type { RemotePwaAffordances, RemotePwaSessionAgents } from '../../../shared/types/remoteDaemon';
+import type { RemotePwaAffordances, RemotePwaSessionAgents, RemoteSettingsPatch } from '../../../shared/types/remoteDaemon';
+import { SHORTCUT_LETTER, sharedShortcutLetter } from '../../../shared/utils/terminalShortcuts';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import { ShellDetector } from '../utils/shellDetector';
 import { syncAutoStartOnBoot } from '../utils/autoStart';
@@ -45,11 +46,10 @@ export function registerConfigHandlers(
 
     // The one settings write a paired phone may make: the shortcut list and voice keys.
     commandRegistry.register('remote:settings:update', async (patch: PaneCommandValue): Promise<RemotePwaAffordances> => {
-      const unknown = Object.keys(decodeBoundary(patch, boundary.jsonObject)).filter(field => !REMOTE_SETTINGS_FIELDS.has(field));
+      const unknown = Object.keys(decodeBoundary(patch, boundary.jsonObject)).filter(field => !(field in remoteSettingsFields));
       if (unknown.length > 0) throw new Error(`remote:settings:update does not accept ${unknown.join(', ')}`);
-      const decoded = decodeBoundary(patch, remoteSettingsPatch);
-      const letters = (decoded.terminalShortcuts ?? []).filter(shortcut => shortcut.enabled).map(shortcut => shortcut.key);
-      const taken = letters.find((letter, index) => letters.indexOf(letter) !== index);
+      const decoded: RemoteSettingsPatch = decodeBoundary(patch, boundary.object(remoteSettingsFields));
+      const taken = sharedShortcutLetter(decoded.terminalShortcuts ?? []);
       if (taken) throw new Error(`Two enabled shortcuts use the letter ${taken}`);
       await configManager.updateConfig(decoded);
       notifySettingsChanged();
@@ -297,16 +297,14 @@ function notifySettingsChanged(): void {
 const shortcutLetter: BoundarySchema<string> = {
   decode(current) {
     const value = boundary.string.decode(current);
-    return /^[a-z]$/.test(value) ? value : current.fail('expected one letter from a to z');
+    return SHORTCUT_LETTER.test(value) ? value : current.fail('expected one letter from a to z');
   },
 };
 
-const REMOTE_SETTINGS_FIELDS = new Set(['terminalShortcuts', 'deepgramApiKey', 'openRouterApiKey', 'falApiKey']);
-const remoteSettingsPatch = boundary.object({
+const remoteSettingsFields = {
   terminalShortcuts: boundary.optional(boundary.array(boundary.object({
     id: boundary.nonEmptyString,
     label: boundary.string,
-    // Desktop binds ⌘⌥ (Ctrl+Alt) plus this letter.
     key: shortcutLetter,
     text: boundary.string,
     enabled: boundary.boolean,
@@ -314,7 +312,7 @@ const remoteSettingsPatch = boundary.object({
   deepgramApiKey: boundary.optional(boundary.nonEmptyString),
   openRouterApiKey: boundary.optional(boundary.nonEmptyString),
   falApiKey: boundary.optional(boundary.nonEmptyString),
-});
+};
 
 function buildRemotePwaSessionAgents(configuredAgent: PaneChatAgent | undefined): RemotePwaSessionAgents {
   const agents = agentPresetsForPlatform(process.platform).map(preset => preset.id);

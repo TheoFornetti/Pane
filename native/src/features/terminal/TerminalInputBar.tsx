@@ -213,7 +213,7 @@ function RecordingTime() {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
     const started = Date.now();
-    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 250);
+    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
     return () => clearInterval(timer);
   }, []);
   return (

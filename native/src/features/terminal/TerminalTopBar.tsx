@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -17,7 +17,7 @@ import { useDaemon } from '@/daemon';
 import { useTheme } from '@/theme';
 import { Icon, ListRow, Text } from '@/ui';
 
-import { ComposerSheet } from '../composer/ComposerSheet';
+import { ComposerSheet, useAfterSheetCloses } from '../composer/ComposerSheet';
 
 const STATUS_LABEL: Record<RemotePaneConnectionStatus, string> = {
   connected: 'Connected to',
@@ -41,12 +41,10 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
   const { status, lastError, lastSeenAt } = connection;
   const title = status === 'connected' ? profile.label : `${STATUS_LABEL[status]} ${profile.label}`;
   const [menuOpen, setMenuOpen] = useState(false);
-  // iOS can't present over a sheet that is still closing, so act once it has gone.
-  const [next, setNext] = useState<(() => void) | null>(null);
+  const { afterClose, onDismiss } = useAfterSheetCloses();
   const choose = (action: () => void) => {
+    afterClose(action);
     setMenuOpen(false);
-    if (Platform.OS === 'ios') setNext(() => action);
-    else action();
   };
 
   return (
@@ -107,10 +105,7 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
       <ComposerSheet
         visible={menuOpen}
         onClose={() => setMenuOpen(false)}
-        onDismiss={() => {
-          next?.();
-          setNext(null);
-        }}
+        onDismiss={onDismiss}
         testID="terminal-menu"
       >
         {onClearScrollback ? (

@@ -251,6 +251,15 @@ export interface RemotePwaTerminalShortcut {
   enabled: boolean;
 }
 
+/** What `remote:settings:update` accepts from a paired phone; the host refuses any other field. */
+export interface RemoteSettingsPatch {
+  /** Replaces the whole list. */
+  terminalShortcuts?: RemotePwaTerminalShortcut[];
+  deepgramApiKey?: string;
+  openRouterApiKey?: string;
+  falApiKey?: string;
+}
+
 export interface RemotePwaCustomCommand {
   name: string;
   command: string;

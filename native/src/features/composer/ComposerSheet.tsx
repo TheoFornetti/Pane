@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { KeyboardAvoidingView, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { useRef, type ReactNode } from 'react';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/theme';
@@ -51,6 +51,27 @@ export function ComposerSheet({ visible, onClose, onDismiss, children, testID }:
       </KeyboardAvoidingView>
     </Modal>
   );
+}
+
+/**
+ * For an action that presents something new (a picker, a screen): iOS can't
+ * present while a sheet is still sliding away. `afterClose(action)` runs it
+ * from the sheet's `onDismiss` on iOS and right away elsewhere; close the
+ * sheet in the same handler.
+ */
+export function useAfterSheetCloses() {
+  const pending = useRef<(() => void) | null>(null);
+  return {
+    afterClose: (action: () => void) => {
+      if (Platform.OS === 'ios') pending.current = action;
+      else action();
+    },
+    onDismiss: () => {
+      const action = pending.current;
+      pending.current = null;
+      action?.();
+    },
+  };
 }
 
 const styles = StyleSheet.create({

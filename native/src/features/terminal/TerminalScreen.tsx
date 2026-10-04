@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useEffectEvent, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -9,7 +9,7 @@ import type { OrchestrationSessionView } from '@shared/types/orchestrationSessio
 import type { ToolPanel } from '@shared/types/panels';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
-import { invokeChannel, useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
+import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
 import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
@@ -85,12 +85,8 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const voice = useVoiceDictation(composer.insert);
   const uploads = useUploads(paneId, composer.insert);
 
-  // Clearing remounts the terminal, which redraws it from the host's copy.
-  const [clears, setClears] = useState(0);
-  const clearScrollback = async (panelId: string) => {
-    await invokeChannel(client, 'terminal:clearScrollback', [panelId]).catch(() => undefined);
-    setClears(count => count + 1);
-  };
+  // Stop and Clear scrollback sit in the bars above the open terminal, which owns them.
+  const terminalActions = useRef<TerminalActions | null>(null);
 
   const selectPanel = (next: ToolPanel) => {
     router.setParams({ panelId: next.id });
@@ -103,18 +99,19 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
       behavior="padding"
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
-      <TerminalTopBar paneName={title} onClearScrollback={panel ? () => void clearScrollback(panel.id) : undefined} />
+      <TerminalTopBar paneName={title} onClearScrollback={panel ? () => terminalActions.current?.clearScrollback() : undefined} />
       <PanelTabs
         panels={panels}
         selectedId={panel?.id ?? null}
         onSelect={selectPanel}
         onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
-        onStop={panel ? () => void invokeChannel(client, 'terminal:input', [panel.id, KEYS.stop]).catch(() => undefined) : undefined}
+        onStop={panel ? () => terminalActions.current?.stop() : undefined}
       />
       {panel ? (
         <TerminalPanel
-          key={`${panel.id}:${clears}`}
+          key={panel.id}
           panel={panel}
+          actions={terminalActions}
           draft={draft}
           onChangeDraft={setDraft}
           composer={composer}
@@ -145,8 +142,15 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   );
 }
 
-function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, shortcuts, shortcutsLoading, onOpenShortcuts }: {
+interface TerminalActions {
+  stop: () => void;
+  clearScrollback: () => void;
+}
+
+function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads, voice, shortcuts, shortcutsLoading, onOpenShortcuts }: {
   panel: ToolPanel;
+  /** Filled with this terminal's Stop and Clear scrollback while it is open. */
+  actions: RefObject<TerminalActions | null>;
   draft: string;
   onChangeDraft: Dispatch<SetStateAction<string>>;
   composer: ReturnType<typeof useComposerDraft>;
@@ -176,6 +180,18 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
     terminal.scrollToBottom();
     void terminal.sendInput(data).catch(() => undefined);
   };
+  useEffect(() => {
+    actions.current = {
+      stop: () => sendKey(KEYS.stop),
+      clearScrollback: () => {
+        terminal.scrollToBottom();
+        void terminal.clearScrollback().catch(() => undefined);
+      },
+    };
+    return () => {
+      actions.current = null;
+    };
+  });
   // An empty box sends a bare Enter, to answer a menu or confirm a prompt.
   const submit = () => {
     const text = draft;

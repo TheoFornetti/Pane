@@ -1,4 +1,5 @@
 import type { RemotePwaTerminalShortcut } from '@shared/types/remoteDaemon';
+import { SHORTCUT_LETTER, sharedShortcutLetter } from '@shared/utils/terminalShortcuts';
 
 type Shortcut = RemotePwaTerminalShortcut;
 
@@ -19,16 +20,15 @@ export interface ShortcutProblems {
 }
 
 /**
- * What stops `draft` from saving into `list`, by field. Desktop binds each
- * enabled shortcut to ⌘⌥ (Ctrl+Alt) plus one letter, so the letter must be
- * a to z and no other enabled shortcut may use it.
+ * What stops `draft` from saving into `list`, by field: the host refuses a
+ * hotkey letter outside a to z, or one another enabled shortcut uses.
  */
 export function shortcutProblems(draft: Shortcut, list: readonly Shortcut[]): ShortcutProblems {
   const problems: ShortcutProblems = {};
   if (!draft.label.trim()) problems.label = 'Add a name';
   if (!draft.text.trim()) problems.text = 'Add the text to insert';
-  if (!/^[a-z]$/.test(draft.key)) problems.key = 'Pick a letter from A to Z';
-  else if (draft.enabled && list.some(other => other.id !== draft.id && other.enabled && other.key === draft.key)) {
+  if (!SHORTCUT_LETTER.test(draft.key)) problems.key = 'Pick a letter from A to Z';
+  else if (sharedShortcutLetter([draft, ...list.filter(other => other.id !== draft.id)]) === draft.key) {
     problems.key = `${draft.key.toUpperCase()} is taken by another shortcut`;
   }
   return problems;

@@ -1,7 +1,7 @@
-import type { RemotePwaVoiceTranscriptionAffordance } from '@shared/types/remoteDaemon';
+import type { RemotePwaVoiceTranscriptionAffordance, RemoteSettingsPatch } from '@shared/types/remoteDaemon';
 import type { VoiceTranscriptionMode } from '@shared/types/voiceTranscription';
 
-export type VoiceKey = 'deepgramApiKey' | 'openRouterApiKey' | 'falApiKey';
+export type VoiceKey = Exclude<keyof RemoteSettingsPatch, 'terminalShortcuts'>;
 
 /** Live streams to Deepgram, recorded sends a clip to fal; OpenRouter cleans up the text either way. */
 const MODE_KEYS: Record<VoiceTranscriptionMode, VoiceKey[]> = {

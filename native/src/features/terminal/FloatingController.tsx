@@ -1,6 +1,7 @@
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
-import { Pressable, StyleSheet, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 
 import { useTheme, withAlpha } from '@/theme';
@@ -84,15 +85,17 @@ function useKeyColors() {
   };
 }
 
-function PadKey({ id, label, data, ios, android, area, center = false, onKey, wake, rest }: KeyHandlers & {
+/**
+ * One controller key: wakes the controls on touch and sends `data`. `lit`
+ * (pressed, or Enter's resting fill) draws it in the accent.
+ */
+function ControllerKey({ id, label, data, shape, filled = false, children, onKey, wake, rest }: KeyHandlers & {
   id: string;
   label: string;
   data: string;
-  ios: SFSymbol;
-  android: AndroidSymbol;
-  area: object;
-  /** Enter, in the middle: filled with the accent. */
-  center?: boolean;
+  shape: StyleProp<ViewStyle>;
+  filled?: boolean;
+  children: (tint: string) => ReactNode;
 }) {
   const colors = useKeyColors();
   return (
@@ -107,41 +110,40 @@ function PadKey({ id, label, data, ios, android, area, center = false, onKey, wa
         onKey(data);
       }}
       style={({ pressed }) => [
-        styles.cell,
-        area,
+        shape,
         {
           borderColor: pressed ? colors.accent : colors.border,
-          backgroundColor: pressed || center ? colors.accent : colors.background,
+          backgroundColor: pressed || filled ? colors.accent : colors.background,
         },
       ]}
     >
-      <Icon ios={ios} android={android} size={center ? 15 : 13} color={center ? colors.onAccent : colors.label} />
+      {({ pressed }) => children(pressed || filled ? colors.onAccent : colors.label)}
     </Pressable>
   );
 }
 
-function SideKey({ label, data, onKey, wake, rest }: KeyHandlers & { label: string; data: string }) {
-  const colors = useKeyColors();
+function PadKey({ ios, android, area, center = false, ...key }: KeyHandlers & {
+  id: string;
+  label: string;
+  data: string;
+  ios: SFSymbol;
+  android: AndroidSymbol;
+  area: ViewStyle;
+  /** Enter, in the middle: filled with the accent. */
+  center?: boolean;
+}) {
   return (
-    <Pressable
-      testID={`terminal-key-${label.toLowerCase()}`}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPressIn={wake}
-      onPressOut={rest}
-      onPress={() => {
-        void Haptics.selectionAsync();
-        onKey(data);
-      }}
-      style={({ pressed }) => [
-        styles.side,
-        { borderColor: colors.border, backgroundColor: pressed ? colors.accent : colors.background },
-      ]}
-    >
-      {({ pressed }) => (
-        <Text variant="footnote" style={[styles.sideLabel, { color: pressed ? colors.onAccent : colors.label }]}>{label}</Text>
-      )}
-    </Pressable>
+    <ControllerKey {...key} shape={[styles.cell, area]} filled={center}>
+      {tint => <Icon ios={ios} android={android} size={center ? 15 : 13} color={tint} />}
+    </ControllerKey>
+  );
+}
+
+function SideKey({ label, ...key }: KeyHandlers & { label: string; data: string }) {
+  return (
+    <ControllerKey {...key} id={label.toLowerCase()} label={label} shape={styles.side}>
+      {tint => <Text variant="footnote" style={[styles.sideLabel, { color: tint }]}>{label}</Text>}
+    </ControllerKey>
   );
 }
 

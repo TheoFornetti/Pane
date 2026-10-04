@@ -1,5 +1,4 @@
 import { router, Stack } from 'expo-router';
-import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import type { RemotePwaTerminalShortcut } from '@shared/types/remoteDaemon';
@@ -16,14 +15,9 @@ export default function ShortcutsSettingsScreen() {
   const { profile } = useDaemon();
   const affordances = useAffordances();
   const save = useSaveHostSettings();
-  // Shown while a save is in flight, so a reorder or toggle doesn't snap back.
-  const [pending, setPending] = useState<RemotePwaTerminalShortcut[] | null>(null);
-  const shortcuts = pending ?? affordances.data?.terminalShortcuts ?? [];
-
-  const saveList = (next: RemotePwaTerminalShortcut[]) => {
-    setPending(next);
-    save.mutate({ terminalShortcuts: next }, { onSettled: () => setPending(null) });
-  };
+  // While a save is in flight, show what it sends, so a reorder or toggle doesn't snap back.
+  const shortcuts = (save.isPending ? save.variables.terminalShortcuts : undefined) ?? affordances.data?.terminalShortcuts ?? [];
+  const saveList = (next: RemotePwaTerminalShortcut[]) => save.mutate({ terminalShortcuts: next });
 
   return (
     <>

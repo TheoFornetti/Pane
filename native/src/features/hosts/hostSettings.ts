@@ -1,28 +1,17 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
-import type { RemotePwaAffordances, RemotePwaTerminalShortcut } from '@shared/types/remoteDaemon';
+import type { RemotePwaAffordances, RemoteSettingsPatch } from '@shared/types/remoteDaemon';
 
-import { invokeChannel, useDaemon, useDaemonEvent, useDaemonQueryKey, useInvokeQuery } from '@/daemon';
+import { invokeChannel, useDaemon, useDaemonQueryKey, useInvokeQuery } from '@/daemon';
 
 const AFFORDANCES = 'remote:pwa-affordances';
 
-/** What a phone may change on the host: the shortcut list (replaced whole) and voice keys. */
-export interface HostSettingsPatch {
-  terminalShortcuts?: RemotePwaTerminalShortcut[];
-  deepgramApiKey?: string;
-  openRouterApiKey?: string;
-  falApiKey?: string;
-}
-
 /**
- * The host's shortcuts, voice setup and agents. It refetches whenever any
- * client saves settings on the host, so an open list never goes stale.
+ * The host's shortcuts, voice setup and agents. `DaemonProvider` refetches it
+ * whenever any client saves settings on the host.
  */
 export function useAffordances() {
-  const queryClient = useQueryClient();
-  const queryKey = useDaemonQueryKey(AFFORDANCES);
-  useDaemonEvent('remote:settings-changed', () => void queryClient.invalidateQueries({ queryKey }));
   return useInvokeQuery<RemotePwaAffordances>(AFFORDANCES, [], { staleTime: 5 * 60_000 });
 }
 
@@ -32,7 +21,7 @@ export function useSaveHostSettings() {
   const queryClient = useQueryClient();
   const queryKey = useDaemonQueryKey(AFFORDANCES);
   return useMutation({
-    mutationFn: (patch: HostSettingsPatch) => invokeChannel<RemotePwaAffordances>(client, 'remote:settings:update', [patch]),
+    mutationFn: (patch: RemoteSettingsPatch) => invokeChannel<RemotePwaAffordances>(client, 'remote:settings:update', [patch]),
     onSuccess: affordances => queryClient.setQueryData(queryKey, affordances),
     // The host may have applied a save whose reply was lost; show what it has.
     onError: () => void queryClient.invalidateQueries({ queryKey }),

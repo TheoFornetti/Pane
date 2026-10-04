@@ -10,6 +10,8 @@ import type { RemotePwaTerminalShortcut } from '@shared/types/remoteDaemon';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
+import { KeyBadge } from './KeyBadge';
+
 type Shortcut = RemotePwaTerminalShortcut;
 
 const ROW = 64;
@@ -32,6 +34,8 @@ export function ShortcutList({ shortcuts, disabled, onReorder, onToggle, onOpen 
   const [dragOrder, setDragOrder] = useState<Shortcut[] | null>(null);
   const dragging = useRef<Shortcut[] | null>(null);
   const shown = dragOrder ?? [...shortcuts];
+  // Worklets copy what they capture to the UI thread, so capture the count, not the list.
+  const last = shown.length - 1;
   const draggingId = useSharedValue<string | null>(null);
   const translation = useSharedValue(0);
   const startIndex = useSharedValue(0);
@@ -75,7 +79,7 @@ export function ShortcutList({ shortcuts, disabled, onReorder, onToggle, onOpen 
           })
           .onUpdate(event => {
             translation.value = event.translationY;
-            const target = Math.max(0, Math.min(shown.length - 1, startIndex.value + Math.round(event.translationY / ROW)));
+            const target = Math.max(0, Math.min(last, startIndex.value + Math.round(event.translationY / ROW)));
             if (target !== index.value) {
               scheduleOnRN(shift, index.value, target);
               index.value = target;
@@ -97,7 +101,7 @@ export function ShortcutList({ shortcuts, disabled, onReorder, onToggle, onOpen 
             lift={{ draggingId, translation, startIndex, index }}
             disabled={disabled}
             canMoveUp={at > 0}
-            canMoveDown={at < shown.length - 1}
+            canMoveDown={at < last}
             onMove={delta => onReorder(move(shown, at, at + delta))}
             onToggle={enabled => onToggle(shortcut, enabled)}
             onOpen={() => onOpen(shortcut)}
@@ -171,9 +175,7 @@ function Row({ shortcut, first, pan, lift, disabled, canMoveUp, canMoveDown, onM
         <Text variant="body" numberOfLines={1}>{shortcut.label}</Text>
         <Text variant="footnote" tone="muted" numberOfLines={1}>{shortcut.text}</Text>
       </Pressable>
-      <View style={[styles.badge, { borderColor: colors.border }]}>
-        <Text variant="footnote" tone="muted" style={styles.badgeText}>{shortcut.key.toUpperCase()}</Text>
-      </View>
+      <KeyBadge letter={shortcut.key} />
       {/* A box of the row's height keeps the iOS switch centered. */}
       <View style={styles.switchBox}>
         <Switch
@@ -201,6 +203,4 @@ const styles = StyleSheet.create({
   handle: { width: 36, height: ROW, alignItems: 'center', justifyContent: 'center' },
   body: { flex: 1, minWidth: 0, gap: 2, justifyContent: 'center', height: ROW },
   switchBox: { height: ROW, justifyContent: 'center' },
-  badge: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 },
-  badgeText: { fontSize: 11, lineHeight: 14, fontWeight: '600' },
 });

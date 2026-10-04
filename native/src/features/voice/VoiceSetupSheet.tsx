@@ -49,9 +49,8 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
 
   const keys = voice.configured ? voiceKeysFor(mode, voice.configured) : [];
   const asked = keys.filter(item => !item.set || replacing.includes(item.key));
-  const missing = keys.filter(item => !item.set).length;
+  const missing = keys.filter(item => !item.set);
   const ready = asked.every(item => typed[item.key]?.trim()) && asked.length > 0;
-  const firstMissing = keys.find(item => !item.set);
 
   const reset = () => {
     setTyped({});
@@ -70,15 +69,13 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
     try {
       await save.mutateAsync(patch);
       // Saved on the host; the phone keeps no copy.
-      setTyped({});
-      setReplacing([]);
+      reset();
       const failure = await voice.start(mode, CONFIRM_MS);
       if (failure) {
         voice.clearError();
         setError(/\b(401|403)\b/.test(failure) ? 'The key was refused. Replace it and try again.' : maskSecrets(failure, secrets));
         return;
       }
-      reset();
       // Drop the request from the mutation's memory too.
       save.reset();
       onStarted();
@@ -95,9 +92,9 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
         <View style={styles.header}>
           <Text variant="headline" accessibilityRole="header">Set up voice on {profile.label}</Text>
           <Text variant="subhead" tone="secondary">
-            {missing === 0
+            {missing.length === 0
               ? `Dictation runs on ${profile.label}. Replace a key, then recording starts.`
-              : `Dictation runs on ${profile.label}. It needs ${missing === 1 ? 'one more key' : 'two more keys'}, then recording starts.`}
+              : `Dictation runs on ${profile.label}. It needs ${missing.length === 1 ? 'one more key' : 'two more keys'}, then recording starts.`}
           </Text>
         </View>
         {keys.map(({ key, set }) => {
@@ -154,9 +151,9 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
         })}
         <Text variant="footnote" tone="muted">
           Sent once over this phone's connection and stored on {profile.label}. Pane never shows a saved key again.
-          {firstMissing ? (
-            <Text variant="footnote" tone="accent" onPress={() => void Linking.openURL(KEY_INFO[firstMissing.key].url)}>
-              {` Get a ${KEY_INFO[firstMissing.key].name} key`}
+          {missing[0] ? (
+            <Text variant="footnote" tone="accent" onPress={() => void Linking.openURL(KEY_INFO[missing[0].key].url)}>
+              {` Get a ${KEY_INFO[missing[0].key].name} key`}
             </Text>
           ) : null}
         </Text>

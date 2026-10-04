@@ -158,6 +158,56 @@ describe('LeaderboardService usage source', () => {
     });
   });
 
+  const cursorRow = {
+    totalTokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+    messageCount: 7, unmeteredMessageCount: 7, estimatedCostUsd: 0, costIncomplete: true, cacheSavingsUsd: 0,
+    model: 'cursor', provider: 'cursor',
+  };
+
+  function submittedBodyAt(call: number): JsonObject {
+    return decodeBoundary(JSON.parse(String(fetchMock.mock.calls[call]?.[1]?.body)), boundary.jsonObject);
+  }
+
+  it('resends without Cursor rows when a server that predates Cursor rejects them', async () => {
+    mocks.invoke.mockResolvedValue({
+      success: true,
+      data: {
+        totals: { ...totals(1200), messageCount: 8, unmeteredMessageCount: 7, costIncomplete: true },
+        byModel: [{ ...totals(1200), model: 'gpt-5', provider: 'codex' }, cursorRow],
+      },
+    });
+    fetchMock
+      .mockResolvedValueOnce(new Response('{"error":"invalid byModel entry"}', { status: 400 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ rank: 2, displayName: '@windows-user', verified: true, total: 10, installs: 1 })));
+
+    await expect(service.submit()).resolves.toMatchObject({ rank: 2 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(submittedBodyAt(1)).toMatchObject({ totalTokens: 1200, messageCount: 1, costIncomplete: false, byModel: [{ provider: 'codex' }] });
+    expect(submittedBodyAt(1).byModel).toHaveLength(1);
+  });
+
+  it('does not resend a rejected submission that has no Cursor rows', async () => {
+    fetchMock.mockResolvedValue(new Response('{"error":"invalid paneVersion"}', { status: 400 }));
+
+    await expect(service.submit()).rejects.toThrow('Leaderboard submit failed (400)');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Cursor rows when trimming the model list to the server limit', async () => {
+    const metered = Array.from({ length: 60 }, (_, index) => ({ ...totals(1000 - index), model: `gpt-${index}`, provider: 'codex' }));
+    mocks.invoke.mockResolvedValue({
+      success: true,
+      data: { totals: { ...totals(60_000), messageCount: 67, unmeteredMessageCount: 7, costIncomplete: true }, byModel: [...metered, cursorRow] },
+    });
+
+    await service.submit();
+
+    const byModel = decodeBoundary(submittedBody().byModel, boundary.array(boundary.jsonObject));
+    expect(byModel).toHaveLength(50);
+    expect(byModel.filter(row => row.provider === 'cursor')).toHaveLength(1);
+  });
+
   it('reports a rejected submission with the server status and reason', async () => {
     fetchMock.mockResolvedValue(new Response('{"error":"invalid byModel entry"}', { status: 400 }));
 

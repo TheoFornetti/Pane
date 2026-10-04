@@ -104,6 +104,20 @@ function sumTotals(rows: UsageTotals[]): UsageTotals {
   });
 }
 
+const MAX_SUBMITTED_MODELS = 50;
+
+/**
+ * The model rows that fit the server's limit, largest first. Cursor rows have
+ * no tokens and would sort last, so they are kept ahead of the cut: the totals
+ * count their messages, and the rows must too.
+ */
+function submittedModelRows<Row extends Pick<UsageTotals, 'messageCount' | 'unmeteredMessageCount'>>(rows: Row[]): Row[] {
+  const unmetered = rows.filter(row => row.unmeteredMessageCount > 0);
+  const metered = rows.filter(row => row.unmeteredMessageCount === 0);
+  return [...metered.slice(0, Math.max(0, MAX_SUBMITTED_MODELS - unmetered.length)), ...unmetered]
+    .slice(0, MAX_SUBMITTED_MODELS);
+}
+
 function buildSubmission(
   report: Pick<UsageReport, 'totals' | 'byModel'>,
   identity: AnalyticsIdentity,
@@ -122,7 +136,7 @@ function buildSubmission(
     estimatedCostUsd: report.totals.estimatedCostUsd,
     costIncomplete: report.totals.costIncomplete,
     cacheSavingsUsd: report.totals.cacheSavingsUsd,
-    byModel: report.byModel.slice(0, 50).map(m => ({
+    byModel: submittedModelRows(report.byModel).map(m => ({
       model: m.model,
       provider: m.provider,
       inputTokens: m.inputTokens,
@@ -169,6 +183,21 @@ export class LeaderboardService {
       success: true, data: (this.dependencies.usage ?? usageManager).getStatus(),
     }));
     return readUsageResponse(decodeBoundary(response, usageResponseSchema), usageStatusSchema);
+  }
+
+  private async post(submission: LeaderboardSubmission): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SUBMIT_TIMEOUT_MS);
+    try {
+      return await fetch(`${LEADERBOARD_API_BASE}/api/runpane/leaderboard/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(submission),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   getStatus(): LeaderboardStatus {
@@ -256,21 +285,14 @@ export class LeaderboardService {
       toMs,
     });
 
-    const submission = buildSubmission(report, identity, app.getVersion());
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SUBMIT_TIMEOUT_MS);
-
-    const response = await fetch(
-      `${LEADERBOARD_API_BASE}/api/runpane/leaderboard/submit`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(submission),
-        signal: controller.signal,
-      },
-    );
-    clearTimeout(timer);
+    let response = await this.post(buildSubmission(report, identity, app.getVersion()));
+    if (response.status === 400 && report.byModel.some(row => row.provider === 'cursor')) {
+      // A server that predates Cursor rejects the whole submission. Send the
+      // rest once more, so Claude and Codex keep updating until it is deployed.
+      const withoutCursor = report.byModel.filter(row => row.provider !== 'cursor');
+      console.warn('[Leaderboard] Server rejected Cursor usage; resubmitting without it.');
+      response = await this.post(buildSubmission({ totals: sumTotals(withoutCursor), byModel: withoutCursor }, identity, app.getVersion()));
+    }
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');

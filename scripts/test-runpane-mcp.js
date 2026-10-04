@@ -585,10 +585,13 @@ test('js runs a script in the daemon under one connection id and returns text an
         assert.equal(reset.content[0].text, 'Script state discarded.');
       }, { args: [], env: { PANE_DIR: paneDir } });
 
-      // The last reset is the server releasing the connection as the agent disconnects.
+      // The last reset is the server releasing the connection as the agent disconnects. Windows ends
+      // the server without a signal it can handle, so the daemon's idle timeout cleans up there instead.
+      const expected = ['computer-use:run', 'computer-use:run', 'computer-use:reset'];
+      if (process.platform !== 'win32') expected.push('computer-use:reset');
       const deadline = Date.now() + 5_000;
-      while (requests.length < 4 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
-      assert.deepEqual(requests.map((request) => request.channel), ['computer-use:run', 'computer-use:run', 'computer-use:reset', 'computer-use:reset']);
+      while (requests.length < expected.length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.deepEqual(requests.map((request) => request.channel), expected);
       const ids = new Set(requests.map((request) => request.args[0].connectionId));
       assert.equal(ids.size, 1);
       assert.match([...ids][0], /^[0-9a-f-]{36}$/);

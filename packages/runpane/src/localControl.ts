@@ -384,7 +384,8 @@ interface UsageTotalsResult {
 
 interface UsageByModelResult extends UsageTotalsResult {
   model: string;
-  provider: 'claude' | 'codex' | 'cursor';
+  /** Printed as reported, so an app with a newer provider still lists its rows. */
+  provider: string;
 }
 
 interface PaneCostSliceResult extends UsageTotalsResult {
@@ -1297,7 +1298,7 @@ const usageTotalsResultSchema: BoundarySchema<UsageTotalsResult> = boundary.obje
 });
 const usageByModelResultSchema: BoundarySchema<UsageByModelResult> = boundary.object({
   model: boundary.string,
-  provider: boundary.enumeration('claude', 'codex', 'cursor'),
+  provider: boundary.string,
   inputTokens: boundary.number,
   outputTokens: boundary.number,
   cacheReadTokens: boundary.number,

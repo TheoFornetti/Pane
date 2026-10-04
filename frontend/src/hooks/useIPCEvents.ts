@@ -284,6 +284,12 @@ export function useIPCEvents() {
     });
     unsubscribeFunctions.push(unsubscribePaneOpenLink);
 
+    // A paired phone edited shortcuts or voice keys; pick them up without a restart.
+    const unsubscribeRemoteSettingsChanged = window.electronAPI.events.onRemoteSettingsChanged(() => {
+      void useConfigStore.getState().fetchConfig().catch(() => undefined);
+    });
+    unsubscribeFunctions.push(unsubscribeRemoteSettingsChanged);
+
     const unsubscribeSessionDeleted = window.electronAPI.events.onSessionDeleted((sessionData) => {
       devLog.debug('[useIPCEvents] Session deleted:', sessionData);
       const sessionId = sessionData.id;

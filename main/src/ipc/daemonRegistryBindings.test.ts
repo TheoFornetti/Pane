@@ -44,6 +44,7 @@ const PROJECT_CHANNELS = [
 
 const CONFIG_CHANNELS = [
   'remote:pwa-affordances',
+  'remote:settings:update',
   'terminal:get-shell-settings',
   'terminal:set-preferred-shell',
 ] as const;

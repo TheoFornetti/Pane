@@ -417,6 +417,8 @@ interface ElectronAPI {
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => () => void;
     onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => () => void;
+    /** A phone or another window saved settings on this host; refetch the config. */
+    onRemoteSettingsChanged: (callback: () => void) => () => void;
     onSessionDeleted: (callback: (session: Pick<Session, 'id'>) => void) => () => void;
     onSessionsLoaded: (callback: (sessions: Session[]) => void) => () => void;
     onSessionOutput: (callback: (output: SessionOutput) => void) => () => void;

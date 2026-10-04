@@ -14,7 +14,9 @@ import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
 import { insertAtSelection, type Selection } from '../composer/insertText';
+import { useAffordances } from '../hosts/hostSettings';
 import { useMarkPaneSeen } from '../panes/hooks';
+import { ShortcutsSheet } from '../shortcuts/ShortcutsSheet';
 import { AttachSheet } from '../upload/AttachSheet';
 import { UploadReceipts } from '../upload/UploadReceipts';
 import { useUploads } from '../upload/useUploads';
@@ -24,7 +26,6 @@ import { FloatingController } from './FloatingController';
 import { KEYS } from './keys';
 import { pickPanel, sessionWorkspacePanels, terminalPanels } from './panels';
 import { PanelTabs } from './PanelTabs';
-import { ShortcutsPanel } from './ShortcutsPanel';
 import { TerminalInputBar } from './TerminalInputBar';
 import { TerminalTopBar } from './TerminalTopBar';
 import { TerminalTouchSurface } from './TerminalTouchSurface';
@@ -50,7 +51,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const panelList = useInvokeQuery<ToolPanel[]>('panels:list', [paneId]);
   // A Session opens on its agent chat, wherever the desktop left the workspace.
   const hostActive = useInvokeQuery<ToolPanel | null>('panels:getActive', [paneId], { enabled: !session });
-  const affordances = useInvokeQuery<RemotePwaAffordances>('remote:pwa-affordances', [], { staleTime: 5 * 60_000 });
+  const affordances = useAffordances();
   const setActive = useInvokeMutation<[string, string]>('panels:set-active');
 
   // Tabs opened, closed or switched on the desktop show up here too.
@@ -118,6 +119,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
           voice={voice}
           shortcuts={affordances.data?.terminalShortcuts ?? []}
           shortcutsLoading={affordances.isPending}
+          // Older hosts send no change events, so read the list fresh each time.
           onOpenShortcuts={() => void affordances.refetch()}
         />
       ) : (
@@ -184,9 +186,9 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
       setClipboardError('Clipboard access is unavailable. Paste into the input instead.');
     }
   };
-  const toggleShortcuts = () => {
-    if (!showShortcuts) onOpenShortcuts();
-    setShowShortcuts(!showShortcuts);
+  const openShortcuts = () => {
+    onOpenShortcuts();
+    setShowShortcuts(true);
   };
 
   return (
@@ -226,17 +228,6 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
             <Text variant="callout" tone="secondary">Latest</Text>
           </Pressable>
         ) : null}
-        {showShortcuts ? (
-          <ShortcutsPanel
-            shortcuts={shortcuts}
-            loading={shortcutsLoading}
-            onPick={text => {
-              insertText(text);
-              setShowShortcuts(false);
-            }}
-            onClose={() => setShowShortcuts(false)}
-          />
-        ) : null}
       </View>
       <View style={[styles.inputArea, { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.border }]}>
         <UploadReceipts receipts={uploads.receipts} onCancel={uploads.cancel} onRetry={uploads.retry} />
@@ -247,7 +238,7 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
           voice={voice}
           onAttach={() => setShowAttach(true)}
           onPaste={() => void paste()}
-          onShortcuts={toggleShortcuts}
+          onShortcuts={openShortcuts}
           onCopy={() => setShowCopy(true)}
           onSelectionChange={composer.onSelectionChange}
           selection={composer.selection}
@@ -266,6 +257,13 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
         ) : null}
       </View>
       <AttachSheet visible={showAttach} onClose={() => setShowAttach(false)} onPick={source => void uploads.attach(source)} />
+      <ShortcutsSheet
+        visible={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+        shortcuts={shortcuts}
+        loading={shortcutsLoading}
+        onPick={insertText}
+      />
       <CopySheet visible={showCopy} onClose={() => setShowCopy(false)} panelId={panel.id} screenText={terminal.screenText} />
     </>
   );

@@ -768,6 +768,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('pane:open-link', wrappedCallback);
       return () => ipcRenderer.removeListener('pane:open-link', wrappedCallback);
     },
+    onRemoteSettingsChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('remote:settings-changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('remote:settings-changed', wrappedCallback);
+    },
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: RunpanePaneFocusRequestedEvent) => callback(data);
       ipcRenderer.on('pane:focus-requested', wrappedCallback);

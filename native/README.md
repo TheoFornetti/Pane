@@ -69,6 +69,8 @@ The pane screen runs xterm in a WebView. The page source is `terminal-web/page.t
 
 The pane screen's text box holds every action: Attach, Paste, Shortcuts and Copy on the left, the mic and one Send/Enter button on the right. An empty box sends a bare Enter, which answers an agent's menu; with text, the button sends the text and then Enter. Stop (Ctrl+C) sits in the tab bar, and Clear scrollback in the "…" menu. Copy shows the terminal's recent output as selectable text, and Last 200 lines swaps in the host's clean scrollback (`terminal:getScrollbackClean`).
 
+Shortcuts live on the host, in its `terminalShortcuts` config, the same list desktop binds to ⌘⌥ (Ctrl+Alt) plus a letter. The bolt opens them as a filterable sheet; Settings › Shortcuts adds, edits, reorders, turns off and deletes them. The phone saves through `remote:settings:update`, the one settings write a paired phone may make: it takes only `terminalShortcuts` (the whole list) and the voice keys, refuses any other field, and returns the refreshed `remote:pwa-affordances`. Every save emits `remote:settings-changed`, so open phones and desktop refetch. Hosts without the channel still serve the list to insert; saving there asks you to update Pane on the host.
+
 The terminal's right edge carries the scroll joystick, a D-pad with Enter in its center, and Esc and Tab. They rest at 18% opacity; touching any of them makes all of them opaque, and 3 s after the last touch they fade back together (`src/features/terminal/FloatingController.tsx`).
 
 ## Uploads

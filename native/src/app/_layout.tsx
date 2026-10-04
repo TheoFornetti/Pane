@@ -70,6 +70,8 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
         {/* The pane list is home, like the PWA's pane drawer; it draws its own header. */}
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        <Stack.Screen name="settings/shortcuts" options={{ title: 'Shortcuts' }} />
+        <Stack.Screen name="settings/shortcut" options={{ presentation: 'modal', title: 'Edit shortcut' }} />
         {/* The terminal draws the PWA's top bar itself. */}
         <Stack.Screen name="pane/[paneId]/index" options={{ headerShown: false }} />
         <Stack.Screen

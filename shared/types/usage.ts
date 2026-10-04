@@ -48,6 +48,14 @@ export const USAGE_PROVIDER_CATALOG = defineUsageProviders({
     color: '#37b877',
     limitsNote: 'Codex writes quota state into its transcripts.',
   },
+  cursor: {
+    value: 'cursor',
+    label: 'Cursor',
+    cliLabel: 'Cursor CLI',
+    vendorLabel: 'Cursor',
+    color: '#c765d6',
+    limitsNote: 'Cursor does not expose plan limits locally.',
+  },
 });
 
 export type UsageProvider = keyof typeof USAGE_PROVIDER_CATALOG;
@@ -75,6 +83,12 @@ export interface UsageEvent {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
+  /**
+   * False when the source recorded the message but not its tokens (Cursor's
+   * interactive transcripts). The token fields are then 0 as placeholders,
+   * never a measurement: reports count the message as unmetered.
+   */
+  metered: boolean;
   /** Provider session id from the transcript, when present. */
   agentSessionId: string | null;
   /** Message id — the primary dedupe key across re-scans. */

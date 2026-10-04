@@ -98,12 +98,17 @@ function isThisMachine(machine: string | undefined): boolean {
   return ['', 'local', 'localhost', 'this', host, host.replace(/\.local$/, '')].includes(wanted);
 }
 
+/** A reset sent after a cancelled or failed run; the next call waits so the reset can't land on it. */
+let pendingReset: Promise<void> | undefined;
+
 export async function callComputerUseTool(
   tool: ComputerUseTool,
   input: JsonObject,
   connectionId: string,
   signal: AbortSignal,
 ): Promise<ComputerUseToolResult> {
+  await pendingReset;
+  let runStarted = false;
   try {
     if (tool.name === 'js_reset') {
       const { machine } = decodeBoundary(input, resetInputSchema);
@@ -113,6 +118,7 @@ export async function callComputerUseTool(
     }
     const { code, machine } = decodeBoundary(input, jsInputSchema);
     if (!isThisMachine(machine)) return errorText(OTHER_MACHINE_REFUSAL);
+    runStarted = true;
     const run = invokeDaemon('computer-use:run', [{ connectionId, code }], runResultSchema, { timeoutMs: RUN_TIMEOUT_MS });
     const result = await abortable(run, signal);
     const toolResult: ComputerUseToolResult = {
@@ -124,9 +130,10 @@ export async function callComputerUseTool(
     if (!result.ok) toolResult.isError = true;
     return toolResult;
   } catch (error) {
-    if (signal.aborted) {
-      // A cancelled run may still be going; ending its host is the only way to stop it.
-      await invokeDaemon('computer-use:reset', [{ connectionId }], resetResultSchema).catch(() => undefined);
+    if (runStarted) {
+      // A cancelled or timed-out run may still be going; ending its host is the only way to stop it.
+      pendingReset = releaseComputerUseConnection(connectionId);
+      await pendingReset;
     }
     return errorText(error instanceof Error ? error.message : String(error));
   }
@@ -134,7 +141,7 @@ export async function callComputerUseTool(
 
 /** Ends this connection's script host when the agent disconnects, so it does not wait out the idle timeout. */
 export async function releaseComputerUseConnection(connectionId: string): Promise<void> {
-  await invokeDaemon('computer-use:reset', [{ connectionId }], resetResultSchema, { timeoutMs: 2_000 }).catch(() => undefined);
+  await invokeDaemon('computer-use:reset', [{ connectionId }], resetResultSchema, { timeoutMs: 2_000 }).then(() => undefined, () => undefined);
 }
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {

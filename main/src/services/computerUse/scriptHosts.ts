@@ -1,8 +1,8 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
-import { boundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { ComputerUseEngine, EngineImage, EngineResult } from './engine';
-import type { ChildMessage, ParentMessage } from './scriptHostProtocol';
+import { childMessageSchema, type ChildMessage, type ParentMessage } from './scriptHostProtocol';
 
 export interface ScriptRunResult {
   ok: boolean;
@@ -30,6 +30,21 @@ const DEFAULT_IDLE_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_RUN_TIMEOUT_MS = 300_000;
 const DEFAULT_MAX_OUTPUT_CHARS = 100_000;
 const GLOBAL_LANE = 'global';
+const STOPPED: EngineResult = { ok: false, error: { code: 'script_stopped', message: 'The script was stopped before this call ran.' } };
+
+// Script processes die with the daemon, even one stuck in a loop that never sees the IPC disconnect.
+const liveChildren = new Set<ChildProcess>();
+let exitHookInstalled = false;
+function trackChild(child: ChildProcess): void {
+  if (!exitHookInstalled) {
+    exitHookInstalled = true;
+    process.once('exit', () => {
+      for (const live of liveChildren) live.kill('SIGKILL');
+    });
+  }
+  liveChildren.add(child);
+  child.once('exit', () => liveChildren.delete(child));
+}
 
 interface Host {
   child: ChildProcess;
@@ -99,11 +114,17 @@ export class ScriptHosts {
       execArgv: [],
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     });
+    trackChild(child);
     const host: Host = { child, queue: Promise.resolve(), running: false, closed: false, lastUsedAt: new Date() };
     child.stderr?.setEncoding('utf8').on('data', (chunk: string) => {
       console.error(`[computer-use script ${connectionId}] ${chunk.trimEnd()}`);
     });
-    child.on('message', (message: ChildMessage) => this.onChildMessage(host, message));
+    child.on('message', (message: JsonValue) => {
+      // The script can reach `process.send`, so its messages are parsed like any other untrusted input.
+      const parsed = decodeOptionalBoundary(message, childMessageSchema);
+      if (parsed) this.onChildMessage(host, parsed);
+      else this.closeHost(connectionId, host, 'The script process sent a malformed message and was stopped.');
+    });
     // A failed fork or a send on a closed channel lands here; unhandled, it would take down the daemon.
     child.on('error', (error) => {
       console.error(`[computer-use script ${connectionId}] ${error.message}`);
@@ -139,9 +160,9 @@ export class ScriptHosts {
         if (this.hosts.get(connectionId) === host) {
           host.idleTimer = setTimeout(() => this.closeHost(connectionId, host, ''), this.idleTimeoutMs);
         }
-        resolve({ ...result, text: this.capOutput(result.text) });
+        resolve(result);
       };
-      host.child.send({ type: 'run', runId, code } satisfies ParentMessage);
+      host.child.send({ type: 'run', runId, code, maxOutputChars: this.maxOutputChars } satisfies ParentMessage);
     });
   }
 
@@ -150,7 +171,9 @@ export class ScriptHosts {
       host.finishRun?.({ ok: message.ok, text: message.text, images: message.images });
       return;
     }
-    void this.inLane(laneFor(message.args), () => this.callEngine(message.tool, message.args)).then((result) => {
+    // A call queued behind others must not act once its script was stopped, reset, or turned off.
+    const call = () => (host.closed ? Promise.resolve(STOPPED) : this.callEngine(message.tool, message.args));
+    void this.inLane(laneFor(message.args), call).then((result) => {
       if (!host.closed) host.child.send({ type: 'callResult', callId: message.callId, result } satisfies ParentMessage);
     });
   }
@@ -179,11 +202,6 @@ export class ScriptHosts {
     if (host.idleTimer) clearTimeout(host.idleTimer);
     host.finishRun?.({ ok: false, text: reason, images: [] });
     host.child.kill();
-  }
-
-  private capOutput(text: string): string {
-    if (text.length <= this.maxOutputChars) return text;
-    return `${text.slice(0, this.maxOutputChars)}\n[output truncated: ${text.length - this.maxOutputChars} more characters]`;
   }
 }
 

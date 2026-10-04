@@ -31,3 +31,14 @@ describe('listPaneCursorChats', () => {
     expect(listPaneCursorChats(db)).toEqual([{ chatId: CHAT_ID, cwd: '/work/pane' }]);
   });
 });
+
+describe('listPaneCursorChats with damaged panel state', () => {
+  it('skips a panel whose state is not JSON and still lists the others', () => {
+    const db = createDb();
+    db.prepare('INSERT INTO sessions (id, worktree_path, archived, updated_at) VALUES (?, ?, ?, ?)').run('pane-1', '/work/pane', 0, '2026-10-03 00:00:00');
+    db.prepare('INSERT INTO tool_panels (id, session_id, state) VALUES (?, ?, ?)').run('broken', 'pane-1', '{"customState": {');
+    addPanel(db, 'cursor', 'pane-1', { agentType: 'cursor', agentSessionId: CHAT_ID });
+
+    expect(listPaneCursorChats(db)).toEqual([{ chatId: CHAT_ID, cwd: '/work/pane' }]);
+  });
+});

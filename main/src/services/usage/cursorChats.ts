@@ -30,13 +30,19 @@ export function cursorChatIdFromTranscript(path: string): string | null {
  */
 export function listPaneCursorChats(db: Database): PaneCursorChat[] {
   const rows = decodeBoundary(db.prepare(`
-    SELECT json_extract(tp.state, '$.customState.agentSessionId') AS chat_id,
-           s.worktree_path AS cwd
-    FROM tool_panels tp
-    JOIN sessions s ON s.id = tp.session_id
-    WHERE json_extract(tp.state, '$.customState.agentType') = 'cursor'
-      AND json_type(tp.state, '$.customState.agentSessionId') = 'text'
-    ORDER BY s.updated_at DESC
+    SELECT chat_id, cwd FROM (
+      -- CASE reads the JSON only once json_valid passes, so one damaged
+      -- panel state cannot fail the whole query.
+      SELECT CASE WHEN json_valid(tp.state) THEN json_extract(tp.state, '$.customState.agentType') END AS agent_type,
+             CASE WHEN json_valid(tp.state) THEN json_type(tp.state, '$.customState.agentSessionId') END AS id_type,
+             CASE WHEN json_valid(tp.state) THEN json_extract(tp.state, '$.customState.agentSessionId') END AS chat_id,
+             s.worktree_path AS cwd,
+             s.updated_at
+      FROM tool_panels tp
+      JOIN sessions s ON s.id = tp.session_id
+    )
+    WHERE agent_type = 'cursor' AND id_type = 'text'
+    ORDER BY updated_at DESC
   `).all(), boundary.array(boundary.object({
     chat_id: boundary.string,
     cwd: boundary.nullable(boundary.string),

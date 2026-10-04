@@ -348,6 +348,23 @@ identity and Git branches separate, choosing a free worktree name for the new
 pane. Creation errors appear in a dismissible error dialog on desktop and Remote
 Pane even if the creation dialog has already closed.
 
+New native archive requests save cleanup intent alongside the archived state. Cleanup
+resumes after a restart, keeps Git branches, and never imports historical
+archives as deletion requests. The Archive Tasks area retains failure reasons
+and offers **Retry cleanup**. Restore waits until cleanup finishes so it cannot
+reuse a path that is still being deleted. An interrupted archive script is not
+replayed; its retry button explicitly skips that script. Native worktrees are
+moved to a private quarantine before files are removed in small batches. Busy
+operations retry up to three times; cross-volume renames, locked worktrees,
+and identity mismatches preserve the remaining files and show a failure.
+Cleanup also waits for known terminal and run-command processes to exit.
+If termination fails, the job retains their identities across restart and
+**Retry cleanup** retries termination before removing files.
+WSL worktrees retain the existing Git cleanup route without restart recovery.
+Unsupported native paths fail before archiving. A CLI wait timeout does not
+cancel a persisted job. Individual filesystem calls are awaited; batch budgets
+bound work between yields, not the time an operating-system call can take.
+
 Leaderboard submissions use the selected runtime's last 30 days of agent usage,
 matching the Usage page's source. When connected to a remote backend, Pane submits that
 backend's totals under the desktop app's existing leaderboard identity. If the

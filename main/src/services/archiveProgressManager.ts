@@ -34,6 +34,15 @@ export class ArchiveProgressManager extends EventEmitter {
   private isProcessing: boolean = false;
   private executingTasks = new Set<string>();
   private failures = new Map<string, string>();
+  private durableTasks?: () => ArchiveProgressTask[];
+
+  setDurableTasks(read: () => ArchiveProgressTask[]): void {
+    this.durableTasks = read;
+  }
+
+  publishDurableTasks(): void {
+    this.emitProgress();
+  }
 
   addTask(
     sessionId: string, 
@@ -145,7 +154,7 @@ export class ArchiveProgressManager extends EventEmitter {
 
   getActiveTasks(): ArchiveProgressTask[] {
     // Return a serializable version without the executeCallback
-    return Array.from(this.activeTasks.values()).map(task => ({
+    const transient = Array.from(this.activeTasks.values()).map(task => ({
       sessionId: task.sessionId,
       sessionName: task.sessionName,
       worktreeName: task.worktreeName,
@@ -156,18 +165,19 @@ export class ArchiveProgressManager extends EventEmitter {
       error: task.error,
       trashDeletion: task.trashDeletion,
     }));
+    return [...transient, ...(this.durableTasks?.() ?? [])];
   }
 
   hasActiveTasks(): boolean {
     // Consider both active tasks and queued tasks
-    const hasActive = Array.from(this.activeTasks.values()).some(
+    const hasActive = this.getActiveTasks().some(
       task => task.status !== 'completed' && task.status !== 'failed'
     );
     return hasActive || this.taskQueue.length > 0;
   }
 
   getActiveTaskCount(): number {
-    return this.activeTasks.size;
+    return this.getActiveTasks().length;
   }
 
   getQueuedTaskCount(): number {

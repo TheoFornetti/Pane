@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import type { ArchiveProgressSnapshot } from '../shared/types/archiveProgress';
 import type { PaneChatAgent } from '../shared/types/paneChat';
 import type { PanePermissionRequest, PanePermissionResponse } from '../shared/types/permissions';
 import type {
@@ -38,6 +39,8 @@ type ElectronApiMockOptions = {
   mainAnalyticsEvents?: AnalyticsMainEvent[];
   initialProjects?: JsonObject[];
   initialSessions?: JsonObject[];
+  initialArchiveProgress?: ArchiveProgressSnapshot;
+  archiveRetryError?: string;
   initialPanels?: JsonObject[];
   initialUiState?: Partial<{
     expandedProjects: number[];
@@ -452,7 +455,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         return success(clone(preferences));
       }
       if (channel === 'archive:get-progress') {
-        return success(null);
+        return success(mockOptions.initialArchiveProgress ?? null);
+      }
+      if (channel === 'archive:retry-cleanup' && mockOptions.archiveRetryError) {
+        return Promise.resolve({ success: false, error: mockOptions.archiveRetryError });
       }
       return success();
     };

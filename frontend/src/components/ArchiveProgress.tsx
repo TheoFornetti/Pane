@@ -39,6 +39,8 @@ export function ArchiveProgress() {
   const taskListId = useId();
   const [progress, setProgress] = useState<ArchiveProgressSnapshot | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<string | null>(null);
   const hasActiveTasks = (progress?.activeCount ?? 0) > 0;
 
   // Archive jobs run on the active host, so read them through the daemon and reload on a host switch.
@@ -52,6 +54,20 @@ export function ArchiveProgress() {
       console.error('Failed to load archive progress:', error);
     }
   }, []);
+
+  const retryCleanup = async (task: ArchiveProgressTask) => {
+    setRetrying(task.sessionId);
+    setRetryError(null);
+    try {
+      const response = await window.electronAPI.invoke('archive:retry-cleanup', task.sessionId, task.interruptedScript === true);
+      if (!response.success) setRetryError(response.error || 'Could not retry cleanup');
+      await loadProgress();
+    } catch (error) {
+      setRetryError(error instanceof Error ? error.message : 'Could not retry cleanup');
+    } finally {
+      setRetrying(null);
+    }
+  };
 
   useEffect(() => {
     void loadProgress();
@@ -105,6 +121,7 @@ export function ArchiveProgress() {
   return (
     <div className="border-t border-border-primary flex-shrink-0">
       <LiveRegion>{archiveAnnouncement}</LiveRegion>
+      {retryError && <div role="alert" className="px-4 py-2 text-xs text-status-error">{retryError}</div>}
       <LiveRegion mode="assertive">{failedTask ? `Archive failed for ${failedTask.sessionName}: ${failedTask.error ?? 'Unknown error'}` : ''}</LiveRegion>
       <button
         type="button"
@@ -178,6 +195,21 @@ export function ArchiveProgress() {
                   {task.error && (
                     <div className="select-text text-xs text-status-error pl-5 mt-1">
                       {task.error}
+                    </div>
+                  )}
+                  {task.cleanupId && (
+                    <div className="text-xs text-text-tertiary pl-5 space-y-1">
+                      {task.status !== 'completed' && <div>Archived; cleanup {task.status === 'failed' ? 'needs attention' : 'pending'}</div>}
+                      {task.remainingPath && task.status === 'failed' && <div className="break-all select-text">{task.remainingPath}</div>}
+                      {(task.attempts ?? 0) > 0 && <div>Failed attempts: {task.attempts}</div>}
+                      {task.nextAttempt && task.status === 'queued' && <div>Retry scheduled for {new Date(task.nextAttempt).toLocaleTimeString()}</div>}
+                      {task.status === 'failed' && (
+                        <button type="button" disabled={retrying === task.sessionId}
+                          className="text-text-primary underline disabled:opacity-50"
+                          onClick={() => void retryCleanup(task)}>
+                          {task.interruptedScript ? 'Retry cleanup (skip interrupted script)' : 'Retry cleanup'}
+                        </button>
+                      )}
                     </div>
                   )}
                   {task.status === 'removing-worktree' && (

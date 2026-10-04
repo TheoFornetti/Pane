@@ -11,7 +11,15 @@ import { formatTokens, formatUsd } from '../ui/charts/chartScales';
 import { ProviderLimitsPanel } from './ProviderLimits';
 import { LeaderboardTab } from './LeaderboardTab';
 import { PaneUsageSummary } from './PaneUsageSummary';
-import { formatSliceTokens, tokensUnreported, UNREPORTED_CHART_TEXT, UNREPORTED_COST_TITLE, unreportedLabel } from './usageMetering';
+import {
+  formatSliceCost,
+  formatSliceTokens,
+  tokensUnreported,
+  UNREPORTED_CHART_TEXT,
+  UNREPORTED_COST_TITLE,
+  unpricedCursorNote,
+  unreportedLabel,
+} from './usageMetering';
 import { UsageDateRangeDialog } from './UsageDateRangeDialog';
 import { USAGE_PROVIDERS, joinLabels } from './usageProviders';
 import { presetCalendarRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
@@ -94,11 +102,15 @@ function StatCard({
 }
 
 function PaneCostCells({ pane }: { pane: UsagePaneCostSlice }) {
-  const cost = (value: number) => pane.costIncomplete ? 'n/a' : formatUsd(value);
+  const cost = (value: number) => formatSliceCost(pane, value);
+  const cursorNote = unpricedCursorNote(pane);
   return (
     <>
       <td className="px-2 py-2 tabular-nums text-text-secondary">{formatSliceTokens(pane, pane.totalTokens)}</td>
-      <td className="px-2 py-2 tabular-nums text-text-secondary">{cost(pane.estimatedCostUsd)}</td>
+      <td className="px-2 py-2 tabular-nums text-text-secondary">
+        {cost(pane.estimatedCostUsd)}
+        {cursorNote && <div className="text-[10px] text-text-muted">{cursorNote}</div>}
+      </td>
       <td className="px-2 py-2 tabular-nums text-text-primary">{cost(pane.uncachedCostUsd)}</td>
       <td className="px-2 py-2 tabular-nums text-text-secondary">{tokensUnreported(pane) ? '—' : `${Math.round(pane.cacheHitRate * 100)}%`}</td>
       <td className="px-2 py-2 tabular-nums text-text-secondary">{formatSliceTokens(pane, pane.cacheReadTokens)}</td>
@@ -667,8 +679,8 @@ export function UsageView() {
                   <StatCard
                     label="Saved by caching"
                     value={formatTokens(report.totals.cacheReadTokens)}
-                    detail={report.totals.cacheSavingsUsd > 0 && !report.totals.costIncomplete
-                      ? `${formatUsd(report.totals.cacheSavingsUsd)} at API rates`
+                    detail={report.totals.cacheSavingsUsd > 0 && formatSliceCost({ ...report.totals, byModel: report.byModel }, report.totals.cacheSavingsUsd) !== 'n/a'
+                      ? `${formatSliceCost({ ...report.totals, byModel: report.byModel }, report.totals.cacheSavingsUsd)} at API rates`
                       : 'tokens served from cache instead of recomputed'}
                   />
                 )}

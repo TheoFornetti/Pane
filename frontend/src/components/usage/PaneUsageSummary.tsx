@@ -1,6 +1,6 @@
 import type { UsageByPaneReport } from '../../../../shared/types/usage';
-import { formatTokens, formatUsd } from '../ui/charts/chartScales';
-import { tokensUnreported } from './usageMetering';
+import { formatTokens } from '../ui/charts/chartScales';
+import { formatSliceCost, tokensUnreported, unpricedCursorNote } from './usageMetering';
 
 export function PaneUsageSummary({ byPane, trim, onTrimChange }: {
   byPane: UsageByPaneReport;
@@ -22,6 +22,14 @@ export function PaneUsageSummary({ byPane, trim, onTrimChange }: {
   // Panes whose messages recorded no tokens (Cursor) would average in as 0.
   const tokenPanes = panes.filter(pane => !tokensUnreported(pane));
   const tokenCut = trim ? Math.floor(tokenPanes.length * 0.1) : 0;
+  const priceMissing = panes.some(pane => pane.byModel.some(model => model.costIncomplete && model.unmeteredMessageCount === 0));
+  // The sample as one slice, so its cost reads the way a pane's does.
+  const sample = {
+    messageCount: panes.reduce((sum, pane) => sum + pane.messageCount, 0),
+    unmeteredMessageCount: panes.reduce((sum, pane) => sum + pane.unmeteredMessageCount, 0),
+    costIncomplete,
+    byModel: panes.flatMap(pane => pane.byModel),
+  };
   const metrics = [
     {
       label: 'Tokens / pane',
@@ -32,12 +40,13 @@ export function PaneUsageSummary({ byPane, trim, onTrimChange }: {
     },
     {
       label: 'Est. cost / pane',
-      value: !count ? '—' : costIncomplete ? 'n/a' : formatUsd(mean(panes.map(pane => pane.estimatedCostUsd))),
+      // Cursor-only panes have no dollars, so the mean is over panes that recorded tokens.
+      value: !count || tokenPanes.length === 0 ? '—' : formatSliceCost(sample, mean(tokenPanes.map(pane => pane.estimatedCostUsd))),
       detail: !costIncomplete
         ? 'All tokens at API rates, not subscription charges'
-        : panes.some(pane => pane.costIncomplete && pane.unmeteredMessageCount === 0)
-          ? unmetered ? 'Missing model prices, and Cursor messages carry no tokens' : 'Missing model prices in this sample'
-          : 'Cursor messages carry no tokens to price',
+        : unpricedCursorNote(sample) ?? (unmetered && !priceMissing
+          ? 'Cursor messages carry no tokens to price'
+          : 'Missing model prices in this sample'),
     },
     {
       label: 'Messages / pane',

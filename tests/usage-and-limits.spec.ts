@@ -573,3 +573,35 @@ test('per-pane footnote says when Tokens / pane leaves out Cursor-only panes', a
   await expect(summary).toContainText('Tokens / pane drops 1 from each end, so 8 panes remain.');
   await expect(summary).toContainText('Cost and messages drop 1 highest and 1 lowest values; 9 panes remain.');
 });
+
+test('shows known dollars with ~ when Cursor messages are mixed in', async ({ page }) => {
+  const cursorModel = { model: 'cursor', provider: 'cursor', ...cursorMessages, messageCount: 4, unmeteredMessageCount: 4 };
+  const mixedPane = {
+    ...report.byPane.panes[0],
+    messageCount: report.byPane.panes[0].messageCount + 4,
+    unmeteredMessageCount: 4,
+    costIncomplete: true,
+    byModel: [...report.byPane.panes[0].byModel, cursorModel],
+  };
+  const mixedReport = {
+    ...report,
+    totals: { ...report.totals, messageCount: report.totals.messageCount + 4, unmeteredMessageCount: 4, costIncomplete: true },
+    byModel: [...report.byModel, cursorModel],
+    byPane: { ...report.byPane, panes: [mixedPane] },
+  };
+  await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: mixedReport, activeProjectId: project.id });
+  await page.setViewportSize({ width: 1_600, height: 900 });
+  await page.goto('/');
+  await openUsageAndLimits(page);
+
+  const row = page.getByTestId('usage-by-pane').locator('tbody tr').first();
+  await expect(row).toContainText('~$5.50');
+  await expect(row).toContainText('~$5.00');
+  await expect(row).toContainText('~$4.50');
+  await expect(row).toContainText('+ 4 Cursor messages, cost not reported');
+  await expect(row).not.toContainText('n/a');
+  const summary = page.getByTestId('pane-usage-summary');
+  await expect(summary.getByText('~$5.50', { exact: true })).toBeVisible();
+  await expect(summary).toContainText('+ 4 Cursor messages, cost not reported');
+  await expect(page.getByText('~$9.87 at API rates', { exact: true })).toBeVisible();
+});

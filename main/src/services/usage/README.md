@@ -35,7 +35,10 @@ upgrading, all lands at the transcript's last write.
 Unmetered messages are counted, never priced: totals carry
 `unmeteredMessageCount`, and any slice holding one has `costIncomplete`. The
 dashboard and `runpane panes cost` show them as "N messages, tokens not
-reported". The leaderboard receives each model's message count with zero tokens
+reported". Where Cursor messages are mixed with priced Claude or Codex usage,
+those surfaces show the known dollars marked "~" with "+ N Cursor messages, cost
+not reported"; a missing model price still shows "n/a", and a Cursor-only
+selection shows no dollar figure. The leaderboard receives each model's message count with zero tokens
 and `costIncomplete`, so runpane.com marks the total as estimated. There are no
 Cursor limit bars.
 

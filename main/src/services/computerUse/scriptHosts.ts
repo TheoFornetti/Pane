@@ -104,6 +104,11 @@ export class ScriptHosts {
       console.error(`[computer-use script ${connectionId}] ${chunk.trimEnd()}`);
     });
     child.on('message', (message: ChildMessage) => this.onChildMessage(host, message));
+    // A failed fork or a send on a closed channel lands here; unhandled, it would take down the daemon.
+    child.on('error', (error) => {
+      console.error(`[computer-use script ${connectionId}] ${error.message}`);
+      this.closeHost(connectionId, host, `The script process failed: ${error.message}`);
+    });
     child.on('exit', (code, signal) => {
       host.closed = true;
       if (this.hosts.get(connectionId) === host) this.hosts.delete(connectionId);

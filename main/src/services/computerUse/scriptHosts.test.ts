@@ -69,6 +69,13 @@ describe('ScriptHosts', () => {
     expect(log.slice(0, 2).sort()).toEqual(['start type_text:a', 'start type_text:b']);
   });
 
+  it('reports a script process that cannot start instead of crashing', async () => {
+    hosts = new ScriptHosts({ getEngine: () => fakeEngine().engine, childEntry: '/nonexistent/scriptHostChild.js' });
+    const result = await hosts.run('a', 'return 1');
+    expect(result.ok).toBe(false);
+    expect(result.text).toMatch(/^The script process (failed|exited)/);
+  });
+
   it('caps long output', async () => {
     const h = makeHosts(fakeEngine().engine, { maxOutputChars: 10 });
     const result = await h.run('a', `return 'x'.repeat(25)`);

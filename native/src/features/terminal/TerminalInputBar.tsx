@@ -23,6 +23,8 @@ export interface TerminalInputBarProps {
   onShortcuts: () => void;
   /** Opens the terminal's recent output as selectable text. */
   onCopy: () => void;
+  /** The mic, when the host lacks a voice key: asks for it, then records. */
+  onSetupVoice: () => void;
   /** Where the cursor is, so inserts land there. */
   onSelectionChange: (selection: { start: number; end: number }) => void;
   /** Moves the cursor after an insert; undefined leaves it to the user. */
@@ -37,7 +39,7 @@ export interface TerminalInputBarProps {
  * far show in the box, dimmed and read-only.
  */
 export function TerminalInputBar({
-  draft, onChangeDraft, onSubmit, voice, onAttach, onPaste, onShortcuts, onCopy, onSelectionChange, selection, disabled = false,
+  draft, onChangeDraft, onSubmit, voice, onAttach, onPaste, onShortcuts, onCopy, onSetupVoice, onSelectionChange, selection, disabled = false,
 }: TerminalInputBarProps) {
   const theme = useTheme();
   const { colors } = theme;
@@ -72,7 +74,7 @@ export function TerminalInputBar({
         <BoxAction testID="terminal-shortcuts" label="Shortcuts" hint="Inserts one of the host's shortcuts" ios="bolt" android="bolt" disabled={disabled} onPress={onShortcuts} />
         <BoxAction testID="terminal-copy" label="Copy from terminal" hint="Shows recent output to copy" ios="doc.on.doc" android="content_copy" disabled={disabled} onPress={onCopy} />
         <View style={styles.spacer} />
-        <MicButton voice={voice} disabled={disabled} />
+        <MicButton voice={voice} disabled={disabled} onSetup={onSetupVoice} />
         <SendButton hasText={draft.trim().length > 0} dimmed={disabled || voiceBusy} onPress={onSubmit} />
       </View>
     </View>
@@ -158,12 +160,12 @@ function SendButton({ hasText, dimmed, onPress }: { hasText: boolean; dimmed: bo
 }
 
 /** The mic; while recording, a red stop key with the elapsed time beside it. */
-function MicButton({ voice, disabled }: { voice: Voice; disabled: boolean }) {
+function MicButton({ voice, disabled, onSetup }: { voice: Voice; disabled: boolean; onSetup: () => void }) {
   const theme = useTheme();
   const { colors } = theme;
   const listening = voice.phase === 'listening';
   const busy = voice.phase === 'starting' || voice.phase === 'transcribing';
-  const off = !listening && (disabled || busy || !voice.available);
+  const off = !listening && (disabled || busy || !voice.loaded);
 
   return (
     <View style={styles.micRow}>
@@ -172,12 +174,14 @@ function MicButton({ voice, disabled }: { voice: Voice; disabled: boolean }) {
         testID="terminal-mic"
         accessibilityRole="button"
         accessibilityLabel={listening ? 'Stop voice recording' : 'Start voice recording'}
+        accessibilityHint={voice.available || listening ? undefined : 'Sets up voice on the host first'}
         accessibilityState={{ busy, disabled: off }}
         disabled={off}
         hitSlop={4}
         onPress={() => {
           void Haptics.impactAsync(listening ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Medium);
-          voice.toggle();
+          if (voice.available || listening) voice.toggle();
+          else onSetup();
         }}
         style={({ pressed }) => [
           styles.action,

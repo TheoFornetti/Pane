@@ -21,6 +21,7 @@ import { AttachSheet } from '../upload/AttachSheet';
 import { UploadReceipts } from '../upload/UploadReceipts';
 import { useUploads } from '../upload/useUploads';
 import { useVoiceDictation } from '../voice/useVoiceDictation';
+import { VoiceSetupSheet } from '../voice/VoiceSetupSheet';
 import { CopySheet } from './CopySheet';
 import { FloatingController } from './FloatingController';
 import { KEYS } from './keys';
@@ -32,6 +33,8 @@ import { TerminalTouchSurface } from './TerminalTouchSurface';
 import { TerminalWebView } from './TerminalWebView';
 import { useTerminal } from './useTerminal';
 
+/** How long "Voice keys saved" stays above the box. */
+const NOTICE_MS = 4000;
 const PANEL_EVENTS = ['panel:created', 'panel:updated', 'panel:deleted', 'panel:activeChanged'];
 
 /**
@@ -154,10 +157,18 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
   onOpenShortcuts: () => void;
 }) {
   const theme = useTheme();
+  const hostLabel = useDaemon().profile.label;
   const terminal = useTerminal(panel.id, panel.sessionId);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
   const [showCopy, setShowCopy] = useState(false);
+  const [showVoiceSetup, setShowVoiceSetup] = useState(false);
+  const [voiceSaved, setVoiceSaved] = useState(false);
+  useEffect(() => {
+    if (!voiceSaved) return;
+    const timer = setTimeout(() => setVoiceSaved(false), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [voiceSaved]);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const disabled = terminal.status !== 'ready';
 
@@ -230,6 +241,12 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
         ) : null}
       </View>
       <View style={[styles.inputArea, { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.border }]}>
+        {voiceSaved ? (
+          <View testID="voice-keys-saved" accessibilityLiveRegion="polite" style={[styles.notice, { borderRadius: theme.radius.lg, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised }]}>
+            <Icon ios="checkmark" android="check" size={13} color={theme.colors.success} />
+            <Text variant="footnote" style={{ color: theme.colors.success }}>Voice keys saved to {hostLabel}</Text>
+          </View>
+        ) : null}
         <UploadReceipts receipts={uploads.receipts} onCancel={uploads.cancel} onRetry={uploads.retry} />
         <TerminalInputBar
           draft={draft}
@@ -240,6 +257,7 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
           onPaste={() => void paste()}
           onShortcuts={openShortcuts}
           onCopy={() => setShowCopy(true)}
+          onSetupVoice={() => setShowVoiceSetup(true)}
           onSelectionChange={composer.onSelectionChange}
           selection={composer.selection}
           disabled={disabled}
@@ -263,6 +281,15 @@ function TerminalPanel({ panel, draft, onChangeDraft, composer, uploads, voice, 
         shortcuts={shortcuts}
         loading={shortcutsLoading}
         onPick={insertText}
+      />
+      <VoiceSetupSheet
+        visible={showVoiceSetup}
+        onClose={() => setShowVoiceSetup(false)}
+        voice={voice}
+        onStarted={() => {
+          setShowVoiceSetup(false);
+          setVoiceSaved(true);
+        }}
       />
       <CopySheet visible={showCopy} onClose={() => setShowCopy(false)} panelId={panel.id} screenText={terminal.screenText} />
     </>
@@ -328,5 +355,6 @@ const styles = StyleSheet.create({
     height: 36,
     borderWidth: 1,
   },
+  notice: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1 },
   inputArea: { borderTopWidth: 1, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 8, gap: 8 },
 });

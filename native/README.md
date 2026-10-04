@@ -71,6 +71,8 @@ The pane screen's text box holds every action: Attach, Paste, Shortcuts and Copy
 
 Shortcuts live on the host, in its `terminalShortcuts` config, the same list desktop binds to ⌘⌥ (Ctrl+Alt) plus a letter. The bolt opens them as a filterable sheet; Settings › Shortcuts adds, edits, reorders, turns off and deletes them. The phone saves through `remote:settings:update`, the one settings write a paired phone may make: it takes only `terminalShortcuts` (the whole list) and the voice keys, refuses any other field, and returns the refreshed `remote:pwa-affordances`. Every save emits `remote:settings-changed`, so open phones and desktop refetch. Hosts without the channel still serve the list to insert; saving there asks you to update Pane on the host.
 
+The mic records through the host. When the host lacks a voice key, the mic opens a sheet that asks only for the missing ones (live mode: Deepgram and OpenRouter; recorded mode: fal and OpenRouter), saves them with `remote:settings:update`, and starts recording in the same tap. A live start from the sheet waits 2.5 s for Deepgram to accept the key, so a refused key shows on the sheet. Keys travel only in that request's body; the phone clears them after the save, and the host reports them only as set (`src/features/voice/VoiceSetupSheet.tsx`).
+
 The terminal's right edge carries the scroll joystick, a D-pad with Enter in its center, and Esc and Tab. They rest at 18% opacity; touching any of them makes all of them opaque, and 3 s after the last touch they fade back together (`src/features/terminal/FloatingController.tsx`).
 
 ## Uploads

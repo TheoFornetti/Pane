@@ -30,7 +30,7 @@ pnpm mobile:build:android
 
 Profiles and bearer tokens are in Keychain on iOS and EncryptedSharedPreferences on Android. Native profile removal makes a best-effort authenticated per-installation revoke before deleting the local bearer token; if the host is unreachable, rotate that host's pairing credential to revoke it server-side. Browser PWA storage remains browser `localStorage`.
 
-Voice dictation uses the transcription provider configured on the host. iOS declares its microphone purpose in `Info.plist`; Android declares `RECORD_AUDIO` and `MODIFY_AUDIO_SETTINGS`, which Capacitor requests when recording starts. Test both allowing and denying microphone access on a device before distributing a mobile build. The launcher icons reuse the existing opaque 1024px Pane artwork in `main/assets/icon.png`.
+Voice dictation uses the transcription provider configured on the host. In the Expo app (`native/`), tapping the mic on a host without voice keys opens a sheet that asks only for the missing ones (live: Deepgram and OpenRouter; recorded: fal and OpenRouter), saves them to the host through `remote:settings:update`, then starts recording. Saved keys show only as "Set"; see `native/README.md` (The composer). iOS declares its microphone purpose in `Info.plist`; Android declares `RECORD_AUDIO` and `MODIFY_AUDIO_SETTINGS`, which Capacitor requests when recording starts. Test both allowing and denying microphone access on a device before distributing a mobile build. The launcher icons reuse the existing opaque 1024px Pane artwork in `main/assets/icon.png`.
 
 ## Push delivery operator setup
 

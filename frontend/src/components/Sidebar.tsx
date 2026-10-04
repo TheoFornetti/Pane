@@ -38,6 +38,20 @@ import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStor
 
 // --- Collapsed sidebar tooltip content ---
 
+function ProjectAgentStatus({ sessions }: { sessions: readonly Session[] }) {
+  // Only this badge needs the aggregate. Subscribing the sidebar to the maps
+  // rerenders every row on background status changes, even when expanded.
+  const status = usePanelStore(state => rollupAgentDisplayStatus(
+    sessions.map(session => toAgentDisplayStatus(
+      rollupSessionAgentState(state.agentStatus, state.agentStatusSession, session.id),
+      Boolean(state.unviewedCompletedActivity[session.id]),
+    )),
+  ));
+  return status === 'unknown'
+    ? <AgentActivityDot active={false} size="sm" className="absolute bottom-0 right-0" />
+    : <AgentStatusDot status={status} size="sm" className="absolute bottom-0 right-0" />;
+}
+
 function CollapsedProjectTooltip({ project, sessionCount }: { project: Project; sessionCount: number }) {
   return (
     <div className="max-w-xs space-y-1">
@@ -244,9 +258,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const orchestrationAvailability = useOrchestrationSessionStore((state) => state.availability);
   const loadOrchestrationSessions = useOrchestrationSessionStore((state) => state.load);
   const setSidebarNavigationScope = useNavigationStore((state) => state.setSidebarNavigationScope);
-  const agentStatusByPanel = usePanelStore((state) => state.agentStatus);
-  const agentPanelSessions = usePanelStore((state) => state.agentStatusSession);
-  const unviewedBySession = usePanelStore((state) => state.unviewedCompletedActivity);
   useSessionNavigationHotkeys({ projects, sessionSortAscending });
 
   useEffect(() => {
@@ -596,12 +607,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 const isActiveProject = project.id === activeProject?.id && activeView === 'project';
                 const initial = project.name.charAt(0).toUpperCase();
                 const projectSessions = sessionsByProject.get(project.id) ?? [];
-                const projectAgentState = rollupAgentDisplayStatus(
-                  projectSessions.map(session => toAgentDisplayStatus(
-                    rollupSessionAgentState(agentStatusByPanel, agentPanelSessions, session.id),
-                    Boolean(unviewedBySession[session.id]),
-                  )),
-                );
 
                 return (
                   <div key={project.id} className="flex w-full shrink-0 flex-col items-center gap-0.5">
@@ -615,9 +620,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                         className={`${COMPACT_RAIL_BUTTON} text-xs font-semibold ${isActiveProject ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
                       >
                         {initial}
-                        {projectAgentState === 'unknown'
-                          ? <AgentActivityDot active={false} size="sm" className="absolute bottom-0 right-0" />
-                          : <AgentStatusDot status={projectAgentState} size="sm" className="absolute bottom-0 right-0" />}
+                        <ProjectAgentStatus sessions={projectSessions} />
                       </button>
                     </Tooltip>
 

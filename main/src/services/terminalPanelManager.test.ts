@@ -311,6 +311,45 @@ describe('TerminalPanelManager hidden output delivery', () => {
     vi.useRealTimers();
   });
 
+  it.each([true, false])('bounds interactive output scheduling with visibility=%s', (visible) => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const daemonSend = vi.fn();
+    setPaneRuntime({
+      eventSink: { send }, daemonEventSink: { send: daemonSend },
+      getConfigManager: () => createConfigManagerStub(),
+      getPtyHostRuntime: () => null, getWebviewContextMap: () => new Map(),
+    });
+    const manager = testAccess<HandlerAccess & TerminalPanelManager>(new TerminalPanelManager());
+    let emit: (data: string) => void = () => {};
+    const terminal = createTerminal({ outputBuffer: '', isVisible: visible });
+    Object.assign(terminal.pty, {
+      onData: (listener: (data: string) => void) => { emit = listener; return { dispose: vi.fn() }; },
+    });
+    manager.terminals.set(terminal.panelId, terminal);
+    manager.setupTerminalHandlers(terminal);
+    const sink = visible ? send : daemonSend;
+    const outputs = () => sink.mock.calls.filter(call => call[0] === 'terminal:output');
+    emit('before input');
+    vi.advanceTimersByTime(4);
+    manager.writeToTerminal(terminal.panelId, 'x');
+    expect(outputs()).toHaveLength(visible ? 1 : 0);
+    emit('after input');
+    vi.advanceTimersByTime(7);
+    expect(outputs()).toHaveLength(visible ? 1 : 0);
+    vi.advanceTimersByTime(1);
+    expect(outputs()).toHaveLength(visible ? 2 : 0);
+    vi.advanceTimersByTime(250);
+    expect(outputs()).toHaveLength(visible ? 2 : 1);
+    emit('bulk output');
+    vi.advanceTimersByTime(8);
+    expect(outputs()).toHaveLength(visible ? 2 : 1);
+    vi.advanceTimersByTime(visible ? 24 : 242);
+    expect(outputs()).toHaveLength(visible ? 3 : 2);
+    if (!visible) expect(send).not.toHaveBeenCalledWith('terminal:output', expect.anything());
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
   it('keeps visible terminal output on the combined runtime sink', () => {
     const combinedSink = { send: vi.fn() };
     const daemonSink = { send: vi.fn() };

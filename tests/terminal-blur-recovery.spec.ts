@@ -588,3 +588,24 @@ test('terminal output preserves history viewing and follows new lines at the bot
   expect(after.baseY).toBeGreaterThan(before.baseY);
   expect(after.lines.at(-1)).toBe('next output');
 });
+
+test('opt-in timing records independent numeric stages without terminal content', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pane:terminalTiming', '1'));
+  const { panel } = await bootFixture(page, 'performance', false, false, 'win32');
+  await panel.locator('.xterm-helper-textarea').focus();
+  await page.keyboard.type('private-input');
+  await mockEvaluate(page, mock => mock.emitPanelTerminalOutput(
+    'terminal-blur-session', 'blur-primary', '\rprivate-output',
+  ));
+  await page.clock.runFor(500);
+  const timings = await page.evaluate(() => window.paneTerminalTiming?.snapshot());
+  expect(timings?.inputRoundTrip.count).toBeGreaterThan(0);
+  expect(timings?.outputParse.count).toBeGreaterThan(0);
+  expect(timings?.outputRender.count).toBeGreaterThan(0);
+  expect(JSON.stringify(timings)).not.toContain('private');
+  expect(JSON.stringify(timings)).not.toContain('blur-primary');
+  for (const metric of Object.values(timings ?? {})) {
+    expect(metric.recentMs.length).toBeLessThanOrEqual(128);
+    expect(metric.recentMs.every(value => Number.isFinite(value) && value >= 0)).toBe(true);
+  }
+});

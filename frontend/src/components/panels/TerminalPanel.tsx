@@ -22,6 +22,7 @@ import {
 import { isMac } from '../../utils/platformUtils';
 import { copyTerminalText, decodeOsc52Write, isTerminalCopyShortcut } from '../../utils/terminalClipboard';
 import { sendTerminalInput } from '../../utils/terminalInput';
+import { terminalTiming } from '../../utils/terminalTiming';
 import { acknowledgeTerminalOutput } from '../../utils/terminalAck';
 import { FileEdit, FolderOpen } from 'lucide-react';
 import { useTerminalLinks } from '../terminal/hooks/useTerminalLinks';
@@ -1328,6 +1329,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           const ACK_BATCH_INTERVAL = 100; // ms
           let pendingAckBytes = 0;
           let ackFlushTimer: ReturnType<typeof setTimeout> | null = null;
+          let pendingRenderStarted: number | undefined;
+          const timingRenderDisposable = terminalTiming ? terminal.onRender(() => {
+            if (pendingRenderStarted === undefined) return;
+            terminalTiming?.record('outputRender', performance.now() - pendingRenderStarted);
+            pendingRenderStarted = undefined;
+          }) : undefined;
 
           const flushAck = () => {
             if (ackFlushTimer) {
@@ -1597,8 +1604,13 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           const writeAndAck = (output: string) => {
             if (!terminal || disposed) return;
             const outputLength = output.length;
+            const writeStarted = terminalTiming ? performance.now() : 0;
             terminal.write(output, () => {
               if (disposed) return;
+              if (terminalTiming) {
+                terminalTiming.record('outputParse', performance.now() - writeStarted);
+                pendingRenderStarted ??= writeStarted;
+              }
               markPanelOutput(panel.id);
               // Ack AFTER xterm has parsed the data — proper backpressure.
               pendingAckBytes += outputLength;
@@ -1831,6 +1843,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             unsubscribeExited();
             unsubscribeFontUpdate();
             inputDisposable.dispose();
+            timingRenderDisposable?.dispose();
             scrollDisposable.dispose();
             terminalElement?.removeEventListener('paste', handlePaste, { capture: true });
             terminalElement?.removeEventListener('dragover', handleDragOver);

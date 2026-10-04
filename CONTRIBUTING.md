@@ -135,6 +135,19 @@ pnpm test:ci:minimal
 - To measure dropped frames while terminal output streams, see the header of
   `tests/terminal-frames.perf.spec.ts`.
 
+Terminal timing diagnostics are opt-in. Set `PANE_TERMINAL_TIMING=1` before
+launching an isolated app to log bounded main-process event-loop delay and PTY
+write-call durations every ten seconds. In renderer DevTools, set
+`localStorage.setItem('pane:terminalTiming', '1')` and reload; read
+`window.paneTerminalTiming.snapshot()` for input IPC round-trip, output parsing,
+write-to-next-render notification, and renderer event-loop delay. Remove that
+storage key and reload to disable. Each metric retains at most 128 numeric
+samples and a count; no keystrokes, output, or panel identifiers are captured.
+Input round-trip ends when the input handler returns (PTY-host writes may still
+be queued), and xterm render notification is not physical display presentation.
+These independent intervals do not identify an output chunk as an input echo.
+Background browser timer throttling can affect event-loop samples.
+
 ## Code Style
 
 - TypeScript throughout; no explicit `any` (use a specific type, or `unknown`

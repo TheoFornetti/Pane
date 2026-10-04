@@ -19,6 +19,7 @@ import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { getAppDirectory } from '../utils/appDirectory';
 import { sessionWorkspacePath } from './sessionWorkspace';
 import { windowsPathToWSLMount } from '../utils/wslUtils';
+import * as shellPathUtils from '../utils/shellPath';
 
 /** In-process stand-in for a ptyHost PTY: output is whatever the test emits. */
 class FakePtyHandle implements PtyHandleLike {
@@ -169,6 +170,30 @@ describe('terminal panel persistence', () => {
     if (visible) manager.setVisibility(panel.id, true);
     return { manager, handle: ptyHost.latest() };
   }
+
+  it('does not spawn a panel closed during PATH warmup', async () => {
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
+    let finishProbe: () => void = () => {};
+    const warmup = vi.spyOn(shellPathUtils, 'warmShellPath').mockImplementation(() =>
+      new Promise<void>(resolve => { finishProbe = resolve; }));
+    const spawn = vi.spyOn(ptyHost, 'spawn');
+    const panel = makePanel('closed-during-path-probe');
+    const manager = new TerminalPanelManager(inProcessEmulatorHost);
+    managers.push(manager);
+    panelManagerMock.getPanel.mockReturnValue(panel);
+    try {
+      const startup = manager.initializeTerminal(panel, tempDir);
+      await vi.waitFor(() => expect(warmup).toHaveBeenCalledOnce());
+      panelManagerMock.getPanel.mockReturnValue(undefined);
+      finishProbe();
+      await startup;
+      expect(spawn).not.toHaveBeenCalled();
+      expect(manager.getActiveTerminals()).toEqual([]);
+    } finally {
+      warmup.mockRestore();
+      platform.mockRestore();
+    }
+  });
 
   it('streams an unviewed terminal without pausing, then applies backpressure while viewed', async () => {
     vi.useFakeTimers();

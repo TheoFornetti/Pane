@@ -17,7 +17,8 @@ import { panelManager } from './panelManager';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
-import { getShellPath } from '../utils/shellPath';
+import { getShellPath, warmShellPath } from '../utils/shellPath';
+import { terminalTiming } from '../utils/terminalTiming';
 import { trimAnsiSafe } from '../utils/ansiTrim';
 import { databaseService } from './database';
 import { ShellDetector } from '../utils/shellDetector';
@@ -42,6 +43,8 @@ import type { AgentDetectionResult, AgentState, PanelAgentStatusEvent } from '..
 import type { PaneEventArgument } from '../core/eventSink';
 
 const OUTPUT_BATCH_INTERVAL = 32; // ms (~30fps) — wider window reduces TUI flicker
+const OUTPUT_BATCH_INTERVAL_INTERACTIVE = 8;
+const INTERACTIVE_OUTPUT_WINDOW_MS = 200;
 const OUTPUT_BATCH_INTERVAL_HIDDEN = 250; // ms — background / hidden cadence to cut IPC wake-up cost
 const OUTPUT_BATCH_SIZE = 131072; // 128KB — timer-based flush preferred; size trigger is safety net
 const OUTPUT_BATCH_SIZE_HIDDEN = 80_000; // 80KB — cap hidden flush size to avoid foreground backpressure churn
@@ -274,6 +277,7 @@ interface TerminalProcess {
   agentType?: CliAgentType;
   /** Basename of the shell Pane spawned, to tell its prompt from a program running in it. */
   shellProcessName?: string;
+  interactiveOutputUntil?: number;
   /** Foreground-process and screen evidence gathered while `agentType` is unresolved. */
   agentProbe?: AgentProbe;
   /** Last status scan, reused while the emulator pushes no new screen. */
@@ -1152,6 +1156,14 @@ export class TerminalPanelManager extends EventEmitter {
     }
 
     const isLinux = process.platform === 'linux';
+    // Join startup's asynchronous probe instead of spawning a second, blocking
+    // login shell while that probe is still running. Profiles remain unchanged.
+    if (!isLinux) {
+      await warmShellPath();
+      // Closing a panel while its profile runs must not leave an orphan PTY.
+      if (!panelManager.getPanel(panel.id)) return;
+    }
+    if (this.terminals.has(panel.id)) return;
     const enhancedPath = isLinux ? (process.env.PATH || '') : getShellPath();
 
     /**
@@ -1555,10 +1567,11 @@ export class TerminalPanelManager extends EventEmitter {
         // Buffer is large enough — flush immediately
         this.flushOutputBuffer(terminal);
       } else if (!terminal.outputFlushTimer) {
-        // Schedule flush for next frame. Hidden panels use a slower cadence
-        // to cut main-process IPC wake-ups; foreground panels keep 32 ms.
+        // Hidden panels keep their slower cadence. Visible panels briefly use
+        // a tighter window after input, then return to bulk-output batching.
         const interval = terminal.isVisible
-          ? OUTPUT_BATCH_INTERVAL
+          ? (Date.now() < (terminal.interactiveOutputUntil ?? 0)
+            ? OUTPUT_BATCH_INTERVAL_INTERACTIVE : OUTPUT_BATCH_INTERVAL)
           : OUTPUT_BATCH_INTERVAL_HIDDEN;
         terminal.outputFlushTimer = setTimeout(() => {
           this.flushOutputBuffer(terminal);
@@ -1651,8 +1664,16 @@ export class TerminalPanelManager extends EventEmitter {
     }
 
     if (terminal.destroying) return;
+    // Input only changes scheduling, never identifies output as an echo. Drain
+    // an older batch now so its bulk-output timer cannot delay the next frame.
+    if (terminal.isVisible) {
+      terminal.interactiveOutputUntil = Date.now() + INTERACTIVE_OUTPUT_WINDOW_MS;
+      this.flushOutputBuffer(terminal);
+    }
     try {
+      const writeStarted = terminalTiming ? performance.now() : 0;
       terminal.pty.write(data);
+      terminalTiming?.record('ptyWrite', performance.now() - writeStarted);
     } catch (err) {
       // A write failure alone does not prove process death; onExit owns cleanup.
       console.warn(`[TerminalPanelManager] Failed to write to terminal ${panelId}:`, err);

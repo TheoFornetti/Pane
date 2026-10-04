@@ -163,7 +163,9 @@ export class ArchiveCleanupManager {
     const parent = await archiveFs.realpath(path.dirname(target)).catch(() => path.dirname(target));
     const key = archivePathKey(path.join(parent, path.basename(target)));
     for (const job of this.jobs.values()) {
-      if (job.removeWorktree && job.status !== 'completed' && key === archivePathKey(job.source)) {
+      const source = archivePathKey(job.source);
+      if (job.removeWorktree && job.status !== 'completed'
+        && (key === source || key.startsWith(`${source}${path.sep}`) || source.startsWith(`${key}${path.sep}`))) {
         throw new Error('This worktree path is reserved by unfinished archive cleanup');
       }
     }

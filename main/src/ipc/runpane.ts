@@ -836,6 +836,7 @@ export function registerRunpaneHandlers(
         try {
           const validatedPath = await validateAdoptedWorktree(services, repo, item.path);
           storedWorktreePath = validatedPath.storagePath;
+          await services.archiveCleanupManager?.assertPathAvailable(validatedPath.pathResolver.toFileSystem(storedWorktreePath));
           const existing = findSessionByWorktreeIdentity(
             databaseService.getAllSessionsIncludingArchived({ includeHidden: true }),
             validatedPath.identityPath,

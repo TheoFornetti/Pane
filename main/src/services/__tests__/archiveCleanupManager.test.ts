@@ -339,6 +339,8 @@ describe('durable archive cleanup', () => {
     const worktrees = new WorktreeManager();
     worktrees.setArchivePathGuard(target => f.manager.assertPathAvailable(target));
     await expect(worktrees.createWorktree(f.repo, 'feature', undefined, undefined, undefined, new PathResolver(f.project), f.runner)).rejects.toThrow(/reserved/);
+    await expect(worktrees.resolveWorkingDirectory(f.repo, 'feature', undefined, true, undefined, new PathResolver(f.project), f.runner)).rejects.toThrow(/reserved/);
+    await expect(f.manager.assertPathAvailable(path.join(f.source, 'nested'))).rejects.toThrow(/reserved/);
     expect(() => f.manager.assertRestorable(f.session.id)).toThrow();
     expect(existsSync(path.join(f.source, 'keep.txt'))).toBe(true);
     release();

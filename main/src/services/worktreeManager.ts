@@ -438,15 +438,19 @@ export class WorktreeManager {
       // Try claiming a pre-created reserve worktree for instant creation
       try {
         const branchName = requestedBranch ?? worktreeName;
-        const claimed = await worktreePoolManager.claimReserve(
-          projectPath,
-          effectiveBase,
-          worktreeName,
-          branchName,
-          worktreeFolder,
-          pathResolver,
-          commandRunner
-        );
+        const claimed = await withArchiveRepositoryLock(projectPath, commandRunner, async () => {
+          const target = this.getWorktreePath(projectPath, worktreeName, worktreeFolder, pathResolver);
+          await this.archivePathGuard?.(pathResolver.toFileSystem(target));
+          return worktreePoolManager.claimReserve(
+            projectPath,
+            effectiveBase,
+            worktreeName,
+            branchName,
+            worktreeFolder,
+            pathResolver,
+            commandRunner
+          );
+        });
         if (claimed) {
           // Detect base commit from the claimed worktree
           const { baseCommit } = await detectGitBase(claimed.worktreePath, commandRunner);

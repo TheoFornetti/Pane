@@ -149,7 +149,8 @@ describe('Cursor transcripts', () => {
     await mkdir(join(transcripts, NESTED_CHAT), { recursive: true });
     const paneFile = join(transcripts, `${PANE_CHAT}.jsonl`);
     await writeFile(paneFile, cursorLines('user', 'assistant', 'assistant') + JSON.stringify({ type: 'turn_ended' }) + '\n');
-    await writeFile(join(transcripts, NESTED_CHAT, `${NESTED_CHAT}.jsonl`), cursorLines('assistant'));
+    const nestedFile = join(transcripts, NESTED_CHAT, 'transcript.jsonl');
+    await writeFile(nestedFile, cursorLines('assistant'));
     await writeFile(join(transcripts, `${OUTSIDE_CHAT}.jsonl`), cursorLines('assistant', 'assistant'));
     let chats = [{ chatId: PANE_CHAT, cwd: '/work/pane' }, { chatId: NESTED_CHAT, cwd: '/work/nested' }];
     manager = new UsageManager({
@@ -161,14 +162,16 @@ describe('Cursor transcripts', () => {
 
     await manager.start();
     await vi.waitFor(() => expect(repository.countEvents()).toBe(3));
+    expect(manager.getStatus()).toMatchObject({ rootsChecked: 1, missingRoots: [] });
 
     // SAFETY: The projection names every column of the row type.
     const rows = () => db.prepare(`
       SELECT provider, metered, agent_session_id, cwd, timestamp_ms FROM usage_events ORDER BY agent_session_id
     `).all() as Array<{ provider: string; metered: number; agent_session_id: string; cwd: string; timestamp_ms: number }>;
     const mtimeMs = Math.floor((await stat(paneFile)).mtimeMs);
+    const nestedMtimeMs = Math.floor((await stat(nestedFile)).mtimeMs);
     expect(rows()).toEqual([
-      { provider: 'cursor', metered: 0, agent_session_id: NESTED_CHAT, cwd: '/work/nested', timestamp_ms: expect.any(Number) },
+      { provider: 'cursor', metered: 0, agent_session_id: NESTED_CHAT, cwd: '/work/nested', timestamp_ms: nestedMtimeMs },
       { provider: 'cursor', metered: 0, agent_session_id: PANE_CHAT, cwd: '/work/pane', timestamp_ms: mtimeMs },
       { provider: 'cursor', metered: 0, agent_session_id: PANE_CHAT, cwd: '/work/pane', timestamp_ms: mtimeMs },
     ]);
@@ -177,6 +180,26 @@ describe('Cursor transcripts', () => {
     await appendFile(paneFile, cursorLines('assistant'));
     await manager.rescan();
     expect(rows().map(row => row.agent_session_id)).toEqual([NESTED_CHAT, PANE_CHAT, PANE_CHAT]);
+  });
+
+  it('recounts a transcript rewritten in place instead of adding its messages again', async () => {
+    const file = join(home, '.cursor/projects/work-pane/agent-transcripts', `${PANE_CHAT}.jsonl`);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, cursorLines('assistant', 'assistant', 'assistant'));
+    manager = new UsageManager({
+      roots: () => [{ provider: 'cursor', path: join(home, '.cursor/projects') }],
+      repository,
+      cursorChats: () => [{ chatId: PANE_CHAT, cwd: '/work/pane' }],
+      createPriceProvider: () => ({ start() {}, stop() {} }),
+    });
+    await manager.start();
+    await vi.waitFor(() => expect(repository.countEvents()).toBe(3));
+
+    // Shorter than before, so the scan reads it from the top.
+    await writeFile(file, cursorLines('assistant', 'assistant'));
+    await manager.rescan();
+
+    expect(repository.countEvents()).toBe(2);
   });
 });
 

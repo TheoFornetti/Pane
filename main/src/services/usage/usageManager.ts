@@ -295,11 +295,6 @@ export class UsageManager {
     }
   }
 
-  /**
-   * Index one transcript, resuming from its stored cursor. Files whose size
-   * and mtime are unchanged are skipped without being opened, which is what
-   * makes subsequent launches fast.
-   */
   /** Pane-launched Cursor chats by id; none when Pane's own records cannot be read. */
   private readCursorChats(): Map<string, PaneCursorChat> {
     try {
@@ -311,6 +306,11 @@ export class UsageManager {
     }
   }
 
+  /**
+   * Index one transcript, resuming from its stored cursor. Files whose size
+   * and mtime are unchanged are skipped without being opened, which is what
+   * makes subsequent launches fast.
+   */
   private async scanOne(
     path: string,
     provider: UsageProvider,
@@ -332,6 +332,10 @@ export class UsageManager {
       if (isFileUnchanged(recorded, stats)) return;
 
       const startOffset = resolveStartOffset(recorded, stats.size);
+      // Cursor lines have no message id, so their rows are keyed by byte offset.
+      // A rewritten transcript moves its lines, and only dropping the old rows
+      // keeps them from being counted twice.
+      if (attribution && recorded && startOffset === 0) this.repository.forgetFile(path);
       // A file being re-read from the top states its own attribution again, and
       // a stored context would describe bytes that are no longer there — this is
       // the rotation and truncation case.

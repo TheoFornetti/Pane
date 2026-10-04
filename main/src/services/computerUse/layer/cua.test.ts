@@ -30,7 +30,7 @@ function fakeDesktop(options: { screens: Array<{ elements: UiElement[]; busy?: b
       const screen = options.screens[Math.min(reads, options.screens.length - 1)];
       reads += 1;
       log.push(`read ${window.id}${read.screenshot ? ' +shot' : ''}`);
-      return { title: window.title, elements: screen.elements, busy: screen.busy === true, ...(read.screenshot ? { screenshot: SHOT } : {}) };
+      return { title: window.title, elements: screen.elements, busy: screen.busy === true, screenshot: read.screenshot ? SHOT : undefined };
     },
     async perform(_window, action: DriverAction, { foreground }): Promise<ActionOutcome> {
       log.push(`${action.kind}${foreground ? ' (foreground)' : ''} ${JSON.stringify(action)}`);
@@ -105,9 +105,9 @@ describe('cua layer', () => {
     const app = await desk.cua.getApp('Notes');
     await app.click(2, { mouseButton: 'r' });
     await app.pressKey('super+a');
-    expect(desk.steps.map(({ at, ...rest }) => ({ ...rest, at: typeof at }))).toEqual([
-      { index: 0, action: 'click', args: { app: 'Notes', windowId: 7, target: 2, button: 'right', clickCount: 1 }, result: 'ok', screenshotPng: 'c2hvdA==', at: 'string' },
-      { index: 1, action: 'pressKey', args: { app: 'Notes', windowId: 7, key: 'super+a' }, result: 'ok', screenshotPng: 'c2hvdA==', at: 'string' },
+    expect(desk.steps).toEqual([
+      { index: 0, action: 'click', args: { app: 'Notes', windowId: 7, target: 2, button: 'right', clickCount: 1 }, result: 'ok', screenshotPng: 'c2hvdA==', at: expect.any(String) },
+      { index: 1, action: 'pressKey', args: { app: 'Notes', windowId: 7, key: 'super+a' }, result: 'ok', screenshotPng: 'c2hvdA==', at: expect.any(String) },
     ]);
   });
 

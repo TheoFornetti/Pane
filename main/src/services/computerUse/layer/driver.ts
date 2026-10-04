@@ -23,6 +23,8 @@ export interface AppInfo {
   /** Bundle id, path or other id the engine accepts. */
   id: string;
   displayName?: string;
+  /** Where the app is installed, when the engine reports it. */
+  path?: string;
   isRunning?: boolean;
   pid?: number;
 }

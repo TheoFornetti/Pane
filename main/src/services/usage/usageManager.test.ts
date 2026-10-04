@@ -116,6 +116,7 @@ beforeEach(async () => {
       output_tokens INTEGER NOT NULL DEFAULT 0,
       cache_read_tokens INTEGER NOT NULL DEFAULT 0,
       cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+      metered INTEGER NOT NULL DEFAULT 1,
       agent_session_id TEXT,
       cwd TEXT,
       source_path TEXT NOT NULL

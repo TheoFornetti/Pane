@@ -112,9 +112,13 @@ export interface UsageTotals {
   cacheReadTokens: number;
   cacheCreationTokens: number;
   totalTokens: number;
+  /** Every recorded message, metered or not. */
   messageCount: number;
+  /** Messages whose source recorded no tokens (Cursor). A subset of messageCount. */
+  unmeteredMessageCount: number;
+  /** Cost of the metered, priced part only. */
   estimatedCostUsd: number;
-  /** True when at least one model in the range had no price entry. */
+  /** True when a model in the range had no price entry, or any message was unmetered. */
   costIncomplete: boolean;
   /**
    * What the cached input would have cost at the full input rate, minus what

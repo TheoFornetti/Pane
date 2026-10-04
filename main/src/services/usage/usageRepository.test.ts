@@ -45,6 +45,7 @@ function createDb() {
       output_tokens INTEGER NOT NULL DEFAULT 0,
       cache_read_tokens INTEGER NOT NULL DEFAULT 0,
       cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+      metered INTEGER NOT NULL DEFAULT 1,
       agent_session_id TEXT,
       cwd TEXT,
       source_path TEXT NOT NULL
@@ -200,5 +201,34 @@ describe('UsageRepository.getRateLimits', () => {
 
     const limits = repo.getRateLimits(NOW);
     expect(limits).toHaveLength(2);
+  });
+});
+
+describe('UsageRepository.commitFile', () => {
+  it('stores whether each event was metered', () => {
+    const base = {
+      provider: 'cursor' as const,
+      timestampMs: NOW,
+      model: 'cursor',
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      agentSessionId: 'chat-1',
+      messageId: null,
+      cwd: '/repo',
+    };
+    repo.commitFile(
+      {
+        path: '/t.jsonl', provider: 'cursor', sizeBytes: 10, mtimeMs: NOW, offsetBytes: 10,
+        lastScannedMs: NOW, parserVersion: 4, parseContext: null,
+      },
+      [{ event: { ...base, metered: false }, byteOffset: 0 }, { event: { ...base, metered: true }, byteOffset: 5 }],
+      NOW,
+    );
+
+    // SAFETY: SELECT metered returns the one integer column.
+    const rows = db.prepare('SELECT metered FROM usage_events ORDER BY id').all() as Array<{ metered: number }>;
+    expect(rows.map(row => row.metered)).toEqual([0, 1]);
   });
 });

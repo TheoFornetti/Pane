@@ -12,7 +12,7 @@ import type {
   LeaderboardResponse,
   LeaderboardStatus,
 } from '../../../shared/types/leaderboard';
-import { USAGE_PROVIDER_IDS, type UsageReport, type UsageReportRequest } from '../../../shared/types/usage';
+import { usageProviderFrom, type UsageReport, type UsageReportRequest, type UsageTotals } from '../../../shared/types/usage';
 import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 
 const LEADERBOARD_API_BASE =
@@ -27,6 +27,8 @@ const usageTotalsFields = {
   cacheReadTokens: boundary.number,
   cacheCreationTokens: boundary.number,
   messageCount: boundary.number,
+  // Absent from backends that predate unmetered (Cursor) messages.
+  unmeteredMessageCount: boundary.optional(boundary.number),
   estimatedCostUsd: boundary.number,
   costIncomplete: boundary.boolean,
   cacheSavingsUsd: boundary.number,
@@ -37,7 +39,8 @@ const usageReportSchema = boundary.object({
   byModel: boundary.array(boundary.object({
     ...usageTotalsFields,
     model: boundary.string,
-    provider: boundary.enumeration(...USAGE_PROVIDER_IDS),
+    // A newer backend may report a provider this version does not know; that row is skipped.
+    provider: boundary.string,
   })),
 });
 const usageStatusSchema = boundary.object({ scanning: boundary.boolean });
@@ -79,6 +82,10 @@ function resolveDoNotTrack(): boolean {
   return true;
 }
 
+function withUnmeteredCount(totals: Omit<UsageTotals, 'unmeteredMessageCount'> & { unmeteredMessageCount?: number }): UsageTotals {
+  return { ...totals, unmeteredMessageCount: totals.unmeteredMessageCount ?? 0 };
+}
+
 function buildSubmission(
   report: Pick<UsageReport, 'totals' | 'byModel'>,
   identity: AnalyticsIdentity,
@@ -105,6 +112,7 @@ function buildSubmission(
       cacheReadTokens: m.cacheReadTokens,
       cacheCreationTokens: m.cacheCreationTokens,
       totalTokens: m.totalTokens,
+      messageCount: m.messageCount,
       estimatedCostUsd: m.estimatedCostUsd,
       costIncomplete: m.costIncomplete,
     })),
@@ -128,7 +136,14 @@ export class LeaderboardService {
     const response = await (this.dependencies.runtime ?? remotePaneClientController).invoke('usage:get-report', [request], async () => ({
       success: true, data: (this.dependencies.usage ?? usageManager).getReport(request),
     }));
-    return readUsageResponse(decodeBoundary(response, usageResponseSchema), usageReportSchema);
+    const report = readUsageResponse(decodeBoundary(response, usageResponseSchema), usageReportSchema);
+    return {
+      totals: withUnmeteredCount(report.totals),
+      byModel: report.byModel.flatMap(row => {
+        const provider = usageProviderFrom(row.provider);
+        return provider ? [{ ...withUnmeteredCount(row), model: row.model, provider }] : [];
+      }),
+    };
   }
 
   private async getUsageStatus(): Promise<{ scanning: boolean }> {

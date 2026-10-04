@@ -90,8 +90,8 @@ export class UsageRepository {
       INSERT OR IGNORE INTO usage_events (
         id, provider, timestamp_ms, model,
         input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-        agent_session_id, cwd, source_path
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        metered, agent_session_id, cwd, source_path
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const upsertFile = this.db.prepare(`
@@ -122,6 +122,7 @@ export class UsageRepository {
           event.outputTokens,
           event.cacheReadTokens,
           event.cacheCreationTokens,
+          event.metered ? 1 : 0,
           event.agentSessionId,
           event.cwd,
           cursor.path

@@ -19,6 +19,7 @@ function createDb() {
       output_tokens INTEGER NOT NULL DEFAULT 0,
       cache_read_tokens INTEGER NOT NULL DEFAULT 0,
       cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+      metered INTEGER NOT NULL DEFAULT 1,
       agent_session_id TEXT,
       cwd TEXT,
       source_path TEXT NOT NULL
@@ -50,11 +51,12 @@ function seed(options: {
   cacheRead?: number;
   cacheWrite?: number;
   cwd?: string | null;
+  metered?: boolean;
 }) {
   seq += 1;
   db.prepare(`
-    INSERT INTO usage_events (id, provider, timestamp_ms, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cwd, source_path)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO usage_events (id, provider, timestamp_ms, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cwd, source_path, metered)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     `e${seq}`,
     options.provider ?? 'claude',
@@ -65,7 +67,8 @@ function seed(options: {
     options.cacheRead ?? 0,
     options.cacheWrite ?? 0,
     options.cwd ?? null,
-    '/t.jsonl'
+    '/t.jsonl',
+    options.metered === false ? 0 : 1
   );
 }
 
@@ -147,6 +150,33 @@ describe('UsageAggregator.getTotals', () => {
 
     // Opus input is $15/Mtok and Sonnet $3/Mtok.
     expect(aggregator.getTotals(NOW - DAY_MS, NOW).estimatedCostUsd).toBeCloseTo(18, 6);
+  });
+
+  it('counts Cursor messages as unmetered and never as a complete cost', () => {
+    seed({ timestampMs: NOW - 3 * HOUR_MS, model: 'claude-sonnet-5', input: 1_000_000 });
+    seed({ timestampMs: NOW - 3 * HOUR_MS, provider: 'cursor', model: 'cursor', metered: false });
+    seed({ timestampMs: NOW - 10 * 60_000, provider: 'cursor', model: 'cursor', metered: false });
+
+    expect(aggregator.getTotals(NOW - DAY_MS, NOW)).toMatchObject({
+      messageCount: 3,
+      unmeteredMessageCount: 2,
+      inputTokens: 1_000_000,
+      estimatedCostUsd: 3,
+      costIncomplete: true,
+    });
+    expect(aggregator.getByModel(NOW - DAY_MS, NOW, ['cursor'])).toEqual([expect.objectContaining({
+      provider: 'cursor',
+      model: 'cursor',
+      totalTokens: 0,
+      messageCount: 2,
+      unmeteredMessageCount: 2,
+      estimatedCostUsd: 0,
+      costIncomplete: true,
+    })]);
+    expect(aggregator.getTotals(NOW - DAY_MS, NOW, ['claude'])).toMatchObject({
+      unmeteredMessageCount: 0,
+      costIncomplete: false,
+    });
   });
 
   it('leaves out rows from a provider this version does not know', () => {

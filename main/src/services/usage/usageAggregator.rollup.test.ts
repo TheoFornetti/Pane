@@ -37,7 +37,8 @@ function createDb() {
       id TEXT PRIMARY KEY, provider TEXT NOT NULL, timestamp_ms INTEGER NOT NULL,
       model TEXT NOT NULL, input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-      cache_creation_tokens INTEGER NOT NULL DEFAULT 0, agent_session_id TEXT, cwd TEXT,
+      cache_creation_tokens INTEGER NOT NULL DEFAULT 0, metered INTEGER NOT NULL DEFAULT 1,
+      agent_session_id TEXT, cwd TEXT,
       source_path TEXT NOT NULL
     );
     CREATE TABLE sessions (
@@ -209,5 +210,33 @@ describe.each([
     expect(keyed(aggregator.getSeries(fromMs, toMs, 'day', undefined, boundaries).map(row => ({
       groupKey: row.bucketStartMs, ...tokensOf(row),
     })))).toEqual(keyed(referenceGroups(db, dayOf, fromMs, toMs)));
+  });
+});
+
+describe('ensureUsageRollup', () => {
+  it('rebuilds a rollup from before unmetered events, keeping their counts', () => {
+    const db = createDb();
+    db.exec(`
+      CREATE TABLE usage_hourly (
+        hour_ms INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, cwd TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+        cache_read_tokens INTEGER NOT NULL, cache_creation_tokens INTEGER NOT NULL,
+        message_count INTEGER NOT NULL, first_ms INTEGER NOT NULL, last_ms INTEGER NOT NULL,
+        PRIMARY KEY (hour_ms, provider, model, cwd)
+      ) WITHOUT ROWID;
+    `);
+    db.prepare(`
+      INSERT INTO usage_events (id, provider, timestamp_ms, model, metered, source_path)
+      VALUES ('a', 'cursor', ?, 'cursor', 0, '/t.jsonl'), ('b', 'cursor', ?, 'cursor', 0, '/t.jsonl')
+    `).run(START + HOUR_MS, START + HOUR_MS + 1);
+
+    ensureUsageRollup(db);
+    db.prepare(`
+      INSERT INTO usage_events (id, provider, timestamp_ms, model, metered, source_path)
+      VALUES ('c', 'cursor', ?, 'cursor', 0, '/t.jsonl')
+    `).run(START + HOUR_MS + 2);
+
+    const totals = new UsageAggregator(db).getTotals(START, START + DAY_MS);
+    expect(totals).toMatchObject({ messageCount: 3, unmeteredMessageCount: 3 });
   });
 });

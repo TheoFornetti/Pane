@@ -7,7 +7,6 @@ import {
 } from 'expo-audio';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 
-import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 import type {
   VoiceStreamingFinalizeRequest,
   VoiceTranscriptionMode,
@@ -15,7 +14,9 @@ import type {
   VoiceTranscriptionResult,
 } from '@shared/types/voiceTranscription';
 
-import { invokeChannel, useDaemon, useInvokeQuery } from '@/daemon';
+import { invokeChannel, useDaemon } from '@/daemon';
+
+import { useAffordances } from '../hosts/hostSettings';
 
 import { LiveTranscript, voiceStreamUrl, wavStreamHeader } from './liveTranscript';
 
@@ -25,6 +26,7 @@ const OPEN_TIMEOUT_MS = 8_000;
 const KEEPALIVE_MS = 5_000;
 /** Time for Deepgram to return the last words after `Finalize`. */
 const FINALIZE_WAIT_MS = 800;
+const CONFIRM_POLL_MS = 100;
 
 export type DictationPhase = 'idle' | 'starting' | 'listening' | 'transcribing';
 
@@ -35,7 +37,7 @@ export type DictationPhase = 'idle' | 'starting' | 'listening' | 'transcribing';
  */
 export function useVoiceDictation(onText: (text: string) => void) {
   const { client, profile } = useDaemon();
-  const affordances = useInvokeQuery<RemotePwaAffordances>('remote:pwa-affordances', [], { staleTime: 5 * 60_000 });
+  const affordances = useAffordances();
   const voice = affordances.data?.voiceTranscription;
   const mode: VoiceTranscriptionMode | null = voice?.availableModes.includes(voice.defaultMode)
     ? voice.defaultMode
@@ -51,6 +53,8 @@ export function useVoiceDictation(onText: (text: string) => void) {
   const startedAt = useRef(0);
   const keepAlive = useRef<ReturnType<typeof setInterval> | null>(null);
   const mounted = useRef(true);
+  // The mode this recording started in; a save from the setup sheet can start one the affordances don't show yet.
+  const activeMode = useRef<VoiceTranscriptionMode>('streaming');
 
   const { stream } = useAudioStream({
     sampleRate: SAMPLE_RATE,
@@ -81,7 +85,8 @@ export function useVoiceDictation(onText: (text: string) => void) {
     setError(cause instanceof Error ? cause.message : String(cause));
   };
 
-  const startStreaming = async () => {
+  /** With `confirmMs`, also waits that long for the host or Deepgram to refuse the key. */
+  const startStreaming = async (confirmMs: number) => {
     const live = new LiveTranscript(Date.now());
     transcript.current = live;
     sentHeader.current = false;
@@ -112,6 +117,11 @@ export function useVoiceDictation(onText: (text: string) => void) {
     keepAlive.current = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'KeepAlive' }));
     }, KEEPALIVE_MS);
+    // The host accepts the socket before Deepgram answers, so a refused key closes it a moment later.
+    for (let waited = 0; waited < confirmMs; waited += CONFIRM_POLL_MS) {
+      await new Promise(resolve => setTimeout(resolve, CONFIRM_POLL_MS));
+      if (socket.current !== ws) throw new Error(serverError ?? 'The voice connection closed.');
+    }
   };
 
   const finishStreaming = async () => {
@@ -161,7 +171,7 @@ export function useVoiceDictation(onText: (text: string) => void) {
     clearTimers();
     setPhase('transcribing');
     try {
-      const text = mode === 'streaming' ? await finishStreaming() : await finishRecording();
+      const text = activeMode.current === 'streaming' ? await finishStreaming() : await finishRecording();
       if (text.trim()) onText(text.trim());
       setPhase('idle');
       setPreview('');
@@ -180,8 +190,15 @@ export function useVoiceDictation(onText: (text: string) => void) {
     return () => clearTimeout(limit);
   }, [phase]);
 
-  const start = async () => {
-    if (!mode || phase !== 'idle') return;
+  /**
+   * Starts recording in `forced`, or the host's mode. Resolves to why it
+   * could not start, or null. `confirmMs` holds a live start that long, so a
+   * just-saved key the provider refuses fails here instead of a moment later.
+   */
+  const start = async (forced?: VoiceTranscriptionMode, confirmMs = 0): Promise<string | null> => {
+    const startMode = forced ?? mode;
+    if (!startMode || phase !== 'idle') return 'Voice is not set up on this host.';
+    activeMode.current = startMode;
     setError(null);
     setPreview('');
     setPhase('starting');
@@ -190,12 +207,14 @@ export function useVoiceDictation(onText: (text: string) => void) {
       if (!permission.granted) throw new Error('Allow microphone access in Settings to dictate.');
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       startedAt.current = Date.now();
-      if (mode === 'streaming') await startStreaming();
+      if (startMode === 'streaming') await startStreaming(confirmMs);
       else await startRecording();
       setPhase('listening');
+      return null;
     } catch (cause) {
       stream.stop();
       fail(cause);
+      return cause instanceof Error ? cause.message : String(cause);
     }
   };
 
@@ -212,7 +231,13 @@ export function useVoiceDictation(onText: (text: string) => void) {
   }, []);
 
   return {
+    /** The host has the keys for at least one mode. */
     available: mode !== null,
+    /** False until the host's voice setup has loaded. */
+    loaded: voice !== undefined,
+    /** Which keys the host has, never their values. */
+    configured: voice?.configured,
+    start,
     phase,
     preview,
     error,

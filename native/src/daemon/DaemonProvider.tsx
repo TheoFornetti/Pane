@@ -53,6 +53,12 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
     };
   }, [client, profile.id, queryClient]);
 
+  // Any client saved settings on the host (shortcuts, voice keys): refetch them once.
+  useEffect(() => client.onEvent(event => {
+    if (event.type !== 'daemon-event' || event.payload.channel !== 'remote:settings-changed') return;
+    void queryClient.invalidateQueries({ queryKey: [profile.id, 'remote:pwa-affordances'] }, { cancelRefetch: false });
+  }), [client, profile.id, queryClient]);
+
   // The client gives up after its reconnect backoff (about 30 s). A phone
   // changing networks or waking a sleeping Mac needs longer, so keep trying
   // while the app is open.

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   cancelAnimation,
@@ -15,7 +15,9 @@ import type { RemotePaneConnectionStatus } from '@shared/types/remoteDaemon';
 
 import { useDaemon } from '@/daemon';
 import { useTheme } from '@/theme';
-import { Icon, Text } from '@/ui';
+import { Icon, ListRow, Text } from '@/ui';
+
+import { ComposerSheet, useAfterSheetCloses } from '../composer/ComposerSheet';
 
 const STATUS_LABEL: Record<RemotePaneConnectionStatus, string> = {
   connected: 'Connected to',
@@ -27,16 +29,23 @@ const STATUS_LABEL: Record<RemotePaneConnectionStatus, string> = {
 
 /**
  * The web app's status bar, drawn inside the top safe area: back, the host's
- * connection dot, label and address, and a button to host settings. The pane
- * name follows the host label, where the web app has none.
+ * connection dot, label and address, and a "…" menu with host settings and,
+ * when a terminal is open, Clear scrollback. The pane name follows the host
+ * label, where the web app has none.
  */
-export function TerminalTopBar({ paneName }: { paneName: string }) {
+export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: string; onClearScrollback?: () => void }) {
   const theme = useTheme();
   const { colors } = theme;
   const insets = useSafeAreaInsets();
   const { profile, connection } = useDaemon();
   const { status, lastError, lastSeenAt } = connection;
   const title = status === 'connected' ? profile.label : `${STATUS_LABEL[status]} ${profile.label}`;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { afterClose, onDismiss } = useAfterSheetCloses();
+  const choose = (action: () => void) => {
+    afterClose(action);
+    setMenuOpen(false);
+  };
 
   return (
     <View style={{ paddingTop: insets.top, backgroundColor: colors.surface, borderBottomColor: colors.border, borderBottomWidth: 1 }}>
@@ -80,22 +89,41 @@ export function TerminalTopBar({ paneName }: { paneName: string }) {
           </View>
         </View>
         <Pressable
-          testID="open-settings"
+          testID="terminal-more"
           accessibilityRole="button"
-          accessibilityLabel="Host settings"
-          onPress={() => router.push('/settings')}
+          accessibilityLabel="More"
+          hitSlop={4}
+          onPress={() => setMenuOpen(true)}
           style={({ pressed }) => [
-            styles.settings,
-            {
-              borderRadius: theme.radius.md,
-              borderColor: colors.border,
-              backgroundColor: pressed ? colors.surfacePressed : colors.surface,
-            },
+            styles.more,
+            { borderRadius: theme.radius.md, backgroundColor: pressed ? colors.surfacePressed : 'transparent' },
           ]}
         >
-          <Icon ios="gearshape" android="settings" size={16} color={colors.textSecondary} />
+          <Icon ios="ellipsis" android="more_horiz" size={20} color={colors.textSecondary} />
         </Pressable>
       </View>
+      <ComposerSheet
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onDismiss={onDismiss}
+        testID="terminal-menu"
+      >
+        {onClearScrollback ? (
+          <ListRow
+            testID="terminal-menu-clear"
+            title="Clear scrollback"
+            subtitle="Clears this terminal's history here and on the host"
+            leading={<Icon ios="clear" android="clear_all" size={18} color={colors.textSecondary} />}
+            onPress={() => choose(onClearScrollback)}
+          />
+        ) : null}
+        <ListRow
+          testID="terminal-menu-settings"
+          title="Settings"
+          leading={<Icon ios="gearshape" android="settings" size={18} color={colors.textSecondary} />}
+          onPress={() => choose(() => router.push('/settings'))}
+        />
+      </ComposerSheet>
     </View>
   );
 }
@@ -159,7 +187,7 @@ const styles = StyleSheet.create({
   semibold: { fontWeight: '600' },
   shrink: { flexShrink: 1 },
   pane: { flexShrink: 2 },
-  settings: { width: 40, height: 40, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  more: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   dotBox: { width: DOT, height: DOT, alignItems: 'center', justifyContent: 'center' },
   dot: { width: DOT, height: DOT, borderRadius: DOT / 2 },
   ring: { position: 'absolute' },

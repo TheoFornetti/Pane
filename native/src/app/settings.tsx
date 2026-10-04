@@ -39,6 +39,10 @@ export default function SettingsScreen() {
         <ListRow testID="settings-sign-out" title="Sign Out" destructive onPress={confirmSignOut} />
       </ListSection>
 
+      <ListSection title="Composer" footer={`Saved on ${profile.label}, so desktop sees the same list.`}>
+        <ListRow testID="settings-shortcuts" title="Shortcuts" subtitle="Text you insert with one tap" trailing="chevron" onPress={() => router.push('/settings/shortcuts')} />
+      </ListSection>
+
       <NotificationSettings />
 
       <ListSection title="Hosts" footer="Pane keeps each host's connection code in the iOS Keychain or Android Keystore.">

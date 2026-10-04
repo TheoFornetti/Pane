@@ -1,13 +1,12 @@
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
-import { useRef } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useDaemon } from '@/daemon';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
-import { ComposerSheet } from '../composer/ComposerSheet';
+import { ComposerSheet, useAfterSheetCloses } from '../composer/ComposerSheet';
 import type { AttachSource } from './pickFiles';
 
 const SOURCES: { source: AttachSource; label: string; ios: SFSymbol; android: AndroidSymbol }[] = [
@@ -21,15 +20,9 @@ export function AttachSheet({ visible, onClose, onPick }: { visible: boolean; on
   const theme = useTheme();
   const { colors } = theme;
   const { profile } = useDaemon();
-  // iOS can't present a picker while this sheet is still sliding away, so pick once it has closed.
-  const pending = useRef<AttachSource | null>(null);
-  const openPending = () => {
-    const source = pending.current;
-    pending.current = null;
-    if (source) onPick(source);
-  };
+  const { afterClose, onDismiss } = useAfterSheetCloses();
   return (
-    <ComposerSheet visible={visible} onClose={onClose} onDismiss={openPending} testID="attach-sheet">
+    <ComposerSheet visible={visible} onClose={onClose} onDismiss={onDismiss} testID="attach-sheet">
       <View style={styles.header}>
         <Text variant="headline">Attach</Text>
         <Text variant="subhead" tone="muted" numberOfLines={1} style={styles.shrink}> · copied to {profile.label}</Text>
@@ -43,9 +36,8 @@ export function AttachSheet({ visible, onClose, onPick }: { visible: boolean; on
             accessibilityLabel={item.label}
             onPress={() => {
               void Haptics.selectionAsync();
-              pending.current = item.source;
+              afterClose(() => onPick(item.source));
               onClose();
-              if (Platform.OS !== 'ios') openPending();
             }}
             style={({ pressed }) => [
               styles.tile,

@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { nativeTheme, type IpcMain } from 'electron';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Project } from '../database/models';
 import type { AppServices } from './types';
 import type { AppConfig, UpdateConfigRequest } from '../types/config';
@@ -11,7 +11,9 @@ import {
   PANE_AGENT_CONTEXT_START,
 } from '../services/agentContextManager';
 import { registerConfigHandlers } from './config';
-import type { PaneCommandValue } from '../daemon/commandRegistry';
+import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
+import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
+import type { RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import { AppearanceValidationError, normalizeAppearance } from '../../../shared/types/appearance';
 import { applyNativeThemeSource } from '../services/appearanceService';
 import { ConfigManager } from '../services/configManager';
@@ -187,5 +189,121 @@ describe('config IPC handlers', () => {
     })).resolves.toMatchObject({ success: true });
     expect(configUpdatedCount).toBe(1);
     expect(nativeTheme.themeSource).toBe('dark');
+  });
+
+  describe('remote:settings:update', () => {
+    async function registerRemoteSettings() {
+      const configManager = await createTempConfigManager();
+      await configManager.initialize();
+      const services = createServicesStub([]);
+      services.configManager = configManager;
+      const registry = new PaneCommandRegistry();
+      // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
+      registerConfigHandlers(createIpcMainStub() as IpcMain, services, registry);
+      return { configManager, registry };
+    }
+
+    const screenshotShortcut = {
+      id: 'screenshot',
+      label: 'Screenshot attached',
+      key: 'a',
+      text: 'Look at the screenshot I just attached.',
+      enabled: true,
+    };
+
+    it('replaces the shortcut list, and the next read from any client returns it', async () => {
+      const { registry } = await registerRemoteSettings();
+
+      const result = await registry.invokeRemote('remote:settings:update', [{ terminalShortcuts: [screenshotShortcut] }]);
+
+      // SAFETY: remote:settings:update returns the refreshed affordances.
+      expect((result as RemotePwaAffordances).terminalShortcuts).toEqual([screenshotShortcut]);
+      // SAFETY: remote:pwa-affordances returns RemotePwaAffordances.
+      const reread = await registry.invoke('remote:pwa-affordances') as RemotePwaAffordances;
+      expect(reread.terminalShortcuts).toEqual([screenshotShortcut]);
+    });
+
+    it('saves a voice key, reports it only as configured, and never returns it', async () => {
+      const { configManager, registry } = await registerRemoteSettings();
+      const key = 'dg-secret-0123456789';
+
+      const result = await registry.invokeRemote('remote:settings:update', [{ deepgramApiKey: key }]);
+
+      expect(configManager.getConfig().deepgramApiKey).toBe(key);
+      // SAFETY: remote:settings:update returns the refreshed affordances.
+      expect((result as RemotePwaAffordances).voiceTranscription.configured.deepgram).toBe(true);
+      expect(JSON.stringify(result)).not.toContain(key);
+    });
+
+    it('leaves fields the patch omits as they were', async () => {
+      const { configManager, registry } = await registerRemoteSettings();
+      await registry.invokeRemote('remote:settings:update', [{ openRouterApiKey: 'or-key-1' }]);
+
+      await registry.invokeRemote('remote:settings:update', [{ terminalShortcuts: [screenshotShortcut] }]);
+
+      expect(configManager.getConfig().openRouterApiKey).toBe('or-key-1');
+    });
+
+    it('refuses a patch with any other config field and writes nothing', async () => {
+      const { configManager, registry } = await registerRemoteSettings();
+
+      await expect(registry.invokeRemote('remote:settings:update', [{
+        terminalShortcuts: [screenshotShortcut],
+        claudeExecutablePath: '/tmp/not-claude',
+      }])).rejects.toThrow(/claudeExecutablePath/);
+
+      expect(configManager.getConfig().claudeExecutablePath).toBeUndefined();
+      expect(configManager.getConfig().terminalShortcuts).not.toEqual([screenshotShortcut]);
+    });
+
+    it('refuses shortcuts desktop could not bind: a hotkey that is not one letter, or two enabled on one letter', async () => {
+      const { configManager, registry } = await registerRemoteSettings();
+      const before = configManager.getConfig().terminalShortcuts;
+
+      await expect(registry.invokeRemote('remote:settings:update', [{
+        terminalShortcuts: [{ ...screenshotShortcut, key: 'ab' }],
+      }])).rejects.toThrow(/key/);
+      await expect(registry.invokeRemote('remote:settings:update', [{
+        terminalShortcuts: [screenshotShortcut, { ...screenshotShortcut, id: 'other' }],
+      }])).rejects.toThrow(/letter a/);
+
+      expect(configManager.getConfig().terminalShortcuts).toEqual(before);
+    });
+
+    describe('change event', () => {
+      const sent = vi.fn();
+      afterEach(() => {
+        sent.mockReset();
+        resetPaneRuntimeForTests();
+      });
+      function captureEvents() {
+        setPaneRuntime({
+          eventSink: { send: sent },
+          getConfigManager: () => { throw new Error('unused'); },
+          getPtyHostRuntime: () => null,
+          getWebviewContextMap: () => new Map(),
+        });
+      }
+
+      it('tells every client to refetch after a phone saves, without the values', async () => {
+        const { registry } = await registerRemoteSettings();
+        captureEvents();
+
+        await registry.invokeRemote('remote:settings:update', [{ falApiKey: 'fal-key-1' }]);
+
+        expect(sent).toHaveBeenCalledWith('remote:settings-changed');
+      });
+
+      it('tells phones to refetch after desktop saves its settings', async () => {
+        const ipcMain = createIpcMainStub();
+        // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
+        registerConfigHandlers(ipcMain as IpcMain, createServicesStub([]));
+        captureEvents();
+
+        await ipcMain.handlers.get('config:update')?.({}, { terminalShortcuts: [screenshotShortcut] });
+
+        expect(sent).toHaveBeenCalledWith('remote:settings-changed');
+      });
+    });
   });
 });

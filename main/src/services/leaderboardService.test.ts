@@ -187,6 +187,20 @@ describe('LeaderboardService usage source', () => {
     expect(submittedBodyAt(1).byModel).toHaveLength(1);
   });
 
+  it('does not resend when the server rejects a Cursor submission for another reason', async () => {
+    mocks.invoke.mockResolvedValue({
+      success: true,
+      data: {
+        totals: { ...totals(1200), messageCount: 8, unmeteredMessageCount: 7, costIncomplete: true },
+        byModel: [{ ...totals(1200), model: 'gpt-5', provider: 'codex' }, cursorRow],
+      },
+    });
+    fetchMock.mockResolvedValue(new Response('{"error":"invalid paneVersion"}', { status: 400 }));
+
+    await expect(service.submit()).rejects.toThrow('Leaderboard submit failed (400): {"error":"invalid paneVersion"}');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('does not resend a rejected submission that has no Cursor rows', async () => {
     fetchMock.mockResolvedValue(new Response('{"error":"invalid paneVersion"}', { status: 400 }));
 

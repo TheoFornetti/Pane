@@ -286,17 +286,20 @@ export class LeaderboardService {
     });
 
     let response = await this.post(buildSubmission(report, identity, app.getVersion()));
-    if (response.status === 400 && report.byModel.some(row => row.provider === 'cursor')) {
-      // A server that predates Cursor rejects the whole submission. Send the
-      // rest once more, so Claude and Codex keep updating until it is deployed.
+    // Read once: the body says why a submission was rejected.
+    let rejection = response.ok ? '' : await response.text().catch(() => '');
+    if (response.status === 400 && rejection.includes('byModel') && report.byModel.some(row => row.provider === 'cursor')) {
+      // A server that predates Cursor rejects the whole submission over its
+      // model rows. Send the rest once more, so Claude and Codex keep updating
+      // until it is deployed.
       const withoutCursor = report.byModel.filter(row => row.provider !== 'cursor');
       console.warn('[Leaderboard] Server rejected Cursor usage; resubmitting without it.');
       response = await this.post(buildSubmission({ totals: sumTotals(withoutCursor), byModel: withoutCursor }, identity, app.getVersion()));
+      rejection = response.ok ? '' : await response.text().catch(() => '');
     }
 
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`Leaderboard submit failed (${response.status}): ${text}`);
+      throw new Error(`Leaderboard submit failed (${response.status}): ${rejection}`);
     }
 
     const result: LeaderboardSubmitResult = await response.json();

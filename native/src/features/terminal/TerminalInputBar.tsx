@@ -243,6 +243,7 @@ function RecordingTime() {
 }
 
 const ACTION = 32;
+const ACTION_MIN = 28;
 
 const styles = StyleSheet.create({
   box: { borderWidth: 1 },
@@ -257,7 +258,8 @@ const styles = StyleSheet.create({
   },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 5, paddingBottom: 5 },
   spacer: { flex: 1 },
-  action: { width: ACTION, height: ACTION, alignItems: 'center', justifyContent: 'center' },
+  // On a 320 pt screen the row is a few points short; the icon buttons give way, Send/Enter never does.
+  action: { width: ACTION, minWidth: ACTION_MIN, flexShrink: 1, height: ACTION, alignItems: 'center', justifyContent: 'center' },
   micRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginRight: 4 },
   timer: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   timerText: { fontWeight: '600', fontVariant: ['tabular-nums'] },

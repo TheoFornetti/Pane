@@ -96,7 +96,8 @@ export function ComputerUseSection({ connectionState }: { connectionState: Remot
             <Toggle
               aria-label={`Computer use on ${machine}`}
               checked={readiness !== null && readiness.state !== 'off'}
-              disabled={!readiness || busy}
+              // Stays live during an install so it can be turned off again; the daemon drops the stale check.
+              disabled={!readiness}
               onChange={(enabled) => void act(() => controller.setEnabled(enabled))}
             />
           </div>

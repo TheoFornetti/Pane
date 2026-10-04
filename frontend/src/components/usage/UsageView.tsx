@@ -12,6 +12,7 @@ import { ProviderLimitsPanel } from './ProviderLimits';
 import { LeaderboardTab } from './LeaderboardTab';
 import { PaneUsageSummary } from './PaneUsageSummary';
 import { UsageDateRangeDialog } from './UsageDateRangeDialog';
+import { USAGE_PROVIDERS, joinLabels } from './usageProviders';
 import { presetCalendarRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
 import {
   DEFAULT_USAGE_RANGE_DAYS,
@@ -35,8 +36,11 @@ const RANGE_OPTIONS = [
 
 const PROVIDER_OPTIONS: Array<{ value: UsageProvider | 'all'; label: string }> = [
   { value: 'all', label: 'All' },
-  ...Object.values(USAGE_PROVIDER_CATALOG),
+  ...USAGE_PROVIDERS,
 ];
+
+const AGENT_NAMES = joinLabels(USAGE_PROVIDERS.map(entry => entry.label));
+const VENDOR_NAMES = joinLabels(USAGE_PROVIDERS.map(entry => entry.vendorLabel));
 
 /** Chart palette, matching the graph view's lane colours. */
 const SERIES_COLORS = {
@@ -375,7 +379,7 @@ export function UsageView() {
     }));
   }, []);
 
-  /** Anthropic vs OpenAI roll-up — the split the model list alone doesn't show. */
+  /** Per-vendor roll-up — the split the model list alone doesn't show. */
   const providerBars = useMemo(() => {
     const byProvider = new Map<UsageProvider, { tokens: number; cost: number; incomplete: boolean }>();
     for (const entry of report?.byModel ?? []) {
@@ -408,7 +412,8 @@ export function UsageView() {
     ];
   }, [report]);
 
-  const bothRootsMissing = (report?.index.missingRoots.length ?? 0) >= 2;
+  const missingRoots = report?.index.missingRoots ?? [];
+  const allRootsMissing = missingRoots.length >= USAGE_PROVIDERS.length;
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
@@ -572,14 +577,17 @@ export function UsageView() {
           <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">
             {error}
           </div>
-        ) : bothRootsMissing ? (
+        ) : allRootsMissing ? (
           <div className="mx-auto max-w-lg rounded border border-border-primary bg-surface-secondary p-6 text-center">
             <h2 className="mb-2 text-sm font-medium text-text-primary">No agent transcripts found</h2>
             <p className="text-xs text-text-secondary">
-              Usage is read from the Claude Code and Codex transcript files in your home directory.
-              Neither <code className="font-mono">~/.claude/projects</code> nor{' '}
-              <code className="font-mono">~/.codex/sessions</code> exists yet — run an agent once and
-              come back.
+              Usage is read from the {AGENT_NAMES} transcript files in your home directory.
+              None of these exist yet: {missingRoots.map((root, index) => (
+                <span key={root}>
+                  {index > 0 && ', '}
+                  <code className="font-mono">{root}</code>
+                </span>
+              ))}. Run an agent once and come back.
             </p>
           </div>
         ) : report ? (
@@ -720,7 +728,7 @@ export function UsageView() {
                 <BarChart
                   data={providerBars}
                   formatValue={formatTokens}
-                  ariaLabel="Token usage split between Anthropic and OpenAI"
+                  ariaLabel={`Token usage split between ${VENDOR_NAMES}`}
                 />
 
                 <h2 className="mb-2 mt-4 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">

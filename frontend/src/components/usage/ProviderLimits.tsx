@@ -1,5 +1,10 @@
-import { RefreshCw } from 'lucide-react';
 import { USAGE_PROVIDER_CATALOG, type UsageRateLimitSample } from '../../../../shared/types/usage';
+import { USAGE_PROVIDERS } from './usageProviders';
+
+const NO_LIMITS_TEXT = [
+  'No provider-reported limits available.',
+  ...USAGE_PROVIDERS.map(provider => provider.limitsNote),
+].join(' ');
 
 function formatWindow(minutes: number): string {
   if (minutes % (60 * 24) === 0) return `${minutes / (60 * 24)}d window`;
@@ -120,40 +125,19 @@ function LimitBar({ limit }: { limit: UsageRateLimitSample }) {
   );
 }
 
-/**
- * Provider-reported limits panel. Shared between Usage & Limits (full page)
- * and Settings > Usage (compact). Both read from `usage_rate_limits` via the
- * same `getReport()` path — one source of truth for limit display.
- */
+/** Provider-reported limits from `usage_rate_limits`, as returned by `getReport()`. */
 export function ProviderLimitsPanel({
   limits,
-  refreshing,
-  onRefresh,
   className = '',
 }: {
   limits: UsageRateLimitSample[];
-  refreshing?: boolean;
-  onRefresh?: () => void;
   className?: string;
 }) {
   return (
     <section aria-label="Provider limits" className={`space-y-2 ${className}`}>
-      <div className="flex items-center justify-between">
-        <h2 className="text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
-          Provider limits
-        </h2>
-        {onRefresh && (
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={refreshing}
-            aria-label="Refresh usage"
-            className="rounded p-1 transition-colors hover:bg-surface-hover disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3 w-3 text-text-tertiary ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
-          </button>
-        )}
-      </div>
+      <h2 className="text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
+        Provider limits
+      </h2>
 
       <LimitStatusBanners limits={limits} />
 
@@ -167,10 +151,7 @@ export function ProviderLimitsPanel({
           <CreditsLine limits={limits} />
         </ul>
       ) : (
-        <p className="text-[11px] text-text-muted">
-          No provider-reported limits available. Codex writes quota state
-          into its transcripts; Anthropic does not expose plan limits locally.
-        </p>
+        <p className="text-[11px] text-text-muted">{NO_LIMITS_TEXT}</p>
       )}
     </section>
   );

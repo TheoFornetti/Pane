@@ -7,10 +7,26 @@
  * Pane reads read-only and indexes incrementally.
  */
 
-/** Agent names identify filters; vendor names identify reported usage and limits. */
+/**
+ * The one place a usage provider is added. Agent names identify filters;
+ * vendor names identify reported usage and limits; `limitsNote` explains where
+ * (or whether) the provider's plan limits can be read locally.
+ */
 export const USAGE_PROVIDER_CATALOG = {
-  claude: { value: 'claude', label: 'Claude', vendorLabel: 'Anthropic', color: '#e0913a' },
-  codex: { value: 'codex', label: 'Codex', vendorLabel: 'OpenAI', color: '#37b877' },
+  claude: {
+    value: 'claude',
+    label: 'Claude',
+    vendorLabel: 'Anthropic',
+    color: '#e0913a',
+    limitsNote: 'Anthropic does not expose plan limits locally.',
+  },
+  codex: {
+    value: 'codex',
+    label: 'Codex',
+    vendorLabel: 'OpenAI',
+    color: '#37b877',
+    limitsNote: 'Codex writes quota state into its transcripts.',
+  },
 } as const;
 
 export type UsageProvider = keyof typeof USAGE_PROVIDER_CATALOG;

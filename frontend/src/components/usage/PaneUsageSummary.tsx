@@ -86,9 +86,9 @@ export function PaneUsageSummary({ byPane, trim, onTrimChange }: {
       <p className="mt-2 text-[11px] text-text-tertiary">
         {count ? `${count.toLocaleString()} panes with recorded usage in this period, including archived panes.` : 'No pane-attributed usage in this period.'}
         {' '}Empty panes and unattributed usage are excluded.
-        {tokenPanes.length > 0 && tokenPanes.length < count && ` Tokens / pane averages the ${tokenPanes.length.toLocaleString()} panes that recorded tokens.`}
+        {tokenPanes.length > 0 && tokenPanes.length < count && ` Tokens / pane and Est. cost / pane average the ${tokenPanes.length.toLocaleString()} panes that recorded tokens.`}
         {trim && (tokenPanes.length < count
-          ? ` Tokens / pane drops ${tokenCut} from each end, so ${tokenPanes.length - tokenCut * 2} panes remain. Cost and messages drop ${cut} highest and ${cut} lowest values; ${retained} panes remain.`
+          ? ` Tokens and cost drop ${tokenCut} from each end, so ${tokenPanes.length - tokenCut * 2} panes remain. Messages drop ${cut} highest and ${cut} lowest values; ${retained} panes remain.`
           : ` Each metric drops its ${cut} highest and ${cut} lowest values; ${retained} panes remain per metric.`)}
         {trim && count > 0 && cut === 0 && ' At least 10 panes are needed to trim.'}
       </p>

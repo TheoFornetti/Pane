@@ -553,7 +553,7 @@ test('filters to Cursor and shows its messages without tokens or a cost', async 
   await capture(page, testInfo, '06-usage-cursor-filter.png');
 });
 
-test('per-pane footnote says when Tokens / pane leaves out Cursor-only panes', async ({ page }) => {
+test('per-pane footnote says when tokens and cost leave out Cursor-only panes', async ({ page }) => {
   const values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 1000];
   const panes = values.map((value, i) => ({
     ...report.byPane.panes[0], paneId: `sample-${i}`, paneName: `Sample ${i}`,
@@ -567,11 +567,11 @@ test('per-pane footnote says when Tokens / pane leaves out Cursor-only panes', a
   await openUsageAndLimits(page);
   const summary = page.getByTestId('pane-usage-summary');
   await expect(summary).toContainText('11 panes with recorded usage');
-  await expect(summary).toContainText('Tokens / pane averages the 10 panes that recorded tokens.');
+  await expect(summary).toContainText('Tokens / pane and Est. cost / pane average the 10 panes that recorded tokens.');
 
   await summary.getByRole('button', { name: 'Trim 10%' }).click();
-  await expect(summary).toContainText('Tokens / pane drops 1 from each end, so 8 panes remain.');
-  await expect(summary).toContainText('Cost and messages drop 1 highest and 1 lowest values; 9 panes remain.');
+  await expect(summary).toContainText('Tokens and cost drop 1 from each end, so 8 panes remain.');
+  await expect(summary).toContainText('Messages drop 1 highest and 1 lowest values; 9 panes remain.');
 });
 
 test('shows known dollars with ~ when Cursor messages are mixed in', async ({ page }) => {

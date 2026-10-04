@@ -3,6 +3,7 @@ import type { ConfigManager } from '../services/configManager';
 import { isRemotePaneCommand, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { getComputerUseEngine } from '../services/computerUse/activeEngine';
 import { reportedStepSchema, saveStep, writeReplay } from '../services/computerUse/replay';
+import { showComputerUseForegroundNotice } from '../services/computerUse/foregroundNotice';
 import { ScriptHosts, type ScriptRunResult } from '../services/computerUse/scriptHosts';
 import type { AppConfig } from '../types/config';
 import { getAppSubdirectory } from '../utils/appDirectory';
@@ -16,12 +17,24 @@ const runRequestSchema = boundary.object({
   code: boundary.string,
   /** The calling agent's Pane (its PANE_SESSION_ID); runs without one leave no replay. */
   sessionId: boundary.optional(boundary.string),
+  /** The MCP client's name, such as "Claude Code", for the foreground notice. */
+  agent: boundary.optional(boundary.string),
 });
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 const REPLAY_TITLE = 'Computer use replay';
 const resetRequestSchema = boundary.object({ connectionId: boundary.nonEmptyString });
 
 const isEnabled = (config: AppConfig) => config.computerUse?.enabled === true;
+
+/** Which agent each connection belongs to, as its latest run said. */
+const agentsByConnection = new Map<string, string>();
+
+const defaultHosts = () =>
+  new ScriptHosts({
+    getEngine: getComputerUseEngine,
+    showForegroundNotice: ({ connectionId, app }) =>
+      showComputerUseForegroundNotice({ agent: agentsByConnection.get(connectionId) ?? 'An agent', app }),
+  });
 
 /**
  * The `js` and `js_reset` MCP tools land here. Each agent connection gets its own script host;
@@ -30,7 +43,7 @@ const isEnabled = (config: AppConfig) => config.computerUse?.enabled === true;
 export function registerComputerUseHandlers(
   commandRegistry: PaneCommandRegistry,
   configManager: Pick<ConfigManager, 'getConfig' | 'on'>,
-  hosts = new ScriptHosts({ getEngine: getComputerUseEngine }),
+  hosts = defaultHosts(),
   /** Where a Pane's steps and replay live; archiving the Pane deletes its artifacts folder. */
   replayDir = (sessionId: string) => getAppSubdirectory('artifacts', sessionId, 'computer-use'),
 ): void {
@@ -52,7 +65,8 @@ export function registerComputerUseHandlers(
   commandRegistry.register('computer-use:run', async (request: PaneCommandValue): Promise<ScriptRunResult> => {
     if (isRemotePaneCommand()) return { ok: false, text: REMOTE_REFUSAL, images: [] };
     if (!enabled) return { ok: false, text: COMPUTER_USE_OFF_MESSAGE, images: [] };
-    const { connectionId, code, sessionId } = decodeBoundary(request, runRequestSchema);
+    const { connectionId, code, sessionId, agent } = decodeBoundary(request, runRequestSchema);
+    if (agent) agentsByConnection.set(connectionId, agent);
     if (!sessionId || !SESSION_ID_PATTERN.test(sessionId)) return hosts.run(connectionId, code);
     return runWithReplay(connectionId, code, sessionId);
   });

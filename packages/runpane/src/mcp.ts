@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
-import { callComputerUseTool, COMPUTER_USE_TOOLS, releaseComputerUseConnection, type ComputerUseContent, type ComputerUseTool } from './computerUseTools';
+import { agentName, callComputerUseTool, COMPUTER_USE_TOOLS, releaseComputerUseConnection, type ComputerUseContent, type ComputerUseTool } from './computerUseTools';
 import { loadDocs } from './docs';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
@@ -118,7 +118,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
             process.once(signal, () => void releaseComputerUseConnection(connectionId).finally(() => process.exit(0)));
           }
         }
-        return callComputerUseTool(tool, input, connectionId, ctx.mcpReq.signal);
+        return callComputerUseTool(tool, input, { connectionId, agent: agentName(server.getClientVersion()?.name) }, ctx.mcpReq.signal);
       }
       return callTool(tool, input, ctx.mcpReq.signal, rewrite);
     });

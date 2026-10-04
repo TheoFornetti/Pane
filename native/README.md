@@ -60,7 +60,7 @@ maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/
 
 ## The terminal page
 
-The pane screen runs xterm in a WebView. The page source is `terminal-web/page.ts`. `pnpm build:terminal-web` bundles it, with xterm and its CSS, into `src/features/terminal/terminalHtml.generated.ts`, so the WebView needs no network. Run it after changing the page or upgrading xterm, and commit the generated file. The page and the screen talk through the messages in `src/features/terminal/bridge.ts`.
+The pane screen runs xterm in a WebView. The page source is `terminal-web/page.ts`. `pnpm build:terminal-web` bundles it, with xterm and its CSS, into `src/features/terminal/terminalHtml.generated.ts`, so the WebView needs no network. Run it after changing the page or upgrading xterm, and commit the generated file. The page and the screen talk through the messages in `src/features/terminal/bridge.ts`. The scroll joystick scrolls the page's own buffer, except when a full-screen app is on the alternate screen or has asked for mouse events (Claude Code with `"tui": "fullscreen"`, less, vim, tmux): those keep no scrollback here, so the page sends them wheel input instead, as xterm does for a desktop mouse wheel.
 
 `panes.yaml` creates a pane, searches, pins, archives and deletes it; it needs at least one repository on the host. `permission.yaml` answers a permission request; queue one first with `node scripts/request-permission.mjs <pane-dir> <pane-id>`, which stands in for the agent's permission bridge.
 

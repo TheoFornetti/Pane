@@ -179,6 +179,15 @@ describe('UsageAggregator.getTotals', () => {
     });
   });
 
+  it('ranks projects with equal tokens by how many messages they recorded', () => {
+    seed({ timestampMs: NOW - HOUR_MS, provider: 'cursor', model: 'cursor', metered: false, cwd: '/w/a-quiet' });
+    for (let i = 0; i < 3; i++) {
+      seed({ timestampMs: NOW - HOUR_MS, provider: 'cursor', model: 'cursor', metered: false, cwd: '/w/z-busy' });
+    }
+
+    expect(aggregator.getByProject(NOW - DAY_MS, NOW).map(project => project.path)).toEqual(['/w/z-busy', '/w/a-quiet']);
+  });
+
   it('leaves out rows from a provider this version does not know', () => {
     seed({ timestampMs: NOW - HOUR_MS, provider: 'claude', model: 'claude-sonnet-4-5', input: 100 });
     seed({ timestampMs: NOW - HOUR_MS, provider: 'gemini', model: 'gemini-3-pro', input: 900 });

@@ -236,7 +236,8 @@ export class UsageAggregator {
         label: path ? basename(path) || path : 'Unknown',
         ...foldTotals(pathRows),
       }))
-      .sort((a, b) => b.totalTokens - a.totalTokens);
+      // Cursor-only projects all have 0 tokens; their messages break the tie.
+      .sort((a, b) => b.totalTokens - a.totalTokens || b.messageCount - a.messageCount);
   }
 
   getByPane(fromMs: number, toMs: number, providers?: UsageProvider[]): UsageByPaneReport {

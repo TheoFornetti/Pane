@@ -132,6 +132,11 @@ export async function callComputerUseTool(
   }
 }
 
+/** Ends this connection's script host when the agent disconnects, so it does not wait out the idle timeout. */
+export async function releaseComputerUseConnection(connectionId: string): Promise<void> {
+  await invokeDaemon('computer-use:reset', [{ connectionId }], resetResultSchema, { timeoutMs: 2_000 }).catch(() => undefined);
+}
+
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(new Error('Cancelled.'));
   return new Promise<T>((resolve, reject) => {

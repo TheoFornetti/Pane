@@ -562,7 +562,7 @@ test('destructive pane actions return a review link, and folder actions pass the
   }
 });
 
-test('js runs a script in the daemon under one connection id and returns text and images; js_reset ends it', async () => {
+test('js runs a script in the daemon under one connection id and returns text and images; js_reset and disconnecting end it', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   const pixel = { mime: 'image/png', base64: 'iVBORw0KGgo=' };
   try {
@@ -585,7 +585,10 @@ test('js runs a script in the daemon under one connection id and returns text an
         assert.equal(reset.content[0].text, 'Script state discarded.');
       }, { args: [], env: { PANE_DIR: paneDir } });
 
-      assert.deepEqual(requests.map((request) => request.channel), ['computer-use:run', 'computer-use:run', 'computer-use:reset']);
+      // The last reset is the server releasing the connection as the agent disconnects.
+      const deadline = Date.now() + 5_000;
+      while (requests.length < 4 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.deepEqual(requests.map((request) => request.channel), ['computer-use:run', 'computer-use:run', 'computer-use:reset', 'computer-use:reset']);
       const ids = new Set(requests.map((request) => request.args[0].connectionId));
       assert.equal(ids.size, 1);
       assert.match([...ids][0], /^[0-9a-f-]{36}$/);

@@ -11,6 +11,7 @@ import { CommandRunner } from '../../utils/commandRunner';
 import { PathResolver } from '../../utils/pathResolver';
 import { archiveFs, directoryIdentity, purgeArchiveBatch } from '../archiveCleanupFilesystem';
 import { WorktreeManager } from '../worktreeManager';
+import { withArchiveRepositoryLock } from '../archiveRepositoryLock';
 
 const fixtures: Array<{ root: string; close: () => Promise<void> }> = [];
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -68,6 +69,26 @@ afterEach(async () => {
 });
 
 describe('durable archive cleanup', () => {
+  it('leaves the repository mutation lock available while an archive script runs', async () => {
+    const f = fixture();
+    f.project.archive_script = 'held script';
+    let release = () => {};
+    f.sessions.runArchiveScript.mockImplementation(() => new Promise(resolve => {
+      release = () => resolve({ success: true, output: '' });
+    }));
+    const job = await f.manager.prepare(f.session, true, false);
+    f.db.archiveSession(f.session.id, job);
+    f.manager.enqueue(job, () => Promise.resolve());
+    try {
+      await vi.waitFor(() => expect(f.sessions.runArchiveScript).toHaveBeenCalled());
+      await expect(withArchiveRepositoryLock(f.repo, f.runner, async () => 'available')).resolves.toBe('available');
+      expect(f.progress.getActiveTasks()[0].status).toBe('running-archive-script');
+    } finally {
+      release();
+    }
+    await settled(f, 'completed');
+  });
+
   it('yields during deep descent and resumes with a tiny batch budget', async () => {
     const f = fixture();
     const root = path.join(f.root, 'deep');

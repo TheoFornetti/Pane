@@ -223,7 +223,7 @@ export class ArchiveCleanupManager {
       this.jobs.set(job.sessionId, job);
       this.active.add(job.sessionId);
       this.repositories.add(key);
-      const execution = withLock(`archive-repository:${key}`, () => this.run(job)).catch(error => this.fail(job, error)).finally(() => {
+      const execution = this.run(job).catch(error => this.fail(job, error)).finally(() => {
         this.active.delete(job.sessionId);
         this.repositories.delete(key);
         this.inFlight.delete(execution);
@@ -282,7 +282,7 @@ export class ArchiveCleanupManager {
         this.save(job);
       }
       if (job.phase === 'detach') {
-        await this.detach(job);
+        await withLock(`archive-repository:${archivePathKey(job.repository)}`, () => this.detach(job));
         job.phase = 'purge';
         this.save(job);
       }

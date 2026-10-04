@@ -43,6 +43,8 @@ const DAEMON_ENV = {
 const START_TIMEOUT_MS = 20_000;
 const DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
 const PERMISSION_REQUEST_TIMEOUT_MS = 180_000;
+/** macOS caches a denied Screen Recording answer per process, so a helper waiting on a grant is relaunched this often. */
+const PERMISSION_RECHECK_MS = 10_000;
 const CALL_TIMEOUT_MS = 120_000;
 
 interface CuaDriverOptions {
@@ -431,6 +433,8 @@ class CuaDriverEngine implements ComputerUseEngine {
   private child: ChildProcess | null = null;
   /** Bumped by stop(), so a call that was waiting on a start never acts after it. */
   private generation = 0;
+  /** When the current helper started, while it is still missing a macOS permission. */
+  private missingPermissionSince: number | null = null;
 
   constructor(private readonly options: CuaDriverOptions) {}
 
@@ -446,6 +450,10 @@ class CuaDriverEngine implements ComputerUseEngine {
     }
     const status: EngineStatus = { installed: true, permissions: {}, desktopSession };
     try {
+      if (this.missingPermissionSince !== null && Date.now() - this.missingPermissionSince >= PERMISSION_RECHECK_MS) {
+        // A fresh helper reads the grant the user may have just made in System Settings.
+        await this.stop();
+      }
       const metadata = await this.ensureDaemon();
       status.version = metadata.driver_version;
       if (layout.platform === 'darwin') {
@@ -454,6 +462,8 @@ class CuaDriverEngine implements ComputerUseEngine {
         // Only the helper running as CuaDriver.app can answer for its own grants.
         if (grants?.source?.attribution === 'driver-daemon') {
           status.permissions = { accessibility: grants.accessibility === true, screenRecording: grants.screen_recording === true };
+          const granted = status.permissions.accessibility && status.permissions.screenRecording;
+          this.missingPermissionSince = granted ? null : (this.missingPermissionSince ?? Date.now());
         } else {
           status.detail = check.error?.message ?? 'Cua Driver could not read its own macOS permissions.';
         }
@@ -483,6 +493,7 @@ class CuaDriverEngine implements ComputerUseEngine {
 
   async stop(): Promise<void> {
     this.generation += 1;
+    this.missingPermissionSince = null;
     // Let a start in progress finish binding, so the helper it launched is the one shut down.
     await this.starting?.catch(() => undefined);
     await shutdownHelper(resolveLayout(this.options));

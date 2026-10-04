@@ -93,7 +93,9 @@ describe('durable archive cleanup', () => {
     }
     expect(worktreePoolManager.hasReserve(f.repo, 'HEAD')).toBe(true);
     const mutations = calls.mock.calls.filter(call => call[1][0] === 'worktree').map(call => call[1][1]);
-    expect(mutations).toEqual(['add', 'list']);
+    // Canonical-repository lookups may complete in either order; FIFO begins
+    // at admission. Both must wait for the owner, and neither removes the reserve.
+    expect(mutations.sort()).toEqual(['add', 'list']);
   });
 
   it('fails closed after restart when an old intent has no process capture', async () => {

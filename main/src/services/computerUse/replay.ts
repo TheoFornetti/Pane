@@ -96,13 +96,13 @@ function renderReplay(steps: ReplayStep[]): string {
   :root { --bg: #18181b; --panel: #232327; --text: #f4f4f5; --muted: #a1a1aa; --border: #3f3f46; --accent: #60a5fa; --accent-text: #0b1220; --error: #f87171; }
 }
 * { box-sizing: border-box; }
-body { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
+body { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); display: grid; grid-template-columns: 220px minmax(0, 1fr); height: 100vh; }
 nav { border-right: 1px solid var(--border); overflow-y: auto; background: var(--panel); }
 nav h1 { font-size: 13px; margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 nav h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0; padding: 12px 14px 4px; }
 nav button { display: flex; gap: 8px; width: 100%; text-align: left; border: 0; background: none; color: inherit; font: inherit; padding: 5px 14px; cursor: pointer; }
 nav button:hover { background: var(--border); }
-nav button[aria-current="true"] { background: var(--accent); color: var(--accent-text); }
+nav button[aria-current="true"], nav button[aria-current="true"] .failed { background: var(--accent); color: var(--accent-text); }
 nav .n { color: inherit; opacity: .65; min-width: 2.2em; font-variant-numeric: tabular-nums; }
 main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
@@ -110,15 +110,15 @@ header strong { font-size: 15px; }
 header .at { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
 header button { border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
 header button:disabled { opacity: .4; cursor: default; }
-.shot { flex: 1; min-height: 0; overflow: auto; padding: 16px; display: flex; align-items: flex-start; justify-content: center; }
-.shot img { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; }
+.shot { flex: 1; min-height: 0; padding: 16px; display: flex; align-items: center; justify-content: center; }
+.shot img { max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; }
 .shot p { color: var(--muted); }
 .detail { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 16px 16px; max-height: 35vh; overflow: auto; }
 .detail h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 4px; }
 .detail pre { margin: 0; padding: 8px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; white-space: pre-wrap; word-break: break-word; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .failed { color: var(--error); }
 .empty { padding: 24px; color: var(--muted); }
-@media (max-width: 700px) { body { grid-template-columns: 1fr; grid-template-rows: 30vh 1fr; } nav { border-right: 0; border-bottom: 1px solid var(--border); } .detail { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); } nav { max-height: 30vh; } nav { border-right: 0; border-bottom: 1px solid var(--border); } .detail { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -153,7 +153,6 @@ function show(i) {
   const step = steps[current];
   buttons.forEach((b, j) => b.setAttribute('aria-current', String(j === current)));
   buttons[current].scrollIntoView({ block: 'nearest' });
-  history.replaceState(null, '', '#step-' + (current + 1));
   const prev = el('button', { type: 'button', textContent: '← Prev', disabled: current === 0, onclick: () => show(current - 1) });
   const next = el('button', { type: 'button', textContent: 'Next →', disabled: current === steps.length - 1, onclick: () => show(current + 1) });
   view.replaceChildren(
@@ -168,9 +167,8 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'ArrowRight' || event.key === 'ArrowDown') { event.preventDefault(); show(current + 1); }
   if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { event.preventDefault(); show(current - 1); }
 });
-const fromHash = /^#step-(\\d+)$/.exec(location.hash);
-const latestRunStart = steps.findIndex((step) => step.run === lastRun);
-show(fromHash ? Number(fromHash[1]) - 1 : Math.max(0, latestRunStart));
+// Opens on the latest run. The URL stays fixed so Pane can find and reload this tab.
+show(Math.max(0, steps.findIndex((step) => step.run === lastRun)));
 </script>
 </body>
 </html>

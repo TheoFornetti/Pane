@@ -49,8 +49,9 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
 
   const keys = voice.configured ? voiceKeysFor(mode, voice.configured) : [];
   const asked = keys.filter(item => !item.set || replacing.includes(item.key));
-  const missing = keys.filter(item => !item.set);
-  const ready = asked.every(item => typed[item.key]?.trim()) && asked.length > 0;
+  const missing = keys.filter(item => !item.set && !item.optional);
+  // The mode's own key must be filled; the cleanup key can be left blank.
+  const ready = asked.some(item => typed[item.key]?.trim()) && asked.every(item => item.optional || typed[item.key]?.trim());
 
   const reset = () => {
     setTyped({});
@@ -62,8 +63,12 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
     onClose();
   };
   const submit = async () => {
-    const patch = Object.fromEntries(asked.map(item => [item.key, typed[item.key]?.trim() ?? '']));
-    const secrets = Object.values(patch);
+    const entries = asked.flatMap(item => {
+      const value = typed[item.key]?.trim();
+      return value ? [[item.key, value] as const] : [];
+    });
+    const patch = Object.fromEntries(entries);
+    const secrets = entries.map(([, value]) => value);
     setBusy(true);
     setError(null);
     try {
@@ -94,15 +99,17 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
           <Text variant="subhead" tone="secondary">
             {missing.length === 0
               ? `Dictation runs on ${profile.label}. Replace a key, then recording starts.`
-              : `Dictation runs on ${profile.label}. It needs ${missing.length === 1 ? 'one more key' : 'two more keys'}, then recording starts.`}
+              : `Dictation runs on ${profile.label}. It needs one more key, then recording starts.`}
           </Text>
         </View>
-        {keys.map(({ key, set }) => {
+        {keys.map(({ key, set, optional }) => {
           const info = KEY_INFO[key];
           const asking = !set || replacing.includes(key);
           return (
             <View key={key} style={styles.field}>
-              <Text variant="footnote" tone="secondary" style={styles.label}>{info.name} key · {info.role}</Text>
+              <Text variant="footnote" tone="secondary" style={styles.label}>
+                {optional ? `Clean up text (optional) · ${info.name} key` : `${info.name} key · ${info.role}`}
+              </Text>
               {asking ? (
                 <View style={[styles.input, { borderRadius: theme.radius.md, borderColor: typed[key] ? colors.accent : colors.border, backgroundColor: colors.surfaceRaised }]}>
                   <TextInput
@@ -110,7 +117,7 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
                     accessibilityLabel={`${info.name} key`}
                     value={typed[key] ?? ''}
                     onChangeText={value => setTyped(current => ({ ...current, [key]: value }))}
-                    placeholder={`Paste your ${info.name} key`}
+                    placeholder={optional ? 'Skip to keep the transcript as heard' : `Paste your ${info.name} key`}
                     placeholderTextColor={colors.textMuted}
                     secureTextEntry
                     autoCapitalize="none"

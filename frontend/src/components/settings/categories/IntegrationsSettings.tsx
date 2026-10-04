@@ -46,7 +46,7 @@ export function IntegrationsSettings({ persistence, onDirtyChange }: Integration
         <SettingRow
           settingId="voice-transcription"
           label="Provider credentials"
-          description="Fal transcribes recorded audio, OpenRouter cleans transcripts, and Deepgram provides live streaming tokens."
+          description="Deepgram transcribes live dictation and fal transcribes recorded audio; either one is enough. OpenRouter is optional and cleans up the transcript."
           saveState={persistence.saveStates['voice-transcription']}
           align="start"
         >
@@ -59,7 +59,7 @@ export function IntegrationsSettings({ persistence, onDirtyChange }: Integration
               onRemove={() => setDraft((current) => ({ ...current, falApiKey: '' }))}
             />
             <SecretField
-              label="OpenRouter API key"
+              label="OpenRouter API key (optional)"
               value={draft.openRouterApiKey}
               placeholder="sk-or-..."
               onChange={(value) => setDraft((current) => ({ ...current, openRouterApiKey: value }))}

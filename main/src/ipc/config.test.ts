@@ -111,6 +111,7 @@ function createServicesStub(projects: Project[]): AppServices {
 
 describe('config IPC handlers', () => {
   afterEach(async () => {
+    vi.unstubAllEnvs();
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
       if (dir) {
@@ -233,6 +234,21 @@ describe('config IPC handlers', () => {
       // SAFETY: remote:settings:update returns the refreshed affordances.
       expect((result as RemotePwaAffordances).voiceTranscription.configured.deepgram).toBe(true);
       expect(JSON.stringify(result)).not.toContain(key);
+    });
+
+    it('offers live dictation with only a Deepgram key, and recorded with only a fal key', async () => {
+      vi.stubEnv('OPENROUTER_API_KEY', '');
+      vi.stubEnv('DEEPGRAM_API_KEY', '');
+      vi.stubEnv('FAL_KEY', '');
+      const { registry } = await registerRemoteSettings();
+
+      // SAFETY: remote:settings:update returns the refreshed affordances.
+      const live = await registry.invokeRemote('remote:settings:update', [{ deepgramApiKey: 'dg-key-1' }]) as RemotePwaAffordances;
+      expect(live.voiceTranscription.availableModes).toEqual(['streaming']);
+      // SAFETY: remote:settings:update returns the refreshed affordances.
+      const both = await registry.invokeRemote('remote:settings:update', [{ falApiKey: 'fal-key-1' }]) as RemotePwaAffordances;
+      expect(both.voiceTranscription.availableModes).toEqual(['streaming', 'recorded']);
+      expect(both.voiceTranscription.configured.cleanup).toBe(false);
     });
 
     it('leaves fields the patch omits as they were', async () => {

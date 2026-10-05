@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
-import { callComputerUseTool, COMPUTER_USE_TOOLS, type ComputerUseContent, type ComputerUseTool } from './computerUseTools';
+import { callComputerUseTool, COMPUTER_USE_TOOLS, releaseComputerUseConnection, type ComputerUseContent, type ComputerUseTool } from './computerUseTools';
 import { loadDocs } from './docs';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
@@ -74,6 +74,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
   const rewrite = (text: string) => rewriteCliHints(text, allTools, toolsByName);
   // One agent connection per stdio server: the daemon keys its `js` script state by this id.
   const connectionId = randomUUID();
+  let usedComputerUse = false;
   const listResult = {
     tools: tools.map((tool) => ({
       name: tool.name,
@@ -109,7 +110,16 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       } catch (error) {
         return errorResult(`Invalid arguments for ${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
-      if (!('command' in tool)) return callComputerUseTool(tool, input, connectionId, ctx.mcpReq.signal);
+      if (!('command' in tool)) {
+        if (!usedComputerUse) {
+          usedComputerUse = true;
+          // Clients may stop the server with a signal instead of closing stdin.
+          for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+            process.once(signal, () => void releaseComputerUseConnection(connectionId).finally(() => process.exit(0)));
+          }
+        }
+        return callComputerUseTool(tool, input, connectionId, ctx.mcpReq.signal);
+      }
       return callTool(tool, input, ctx.mcpReq.signal, rewrite);
     });
     server.setRequestHandler('resources/list', () => ({
@@ -133,6 +143,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
   const handle = serveStdio(createServer, { onerror: (error) => process.stderr.write(`runpane mcp: ${error.message}\n`) });
   await new Promise<void>((resolve) => process.stdin.once('close', resolve).once('end', resolve));
   await handle.close();
+  if (usedComputerUse) await releaseComputerUseConnection(connectionId);
   return 0;
 }
 

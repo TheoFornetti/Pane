@@ -69,6 +69,33 @@ describe('ScriptHosts', () => {
     expect(log.slice(0, 2).sort()).toEqual(['start type_text:a', 'start type_text:b']);
   });
 
+  it('reports a script process that cannot start instead of crashing', async () => {
+    hosts = new ScriptHosts({ getEngine: () => fakeEngine().engine, childEntry: '/nonexistent/scriptHostChild.js' });
+    const result = await hosts.run('a', 'return 1');
+    expect(result.ok).toBe(false);
+    expect(result.text).toMatch(/^The script process (failed|exited)/);
+  });
+
+  it('drops engine calls still queued when the script is reset', async () => {
+    const { engine, log } = fakeEngine(300);
+    const h = makeHosts(engine);
+    const running = h.run('a', `for (let i = 0; i < 5; i++) engine.call('click', { pid: 9, text: String(i) }); await new Promise(() => {})`);
+    // Reset while the first click is still in flight and the other four wait behind it.
+    while (log.length === 0) await new Promise((resolve) => setTimeout(resolve, 10));
+    h.reset('a');
+    await running;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(log.filter((entry) => entry.startsWith('start'))).toEqual(['start click:0']);
+  });
+
+  it('stops a script that forges a message to the daemon, without crashing it', async () => {
+    const h = makeHosts(fakeEngine().engine);
+    // The vm is not a boundary: a script can reach the real process object and its IPC channel.
+    const result = await h.run('a', `setTimeout.constructor('return process')().send({ type: 'call', callId: 1 }); await new Promise(() => {})`);
+    expect(result).toEqual({ ok: false, text: 'The script process sent a malformed message and was stopped.', images: [] });
+    expect((await h.run('a', 'return 1')).text).toBe('1');
+  });
+
   it('caps long output', async () => {
     const h = makeHosts(fakeEngine().engine, { maxOutputChars: 10 });
     const result = await h.run('a', `return 'x'.repeat(25)`);

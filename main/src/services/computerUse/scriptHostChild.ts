@@ -8,9 +8,10 @@ import { inspect } from 'node:util';
 import vm from 'node:vm';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import type { EngineImage, EngineResult } from './engine';
-import type { ChildMessage, ParentMessage } from './scriptHostProtocol';
+import { imageSchema, type ChildMessage, type ParentMessage } from './scriptHostProtocol';
 
-const imageSchema = boundary.object({ mime: boundary.string, base64: boundary.string });
+// Each result goes back through the daemon to the agent's context; keep it within budget at the source.
+const MAX_IMAGES = 20;
 /** `image()` takes one image, or an engine result and adds all of its images. */
 const imageSourceSchema = boundary.union(imageSchema, boundary.object({ images: boundary.array(imageSchema) }));
 type ImageSource = EngineImage | Pick<EngineResult, 'images'>;
@@ -57,6 +58,7 @@ const context = vm.createContext({
     const parsed = decodeBoundary(source, imageSourceSchema);
     const added = 'images' in parsed ? parsed.images : [parsed];
     if (added.length === 0) throw new TypeError('image() got an engine result with no images');
+    if (images.length + added.length > MAX_IMAGES) throw new RangeError(`image() allows ${MAX_IMAGES} images per call`);
     images.push(...added);
   },
   sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -70,7 +72,7 @@ const context = vm.createContext({
   TextDecoder,
 });
 
-async function run(runId: number, code: string): Promise<void> {
+async function run(runId: number, code: string, maxOutputChars: number): Promise<void> {
   output = '';
   images = [];
   let ok = true;
@@ -89,12 +91,16 @@ async function run(runId: number, code: string): Promise<void> {
     // inspect() prints the stack of errors from the script's own realm, where `instanceof Error` fails.
     output += scriptFrames(inspect(error));
   }
-  send({ type: 'done', runId, ok, text: output.trimEnd(), images });
+  const text = output.trimEnd();
+  const capped = text.length <= maxOutputChars
+    ? text
+    : `${text.slice(0, maxOutputChars)}\n[output truncated: ${text.length - maxOutputChars} more characters]`;
+  send({ type: 'done', runId, ok, text: capped, images });
 }
 
 process.on('message', (message: ParentMessage) => {
   if (message.type === 'run') {
-    void run(message.runId, message.code);
+    void run(message.runId, message.code, message.maxOutputChars);
     return;
   }
   const resolve = pendingCalls.get(message.callId);

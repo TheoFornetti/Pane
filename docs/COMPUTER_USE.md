@@ -14,20 +14,24 @@ Typical uses:
 - Finish a task that exists only in an app's UI.
 
 Apps are driven in the background, so you can keep working while the agent
-runs. Every action leaves a screenshot of the target window, and each run
-leaves a replay.
+runs. Every action leaves a screenshot of the target window, and the agent's
+Pane keeps a replay of every run.
 
 ## Turn it on
 
 Computer use is off by default and is set per machine. Only you should turn it
-on: agents get no MCP tool for it, and the skill tells them never to run the
-command.
+on. Agents get no MCP tool for it, `runpane computer-use on` refuses to run
+inside a Pane terminal, and the skill tells agents never to run it. An agent
+running outside Pane could still run the command, so this is a guard, not a
+lock.
 
-- **Desktop:** Settings → Remote Access → Computer use.
-- **Headless host:** `runpane computer-use on`. Check it with
-  `runpane computer-use status`. Each command takes `--json`.
-
-<!-- P5-PENDING: status copy from plan P5; chunk D owns the final text. -->
+- **Desktop:** Settings → Remote Access → Computer use, or the status row in
+  the host switcher. When Pane is connected to a remote host, the setting
+  controls that host.
+- **Headless host:** `runpane computer-use on [--engine auto|cua-driver]`,
+  from a shell outside Pane. It exits non-zero unless the machine ends Ready,
+  so setup scripts can check it. `runpane computer-use status` shows the
+  state. Each command takes `--json`.
 
 Turning it on installs the engine, registers the `pane` MCP server, installs
 the `pane-computer-use` skill for Claude Code, Codex and Cursor, checks OS
@@ -37,9 +41,9 @@ permissions and runs a self-test. The status shows the result:
 |---|---|
 | Off | Computer use is off on this machine. |
 | Installing… | Pane is installing the engine. |
-| Needs permission: *permission* | Click **Open System Settings** and grant the named permission to **Cua Driver** (on macOS it needs Accessibility and Screen Recording). The status rechecks when you return. |
+| Needs permission: *permission* | Click **Open System Settings** and turn on **Cua Driver** in the Privacy pane it opens. On macOS it needs Screen Recording and Accessibility. Pane checks again every 5 seconds, so the status turns Ready soon after you grant it. |
 | No desktop session | The machine has no graphical session to drive (for example a headless Linux server). |
-| Self-test failed | View details shows what failed. |
+| Self-test failed | **View details** shows the engine's error. **Check again** reruns the readiness step. |
 | Ready · Cua Driver · checked *time* | Agents can use it. |
 
 Leave the engine choice next to the switch on **Auto**. In this release Auto
@@ -49,31 +53,38 @@ engine that Pane installs as a pinned release under its own data directory.
 ## What agents get
 
 The `js` tool runs the script in a separate process on the target machine, one
-per MCP connection, so each agent session starts fresh. Values the script stores on `globalThis` stay available
-to that agent's next call. `js_reset` clears them, and they also clear after 10
-idle minutes. A script stops after 300 seconds. Output is capped at about 25k
-tokens.
+per agent, so each agent session starts fresh. The process runs with your user's
+privileges, like the agent's own shell. Values the script stores on
+`globalThis` stay available to that agent's next call. `js_reset` clears them,
+and they also clear after 10 idle minutes. A script stops after 300 seconds.
+Output is capped at about 25k tokens and 20 images per call.
 
 `machine` picks the target machine. This release supports only the machine
 running the agent.
 
-Agents learn the API from the `pane-computer-use` skill and from the `js`
-tool's description. The layer under the API:
+Scripts use a Codex-style API: `cua.getApp('TextEdit')` binds an app's
+window, and verbs such as `click(12)`, `typeText(...)` and `getAXState()` act
+on it. Agents learn it from the `pane-computer-use` skill and from the `js`
+tool's description. Under the API, Pane:
 
-- returns only what changed in an app's tree since the last read, unless the
-  agent asks for the full tree;
-- waits for the app to settle after each action, including while it shows a
-  loading indicator;
-- keeps an element's index stable across reads of the same window;
-- queues actions on the same window, so two agents never interleave
-  keystrokes; actions on different windows run in parallel.
+- shows only what changed in an app's tree since the agent's last read
+  (added `+`, removed `-`, changed `~`), unless the agent asks for the full
+  tree;
+- waits for the app to settle after each action: 1 second, plus up to 5 more
+  while it shows a spinner or progress indicator;
+- keeps an element's id stable across reads of the same window, and gives a
+  control a new id when its label changes;
+- runs calls to the same app one after another, so two agents never
+  interleave keystrokes; calls to different apps run in parallel.
 
 ## Background and foreground
 
 Pane never moves focus on its own. When an app can't take an action in the
-background on your OS, the agent gets a `needs_foreground` result. When no background route works, it may
-retry that one action with `{ foreground: true }`. Pane shows a notice ("Pane:
-*agent* is bringing *App* to the front") before the window comes forward.
+background on your OS, the action fails with `needs_foreground`. When no
+background route works, the agent may retry that one action with
+`{ foreground: true }`. Pane first posts a notification ("Pane: *agent* is
+bringing *App* to the front"), then brings the window forward. It does not wait
+for you to respond. The same line appears in the agent's tool result.
 
 ## Apps Pane allows
 
@@ -87,12 +98,13 @@ personal data into a third-party site.
 
 ## Replays and pull requests
 
-<!-- P4-PENDING: location and replay link from plan P4; chunk F owns the final text. -->
-
-Each run saves one screenshot per step and a replay page that steps through
-them with the action at each step. They live in the session's artifacts folder,
-`~/.pane/artifacts/<session id>/` (or under `PANE_DIR` when set), and open from the pane. Archiving the
-session deletes them, like its other artifacts.
+Every action records a step: the window screenshot after the app settles,
+the action and its result. Steps are saved in the agent's Pane under
+`~/.pane/artifacts/<pane id>/computer-use/` (under `PANE_DIR` when set).
+After each run, Pane rebuilds `replay.html` there. It is one offline page that
+steps through every run in that Pane and opens as a tab in the Pane, without
+taking focus. Runs started outside a Pane terminal leave no replay. Archiving
+the Pane deletes these files, like its other artifacts.
 
 Pane uploads nothing. When an agent opens a pull request, the skill tells it to
 leave out frames that show secrets or unrelated windows, attach the rest, and
@@ -104,7 +116,8 @@ like any other tool output.
 ## Turn it off
 
 Switch it off in the same place, or run `runpane computer-use off`. A running
-script stops, the engine exits, and the next call returns "Computer use is off
+script stops, the engine exits, Pane removes the skill, and the next call
+returns "Computer use is off
 on this machine. Turn it on in Pane's Remote Access settings."
 
 ## Limits in this release
@@ -112,4 +125,7 @@ on this machine. Turn it on in Pane's Remote Access settings."
 - Only the machine running the agent. Other machines answer "Only this machine
   is supported yet."
 - Dragging on macOS needs `{ foreground: true }`.
+- `paste` handles plain text and Markdown, not HTML. When the clipboard holds
+  something richer than text, `paste` types the text instead, so your
+  clipboard is never lost.
 - No live video, shared cursor or human takeover; screenshots and replays only.

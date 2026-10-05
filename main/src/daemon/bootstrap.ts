@@ -27,7 +27,7 @@ import { OrchestrationSessionManager } from '../services/orchestrationSessionMan
 import { TaskQueue } from '../services/taskQueue';
 import { registerIpcHandlers } from '../ipc';
 import { isLockOwnerLive } from '../ipc/runpane';
-import { getComputerUseEngine, setComputerUseEngineChoice } from '../services/computerUse/activeEngine';
+import { configureComputerUseEngine, getComputerUseEngine } from '../services/computerUse/activeEngine';
 import { PaneDaemonServer } from './server';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
@@ -321,7 +321,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     log: (message, error) => logger.warn(message, error),
   });
 
-  setComputerUseEngineChoice(() => configManager.getConfig().computerUse?.engine ?? 'auto');
+  configureComputerUseEngine({
+    engineChoice: () => configManager.getConfig().computerUse?.engine ?? 'auto',
+    // Declared below; only called later, when a Codex runtime breaks mid-session.
+    onFallback: () => void computerUseReadiness.check(),
+  });
   // Runs on headless hosts too, so turning computer use on there registers the Pane MCP server and skill.
   const computerUseReadiness = new ComputerUseReadinessService({
     getSetting: () => configManager.getConfig().computerUse,

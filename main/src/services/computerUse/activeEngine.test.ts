@@ -73,16 +73,68 @@ describe('engine selection', () => {
     expect(selected.id).toBe('codex');
   });
 
-  it('keeps a selected Codex runtime on later checks without stopping it', async () => {
+  it('keeps a Codex runtime with calls in flight on a later check, without testing or stopping it', async () => {
+    let finishCall: () => void = () => undefined;
     const codex = engine('codex');
+    const call = codex.fake.call;
+    codex.fake.call = (tool, args) => (tool === 'list_apps' ? call(tool, args) : new Promise((resolve) => { finishCall = () => resolve(call(tool, args)); }));
     const selected = selector(codex.fake, engine('cua-driver').fake);
+    await selected.status();
 
+    const running = selected.call('click', {});
+    await Promise.resolve();
     await selected.status();
-    await selected.status();
+    finishCall();
+    await running;
 
     expect(selected.id).toBe('codex');
-    expect(codex.calls).toEqual(['list_apps']);
+    expect(codex.calls).toEqual(['list_apps', 'click']);
     expect(codex.stops()).toBe(0);
+  });
+
+  it('falls back to Cua Driver when a selected runtime stops answering a later check', async () => {
+    let answering = true;
+    const codex = engine('codex');
+    codex.fake.call = async () => (answering ? { ok: true, data: [] } : { ok: false, error: { code: 'engine_error', message: 'The Codex runtime exited.' } });
+    const selected = selector(codex.fake, engine('cua-driver').fake);
+    await selected.status();
+
+    answering = false;
+    const status = await selected.status();
+
+    expect(selected.id).toBe('cua-driver');
+    expect(status.fallbackReason).toBe('Codex runtime not used: it refused calls from Pane (The Codex runtime exited.).');
+  });
+
+  it('falls back mid-session when the runtime itself fails a call and stays down, and says so', async () => {
+    let answering = true;
+    let fallbacks = 0;
+    const codex = engine('codex');
+    codex.fake.call = async () => (answering ? { ok: true, data: [] } : { ok: false, error: { code: 'engine_error', message: "The Codex runtime didn't answer within 75 s." } });
+    const cua = engine('cua-driver');
+    const selected = createEngineSelector({ engineChoice: () => 'auto', codex: codex.fake, cua: cua.fake, onFallback: () => { fallbacks += 1; } });
+    await selected.status();
+
+    answering = false;
+    await selected.call('click', {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(selected.id).toBe('cua-driver');
+    expect(fallbacks).toBe(1);
+    await expect(selected.call('click', {})).resolves.toEqual({ ok: true, data: { engine: 'cua-driver' } });
+  });
+
+  it('keeps the runtime when only one action fails', async () => {
+    const codex = engine('codex');
+    const call = codex.fake.call;
+    codex.fake.call = async (tool, args) => (tool === 'click' ? { ok: false, error: { code: 'codex_error', message: 'Element 99 does not exist' } } : call(tool, args));
+    const selected = selector(codex.fake, engine('cua-driver').fake);
+    await selected.status();
+
+    await selected.call('click', {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(selected.id).toBe('codex');
   });
 
   it('leaves no engine running when computer use stops during a selection', async () => {
@@ -93,7 +145,12 @@ describe('engine selection', () => {
       codex.fake.status = status;
       return new Promise((resolve) => { finishStatus = () => resolve(status()); });
     };
-    const selected = selector(codex.fake, engine('cua-driver').fake);
+
+    const cua = engine('cua-driver');
+    let cuaStatusReads = 0;
+    const cuaStatus = cua.fake.status;
+    cua.fake.status = () => { cuaStatusReads += 1; return cuaStatus(); };
+    const selected = selector(codex.fake, cua.fake);
 
     const checking = selected.status();
     await selected.stop();
@@ -102,5 +159,7 @@ describe('engine selection', () => {
     await checking;
 
     expect(codex.stops()).toBeGreaterThan(stopsAfterTurnOff);
+    // Reading Cua Driver's status starts its helper, so a turned-off check must not.
+    expect(cuaStatusReads).toBe(0);
   });
 });

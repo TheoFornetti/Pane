@@ -110,4 +110,27 @@ describe('the layer over the Codex runtime', () => {
 
     await expect(app.typeText('ls')).rejects.toThrow('not allowed to use the app');
   });
+
+  it('shows the foreground notice before each input on Windows, where the runtime brings the window forward', async () => {
+    const order: string[] = [];
+    const { cua } = createCua({
+      driver: codexDriver(async (tool, args) => {
+        order.push(tool);
+        if (tool === 'list_windows') return { ok: true, data: { windows: [{ id: 5, app: 'Notepad', title: 'notes.txt' }] } };
+        if (tool === 'get_app_state') return { ok: true, data: { state: `window ${String(args.window_id)}` } };
+        return { ok: true, data: { broughtForward: true } };
+      }, 'windows'),
+      write: () => undefined,
+      emitImage: () => undefined,
+      showForegroundNotice: async ({ app }) => {
+        order.push(`notice ${app}`);
+        return undefined;
+      },
+    });
+    const app = await cua.getApp({ windowId: 5 });
+
+    await app.typeText('hi');
+
+    expect(order.slice(order.indexOf('notice Notepad'))).toEqual(['notice Notepad', 'type_text', 'state_and_screenshot']);
+  });
 });

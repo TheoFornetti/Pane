@@ -272,11 +272,12 @@ export class App {
     const at = new Date().toISOString();
     const index = this.layer.nextStep++;
     const stepArgs: JsonObject = { app: this.name, windowId: this.window.id, ...args };
-    if (options.foreground) stepArgs.foreground = true;
+    const forward = options.foreground === true || this.layer.driver.inputBringsForward === true;
+    if (forward) stepArgs.foreground = true;
     let failure: Error | undefined;
     let result: JsonValue = 'ok';
     try {
-      if (options.foreground) {
+      if (forward) {
         const notice = await this.layer.host.showForegroundNotice({ app: this.name, action: verb });
         if (notice) this.layer.host.write(notice);
       }

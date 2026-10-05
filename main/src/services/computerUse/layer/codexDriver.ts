@@ -82,6 +82,7 @@ export function codexDriver(call: CallEngine, platform: DesktopDriver['platform'
   const driver: DesktopDriver = {
     platform,
     renders: 'native',
+    inputBringsForward: platform === 'windows',
 
     listApps,
 

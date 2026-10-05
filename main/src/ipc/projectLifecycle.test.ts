@@ -43,3 +43,26 @@ it.each(['session', 'project'] as const)('stops the %s logs process before delet
   await expect(registry.invoke('projects:delete', ['1'])).resolves.toMatchObject({ success: true });
   expect(removedWhileRunning).toBe(false);
 });
+
+it('stores a WSL UNC path edited in project settings as the Linux path and its distro', async () => {
+  const updateProject = vi.fn((_id: number, updates: object) => ({ id: 1, name: 'Repo', ...updates }));
+  // SAFETY: The fixture provides only the repository boundary used by projects:update.
+  const services = {
+    databaseService: { updateProject },
+    sessionManager: { invalidateProjectContext: () => {}, emit: () => true },
+  } as unknown as AppServices;
+  // SAFETY: This registry test only needs IpcMain.handle for channel binding.
+  const ipc = { handle: vi.fn() } as IpcMain;
+  const registry = new PaneCommandRegistry();
+  registerProjectHandlers(ipc, services, registry);
+
+  await registry.invoke('projects:update', ['1', { path: '\\\\wsl.localhost\\Ubuntu\\home\\me\\repo' }]);
+  expect(updateProject).toHaveBeenLastCalledWith(1, {
+    path: '/home/me/repo',
+    wsl_enabled: true,
+    wsl_distribution: 'Ubuntu',
+  });
+
+  await registry.invoke('projects:update', ['1', { path: '/home/me/other' }]);
+  expect(updateProject).toHaveBeenLastCalledWith(1, { path: '/home/me/other' });
+});

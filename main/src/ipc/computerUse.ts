@@ -76,12 +76,13 @@ export function registerComputerUseHandlers(
         droppedSteps += 1;
         return;
       }
-      let screenshotPng = reported.screenshotPng;
-      if (screenshotPng && screenshotPng.length > MAX_SCREENSHOT_BASE64_CHARS) {
-        screenshotPng = undefined;
+      const { screenshotPng, ...fields } = reported;
+      let screenshot = fields.screenshot ?? (screenshotPng ? { mime: 'image/png', base64: screenshotPng } : undefined);
+      if (screenshot && screenshot.base64.length > MAX_SCREENSHOT_BASE64_CHARS) {
+        screenshot = undefined;
         droppedScreenshots += 1;
       }
-      const step = { ...reported, screenshotPng, index: reported.index ?? count, args: reported.args ?? {}, result: reported.result ?? null, at: reported.at ?? new Date().toISOString() };
+      const step = { ...fields, screenshot, index: reported.index ?? count, args: reported.args ?? {}, result: reported.result ?? null, at: reported.at ?? new Date().toISOString() };
       count += 1;
       saving = saving.then(() => saveStep(dir, run, step)).catch((error) => console.error('[computer-use] Failed to save a step:', error));
     };

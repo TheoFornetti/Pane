@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
+import type { EngineImage } from './engine';
 
 /** One action our layer took, with the target window as it looked afterwards. */
 export interface ComputerUseStep {
@@ -8,8 +9,8 @@ export interface ComputerUseStep {
   action: string;
   args: JsonObject;
   result: JsonValue;
-  /** Base64 PNG without a `data:` prefix; missing when the capture failed. */
-  screenshotPng?: string;
+  /** The target window after the action, as the engine returned it; missing when the capture failed. */
+  screenshot?: EngineImage;
   at: string;
 }
 
@@ -19,11 +20,15 @@ export const reportedStepSchema = boundary.object({
   action: boundary.nonEmptyString,
   args: boundary.optional(boundary.jsonObject),
   result: boundary.optional(boundary.json),
+  screenshot: boundary.optional(boundary.object({ mime: boundary.string, base64: boundary.string })),
+  /** The earlier PNG-only field, read when `screenshot` is absent. */
   screenshotPng: boundary.optional(boundary.string),
   at: boundary.optional(boundary.string),
 });
 
 const INDEX_FILE = 'steps.jsonl';
+/** Screenshot types the replay saves, by file extension. Cua returns PNG, Codex JPEG. */
+const IMAGE_EXTENSIONS = new Map([['image/png', 'png'], ['image/jpeg', 'jpg'], ['image/webp', 'webp']]);
 const REPLAY_FILE = 'replay.html';
 
 const savedStepSchema = boundary.object({
@@ -38,15 +43,17 @@ const savedStepSchema = boundary.object({
 type SavedStep = ReturnType<typeof savedStepSchema.decode>;
 
 /**
- * Saves a step into `dir`: its screenshot as `steps/<run>-<index>.png` and a line in `steps.jsonl`.
+ * Saves a step into `dir`: its screenshot as `steps/<run>-<index>.<png|jpg|webp>` and a line in
+ * `steps.jsonl`. A screenshot of another type is left out.
  * Steps of one run must be saved in order; runs may save concurrently.
  */
 export async function saveStep(dir: string, run: string, step: ComputerUseStep): Promise<void> {
   let screenshot: string | undefined;
-  if (step.screenshotPng) {
-    screenshot = `steps/${run}-${String(step.index).padStart(4, '0')}.png`;
+  const extension = step.screenshot && IMAGE_EXTENSIONS.get(step.screenshot.mime);
+  if (step.screenshot && extension) {
+    screenshot = `steps/${run}-${String(step.index).padStart(4, '0')}.${extension}`;
     await fs.mkdir(path.join(dir, 'steps'), { recursive: true });
-    await fs.writeFile(path.join(dir, screenshot), Buffer.from(step.screenshotPng, 'base64'));
+    await fs.writeFile(path.join(dir, screenshot), Buffer.from(step.screenshot.base64, 'base64'));
   }
   const saved: SavedStep = { run, index: step.index, action: step.action, args: step.args, result: step.result, at: step.at, screenshot };
   await fs.mkdir(dir, { recursive: true });

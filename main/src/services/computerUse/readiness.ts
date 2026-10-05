@@ -92,7 +92,7 @@ export class ComputerUseReadinessService {
           await this.installing;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          return settle({ state: 'failed', engineChoice, detail: `Install failed: ${message}` });
+          return settle({ state: 'failed', engineChoice, step: 'install', detail: message });
         }
         if (stale()) return this.readiness;
         status = await engine.status();
@@ -101,7 +101,7 @@ export class ComputerUseReadinessService {
 
       if (!status.desktopSession) return settle({ state: 'no-desktop', engineChoice });
       if (!status.installed) {
-        return settle({ state: 'failed', engineChoice, detail: status.detail ?? `${ENGINE_APP_NAME} is not installed.` });
+        return settle({ state: 'failed', engineChoice, step: 'install', detail: status.detail ?? `${ENGINE_APP_NAME} is not installed.` });
       }
       const missing = missingPermission(status.permissions);
       if (missing) {
@@ -112,12 +112,12 @@ export class ComputerUseReadinessService {
 
       const test = await this.deps.selfTest(engine);
       if (!test.ok) {
-        return settle({ state: 'failed', engineChoice, detail: test.error?.message ?? 'The engine did not answer.' });
+        return settle({ state: 'failed', engineChoice, step: 'self-test', detail: test.error?.message ?? 'The engine did not answer.' });
       }
       // M1 runs every engine choice on Cua Driver; Auto picks the Codex runtime once its adapter ships (M3).
       return settle({ state: 'ready', engineChoice, engine: engine.id, checkedAt: this.deps.now() });
     } catch (error) {
-      return settle({ state: 'failed', engineChoice, detail: error instanceof Error ? error.message : String(error) });
+      return settle({ state: 'failed', engineChoice, step: 'self-test', detail: error instanceof Error ? error.message : String(error) });
     }
   }
 

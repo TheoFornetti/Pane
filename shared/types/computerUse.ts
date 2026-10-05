@@ -11,7 +11,7 @@ export type ComputerUseReadiness =
   | { state: 'installing'; engineChoice: ComputerUseEngineChoice }
   | { state: 'needs-permission'; engineChoice: ComputerUseEngineChoice; permission: ComputerUsePermission; appName: string }
   | { state: 'no-desktop'; engineChoice: ComputerUseEngineChoice }
-  | { state: 'failed'; engineChoice: ComputerUseEngineChoice; detail: string }
+  | { state: 'failed'; engineChoice: ComputerUseEngineChoice; step: 'install' | 'self-test'; detail: string }
   | { state: 'ready'; engineChoice: ComputerUseEngineChoice; engine: ComputerUseEngineName; checkedAt: number };
 
 export type ComputerUseState = ComputerUseReadiness['state'];
@@ -43,7 +43,7 @@ export function computerUseStatusText(readiness: ComputerUseReadiness, now: numb
     case 'installing': return 'Installing…';
     case 'needs-permission': return `Needs permission: ${readiness.permission}`;
     case 'no-desktop': return 'No desktop session';
-    case 'failed': return 'Self-test failed';
+    case 'failed': return readiness.step === 'install' ? 'Install failed' : 'Self-test failed';
     case 'ready': return `Ready · ${ENGINE_LABELS[readiness.engine]} · checked ${formatCheckedAt(readiness.checkedAt, now)}`;
   }
 }

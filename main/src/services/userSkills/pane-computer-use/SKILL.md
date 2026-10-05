@@ -78,9 +78,11 @@ use a fresh id.
 
 ## Observe, act, verify
 
-1. **Observe.** `getApp` shows the tree; read it before the first action. An
-   element keeps its id across reads of the same window. A control whose label
-   changes gets a new id, so a stale id never hits the wrong control.
+1. **Observe.** `getApp` shows the tree; read it before the first action. Use
+   element ids from your latest read of that window. Diff reads keep ids
+   stable; on the Codex runtime a full read (`disableDiffing: true`) renumbers
+   them. On Cua Driver a control whose label changes gets a new id, so a stale
+   id never hits the wrong control.
 2. **Act** on elements by id. Use coordinates only when the tree lacks the
    element, and take a screenshot first to find the point.
 3. **Verify.** Read again and check that the change you expected happened.

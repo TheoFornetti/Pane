@@ -34,7 +34,7 @@ Voice dictation uses the transcription provider configured on the host. In the E
 
 ## Push delivery operator setup
 
-Push is host-originated: killed-app delivery is an APNs alert (iOS) or FCM notification payload (Android), not a local notification or background JavaScript claim. The host sends generic text and routing metadata; see the payload details below.
+Push is host-originated: killed-app delivery is an APNs alert (iOS) or FCM notification payload (Android), not a local notification or background JavaScript claim. The host sends the Pane or Session name and routing metadata; see the payload details below.
 
 For iOS, register `com.dcouple.pane.mobile` (or your signed bundle identifier), enable Push Notifications, add the capability in Xcode, and set these only in the host service environment:
 
@@ -90,7 +90,7 @@ The app asks notification permission after a successful paired connection. Notif
 
 Push-state writes merge with the latest host configuration inside the serialized config-write queue, so they cannot restore a concurrently revoked pairing. Hosts without registered mobile clients do not persist push state on every agent transition.
 
-The daemon sends generic APNs/FCM alert text for both a newly blocked turn and a `working → idle` completion. Tap metadata contains the client-local profile ID (including its host label, URL, and token suffix) and pane/panel IDs; no terminal output or full bearer token is sent. A tap is held in encrypted native storage until saved profiles load, then reconnects only to the matching saved profile, including when switching panels inside the selected pane. An unknown/deleted profile or pane produces an error without connecting to an unrecognized host. Push commands derive client identity from the authenticated request, ignoring caller-supplied identity arguments.
+Only agent panels send alerts, never plain shells. The title is the Pane name, or the Session name for a Session's orchestrator. A newly blocked agent sends "<name> is blocked" at once. A finished turn sends "<name> needs your attention" only when the agent showed its own working signal (title spinner or working chrome) and then stayed idle for 10 s; terminal output alone, such as typing or a redraw, never counts. Each Pane has one APNs collapse id and `thread-id` and one FCM `tag`, so a newer alert replaces the older one, and opening a Pane in the app removes its delivered alerts. Every send logs `[Pane mobile push]` with the platform, the kind and, on failure, the provider's status and reason. Tap metadata contains the client-local profile ID (including its host label, URL, and token suffix) and pane/panel IDs; no terminal output or full bearer token is sent. A tap is held in encrypted native storage until saved profiles load, then reconnects only to the matching saved profile, including when switching panels inside the selected pane. An unknown/deleted profile or pane produces an error without connecting to an unrecognized host. Push commands derive client identity from the authenticated request, ignoring caller-supplied identity arguments.
 
 The Expo app in `native/` uses the same host commands and payload. It registers the raw APNs/FCM device token, not an Expo push token, and routes taps and `pane-remote://` / `pane://pane/…` links as described in `native/README.md` (Notifications and links).
 

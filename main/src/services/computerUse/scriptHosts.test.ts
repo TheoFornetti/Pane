@@ -211,4 +211,16 @@ describe('ScriptHosts', () => {
     await h.run('a', `await engine.call('click', { pid: 7 })`);
     expect(notices).toHaveLength(1);
   });
+
+  it('shows one foreground notice per held action, not one per call', async () => {
+    const notices: string[] = [];
+    const h = makeHosts(fakeEngine().engine, { showForegroundNotice: async ({ app }) => { notices.push(app); return `Pane: bringing ${app}`; } });
+    const result = await h.run('a', `return await engine.hold({ pid: 7 }, async () => {
+      const first = await engine.call('type_text', { pid: 7, text: 'a', delivery_mode: 'foreground' });
+      const second = await engine.call('press_key', { pid: 7, key: 'Return', delivery_mode: 'foreground' });
+      return [first.notice, second.notice].join(' | ');
+    })`);
+    expect(notices).toEqual(['TextEdit']);
+    expect(result.text).toBe('Pane: bringing TextEdit | Pane: bringing TextEdit');
+  });
 });

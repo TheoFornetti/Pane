@@ -107,7 +107,7 @@ export interface StepRecord {
   action: string;
   args: JsonObject;
   result: JsonValue;
-  /** Base64 PNG of the target window after the action settled, without a data: prefix. */
-  screenshotPng?: string;
+  /** The target window after the action settled, in the engine's image type (PNG on Cua Driver, JPEG on Codex). */
+  screenshot?: EngineImage;
   at: string;
 }

@@ -75,6 +75,8 @@ function trackChild(child: ChildProcess): void {
 interface Hold {
   lanes: string[];
   release: () => void;
+  /** The notice line once this action has shown one: one notice per action, not per call. */
+  notice?: string;
 }
 
 interface Host {
@@ -239,19 +241,24 @@ export class ScriptHosts {
       return;
     }
     // A call queued behind others must not act once its script was stopped, reset, or turned off.
-    const call = () => (host.closed ? Promise.resolve(STOPPED) : this.callEngine(connectionId, message.tool, message.args));
     const lane = laneFor(message.tool, message.args);
+    const hold = this.holdFor(host, lane);
+    const call = () => (host.closed ? Promise.resolve(STOPPED) : this.callEngine(connectionId, message.tool, message.args, hold));
     // Calls inside the host's own hold already own their lane.
-    const run = this.heldBy(host, lane) ? call() : this.inLane(lane, call);
+    const run = hold ? call() : this.inLane(lane, call);
     void run.then((result) => {
       if (!host.closed) host.child.send({ type: 'callResult', callId: message.callId, result } satisfies ParentMessage);
     });
   }
 
-  private async callEngine(connectionId: string, tool: string, args: JsonObject): Promise<EngineResult> {
+  private async callEngine(connectionId: string, tool: string, args: JsonObject, hold?: Hold): Promise<EngineResult> {
     try {
       // The notice is the daemon's job: a script can send a foreground call without asking the layer.
-      const notice = args.delivery_mode === 'foreground' ? await this.showForegroundNotice(connectionId, args) : undefined;
+      let notice: string | undefined;
+      if (args.delivery_mode === 'foreground') {
+        notice = hold?.notice ?? await this.showForegroundNotice(connectionId, args);
+        if (hold) hold.notice = notice;
+      }
       const result = await this.options.getEngine().call(tool, args);
       return notice === undefined ? result : { ...result, notice };
     } catch (error) {
@@ -304,8 +311,8 @@ export class ScriptHosts {
     for (const holdId of [...host.holds.keys()]) this.release(host, holdId);
   }
 
-  private heldBy(host: Host, lane: string): boolean {
-    return [...host.holds.values()].some((hold) => hold.lanes.includes(lane));
+  private holdFor(host: Host, lane: string): Hold | undefined {
+    return [...host.holds.values()].find((hold) => hold.lanes.includes(lane));
   }
 
   /** Resolves once `lane` is ours, with the function that gives it back. */

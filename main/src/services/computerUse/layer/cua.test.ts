@@ -113,8 +113,8 @@ describe('cua layer', () => {
     await app.click(2, { mouseButton: 'r' });
     await app.pressKey('super+a');
     expect(desk.steps).toEqual([
-      { index: 0, action: 'click', args: { app: 'Notes', windowId: 7, target: 2, button: 'right', clickCount: 1 }, result: 'ok', screenshotPng: 'c2hvdA==', at: expect.any(String) },
-      { index: 1, action: 'pressKey', args: { app: 'Notes', windowId: 7, key: 'super+a' }, result: 'ok', screenshotPng: 'c2hvdA==', at: expect.any(String) },
+      { index: 0, action: 'click', args: { app: 'Notes', windowId: 7, target: 2, button: 'right', clickCount: 1 }, result: 'ok', screenshot: { mime: 'image/png', base64: 'c2hvdA==' }, at: expect.any(String) },
+      { index: 1, action: 'pressKey', args: { app: 'Notes', windowId: 7, key: 'super+a' }, result: 'ok', screenshot: { mime: 'image/png', base64: 'c2hvdA==' }, at: expect.any(String) },
     ]);
   });
 

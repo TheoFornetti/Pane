@@ -45,10 +45,26 @@ permissions and runs a self-test. The status shows the result:
 | No desktop session | The machine has no graphical session to drive (for example a headless Linux server). |
 | Self-test failed | **View details** shows the engine's error. **Check again** reruns the readiness step. |
 | Ready · Cua Driver · checked *time* | Agents can use it. |
+| Ready · Codex runtime · checked *time* | Agents can use it, through your installed Codex runtime. |
 
-Leave the engine choice next to the switch on **Auto**. In this release Auto
-and **Cua Driver** both use [Cua Driver](https://github.com/trycua/cua), an open-source
-engine that Pane installs as a pinned release under its own data directory.
+The engine choice next to the switch is **Auto** or **Cua Driver**:
+
+- **Auto** uses the Codex runtime from your installed ChatGPT desktop app when
+  it is installed and answers Pane, and Cua Driver otherwise. When Auto falls
+  back, the Ready status says why, for example "Codex runtime not used: ChatGPT
+  is not installed." It picks again on each check, so installing ChatGPT later
+  switches it over.
+- **Cua Driver** always uses [Cua Driver](https://github.com/trycua/cua), an
+  open-source engine that Pane installs as a pinned release under its own data
+  directory.
+
+On a Mac, the first time Auto starts the Codex runtime, Pane sets the
+user-wide macOS default `ComputerUseAllowForbiddenTargets` to `YES`, so the
+runtime can operate apps it refuses by default, such as terminals and password
+managers. ChatGPT reads the same setting. Turning computer use off leaves it
+set; remove it with `defaults delete -g ComputerUseAllowForbiddenTargets`.
+
+On Windows, the Codex runtime brings a window to the front to send it input.
 
 ## What agents get
 
@@ -100,7 +116,7 @@ personal data into a third-party site.
 
 Every action records a step: the window screenshot after the app settles,
 the action and its result. Steps are saved in the agent's Pane under
-`~/.pane/artifacts/<pane id>/computer-use/` (under `PANE_DIR` when set).
+`~/.pane/artifacts/<session id>/computer-use/` (under `PANE_DIR` when set).
 After each run, Pane rebuilds `replay.html` there. It is one offline page that
 steps through every run in that Pane and opens as a tab in the Pane, without
 taking focus. Runs started outside a Pane terminal leave no replay. Archiving
@@ -117,8 +133,9 @@ like any other tool output.
 
 Switch it off in the same place, or run `runpane computer-use off`. A running
 script stops, the engine exits, Pane removes the skill, and the next call
-returns "Computer use is off
-on this machine. Turn it on in Pane's Remote Access settings."
+returns "Computer use is off on this machine. Turn it on in Pane's Remote
+Access settings." On a Mac, `ComputerUseAllowForbiddenTargets` stays set (see
+above).
 
 ## Limits in this release
 

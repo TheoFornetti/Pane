@@ -34,7 +34,9 @@ function guidance(readiness: ComputerUseReadiness): string {
     case 'no-desktop':
       return 'This machine has no graphical desktop session for agents to operate.';
     case 'failed':
-      return 'Pane could not reach the engine on this machine.';
+      return readiness.step === 'install'
+        ? 'Pane could not install Cua Driver on this machine.'
+        : 'Pane could not reach the engine on this machine.';
   }
 }
 

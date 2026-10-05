@@ -2921,7 +2921,6 @@ export const RUNPANE_CONTRACT = {
         "runpane computer-use status [--json] [--pane-dir <path>]",
         "",
         "Options:",
-        "  --engine <auto|cua-driver>   Engine for this machine (on). Auto uses Cua Driver until the Codex runtime is supported.",
         "  --json                       Print JSON output.",
         "  --pane-dir <path>            Connect to a specific Pane data directory."
       ],
@@ -2930,7 +2929,7 @@ export const RUNPANE_CONTRACT = {
         "runpane computer-use on [--engine auto|cua-driver] [--json] [--pane-dir <path>]",
         "",
         "Options:",
-        "  --engine <auto|cua-driver>   Engine for this machine (on). Auto uses Cua Driver until the Codex runtime is supported.",
+        "  --engine <auto|cua-driver>   Engine for this machine (on). Auto uses the Codex runtime where it works, else Cua Driver.",
         "  --json                       Print JSON output.",
         "  --pane-dir <path>            Connect to a specific Pane data directory."
       ],
@@ -2939,7 +2938,6 @@ export const RUNPANE_CONTRACT = {
         "runpane computer-use off [--json] [--pane-dir <path>]",
         "",
         "Options:",
-        "  --engine <auto|cua-driver>   Engine for this machine (on). Auto uses Cua Driver until the Codex runtime is supported.",
         "  --json                       Print JSON output.",
         "  --pane-dir <path>            Connect to a specific Pane data directory."
       ],
@@ -2950,7 +2948,7 @@ export const RUNPANE_CONTRACT = {
         "Computer use lets agents see and operate apps on this machine through the Pane js tool.",
         "It is set per machine, off by default, and only from Pane's Remote Access settings or this command.",
         "Turning it on installs Cua Driver, registers the Pane MCP server and skill, checks OS permissions, and runs a self-test.",
-        "`on` refuses inside Pane terminals, where agents run."
+        "`on` refuses inside Pane terminals ($PANE_SESSION_ID set), where agents run. That slows agents down but is no security boundary: a shell without that variable can still turn it on."
       ]
     },
     "pip": {
@@ -4022,7 +4020,6 @@ export const RUNPANE_CONTRACT = {
         "python -m runpane computer-use status [--json] [--pane-dir <path>]",
         "",
         "Options:",
-        "  --engine <auto|cua-driver>   Engine for this machine (on). Auto uses Cua Driver until the Codex runtime is supported.",
         "  --json                       Print JSON output.",
         "  --pane-dir <path>            Connect to a specific Pane data directory."
       ],
@@ -4031,7 +4028,7 @@ export const RUNPANE_CONTRACT = {
         "python -m runpane computer-use on [--engine auto|cua-driver] [--json] [--pane-dir <path>]",
         "",
         "Options:",
-        "  --engine <auto|cua-driver>   Engine for this machine (on). Auto uses Cua Driver until the Codex runtime is supported.",
+        "  --engine <auto|cua-driver>   Engine for this machine (on). Auto uses the Codex runtime where it works, else Cua Driver.",
         "  --json                       Print JSON output.",
         "  --pane-dir <path>            Connect to a specific Pane data directory."
       ],
@@ -4040,7 +4037,6 @@ export const RUNPANE_CONTRACT = {
         "python -m runpane computer-use off [--json] [--pane-dir <path>]",
         "",
         "Options:",
-        "  --engine <auto|cua-driver>   Engine for this machine (on). Auto uses Cua Driver until the Codex runtime is supported.",
         "  --json                       Print JSON output.",
         "  --pane-dir <path>            Connect to a specific Pane data directory."
       ],
@@ -4051,7 +4047,7 @@ export const RUNPANE_CONTRACT = {
         "Computer use lets agents see and operate apps on this machine through the Pane js tool.",
         "It is set per machine, off by default, and only from Pane's Remote Access settings or this command.",
         "Turning it on installs Cua Driver, registers the Pane MCP server and skill, checks OS permissions, and runs a self-test.",
-        "`on` refuses inside Pane terminals, where agents run."
+        "`on` refuses inside Pane terminals ($PANE_SESSION_ID set), where agents run. That slows agents down but is no security boundary: a shell without that variable can still turn it on."
       ]
     }
   },
@@ -13231,7 +13227,7 @@ export const RUNPANE_CONTRACT = {
       "computer-use on": {
         "name": "computer-use on",
         "summary": "Turn computer use on for this machine: install the engine, register the Pane MCP server and skill, check permissions, and self-test.",
-        "details": "For people setting up a machine, including headless hosts. It waits for the readiness step and prints the resulting status. It refuses inside Pane terminals ($PANE_SESSION_ID set), where agents run, and it is not a Pane MCP tool.",
+        "details": "For people setting up a machine, including headless hosts. It waits for the readiness step and prints the resulting status. It refuses inside Pane terminals ($PANE_SESSION_ID set), where agents run; that is a speed bump, not a security boundary. It is not a Pane MCP tool.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [

@@ -83,7 +83,7 @@ describe('ComputerUseReadinessService', () => {
       install: async () => { throw new Error('Checksum mismatch for cua-driver 0.4.2'); },
     });
     expect(await service.set({ enabled: true })).toEqual({
-      state: 'failed', engineChoice: 'auto', detail: 'Install failed: Checksum mismatch for cua-driver 0.4.2',
+      state: 'failed', engineChoice: 'auto', step: 'install', detail: 'Checksum mismatch for cua-driver 0.4.2',
     });
   });
 
@@ -91,7 +91,7 @@ describe('ComputerUseReadinessService', () => {
     const engine = fakeEngine({}, { ok: false, error: { code: 'timeout', message: 'list_apps timed out after 10 s' } }).engine;
     const { service } = createService(engine);
     expect(await service.set({ enabled: true })).toEqual({
-      state: 'failed', engineChoice: 'auto', detail: 'list_apps timed out after 10 s',
+      state: 'failed', engineChoice: 'auto', step: 'self-test', detail: 'list_apps timed out after 10 s',
     });
   });
 

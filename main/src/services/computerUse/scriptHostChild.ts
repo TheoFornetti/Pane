@@ -1,6 +1,7 @@
 /**
  * One agent connection's script process. It runs each `js` call in a context that persists
- * between calls, and reaches the desktop only through `engine.call`, which the daemon serves.
+ * between calls, and reaches the desktop only through engine calls the daemon serves: raw ones as
+ * `engine.call`, and through our layer as `cua`.
  */
 import { Console } from 'node:console';
 import { Writable } from 'node:stream';
@@ -9,6 +10,9 @@ import vm from 'node:vm';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import type { EngineImage, EngineResult } from './engine';
 import type { ChildMessage, ParentMessage } from './scriptHostProtocol';
+import { createCua } from './layer/cua';
+import { cuaDriverDriver } from './layer/cuaDriverDriver';
+import type { StepRecord } from './layer/driver';
 
 const imageSchema = boundary.object({ mime: boundary.string, base64: boundary.string });
 /** `image()` takes one image, or an engine result and adds all of its images. */
@@ -17,6 +21,8 @@ type ImageSource = EngineImage | Pick<EngineResult, 'images'>;
 
 const pendingCalls = new Map<number, (result: EngineResult) => void>();
 let nextCallId = 1;
+const pendingNotices = new Map<number, (text: string | undefined) => void>();
+let nextNoticeId = 1;
 let output = '';
 let images: EngineImage[] = [];
 
@@ -37,22 +43,50 @@ function scriptFrames(stack: string): string {
   return stack.split('\n').filter((line) => !/^\s+at /.test(line) || /[ (]js:\d/.test(line)).join('\n');
 }
 
+function callEngine(tool: string, args: JsonObject): Promise<EngineResult> {
+  const message: ChildMessage = { type: 'call', callId: nextCallId++, tool, args };
+  return new Promise((resolve) => {
+    pendingCalls.set(message.callId, resolve);
+    send(message);
+  });
+}
+
+/** Our layer reports each action here; the daemon saves it for the session's replay. */
+function recordStep(step: StepRecord | JsonObject): void {
+  // A JSON round trip drops `undefined` fields, such as a missing screenshot.
+  send({ type: 'step', step: decodeBoundary(JSON.parse(JSON.stringify(step)), boundary.jsonObject) });
+}
+
+/** Resolves once the daemon has shown the user the foreground notice, with the line for the result. */
+function showForegroundNotice(info: { app: string; action: string }): Promise<string | undefined> {
+  const noticeId = nextNoticeId++;
+  return new Promise((resolve) => {
+    pendingNotices.set(noticeId, resolve);
+    send({ type: 'foregroundNotice', noticeId, ...info });
+  });
+}
+
+const layer = createCua({
+  driver: cuaDriverDriver(callEngine),
+  write: (text) => {
+    output += `${text}\n`;
+  },
+  emitImage: (image) => {
+    images.push(image);
+  },
+  recordStep,
+  showForegroundNotice,
+});
+
 const context = vm.createContext({
+  cua: layer.cua,
   engine: {
     // Scripts are untyped, so both arguments are parsed before they leave this process.
     call(tool: string, args: JsonObject = {}): Promise<EngineResult> {
-      const message: ChildMessage = {
-        type: 'call',
-        callId: nextCallId++,
-        tool: decodeBoundary(tool, boundary.nonEmptyString),
-        args: decodeBoundary(args, boundary.jsonObject),
-      };
-      return new Promise((resolve) => {
-        pendingCalls.set(message.callId, resolve);
-        send(message);
-      });
+      return callEngine(decodeBoundary(tool, boundary.nonEmptyString), decodeBoundary(args, boundary.jsonObject));
     },
   },
+  recordStep,
   image(source: ImageSource): void {
     const parsed = decodeBoundary(source, imageSourceSchema);
     const added = 'images' in parsed ? parsed.images : [parsed];
@@ -73,6 +107,7 @@ const context = vm.createContext({
 async function run(runId: number, code: string): Promise<void> {
   output = '';
   images = [];
+  layer.beginRun();
   let ok = true;
   try {
     // An async body allows top-level await and `return`. State that should outlive the call goes on globalThis.
@@ -95,6 +130,11 @@ async function run(runId: number, code: string): Promise<void> {
 process.on('message', (message: ParentMessage) => {
   if (message.type === 'run') {
     void run(message.runId, message.code);
+    return;
+  }
+  if (message.type === 'foregroundNoticeShown') {
+    pendingNotices.get(message.noticeId)?.(message.text);
+    pendingNotices.delete(message.noticeId);
     return;
   }
   const resolve = pendingCalls.get(message.callId);

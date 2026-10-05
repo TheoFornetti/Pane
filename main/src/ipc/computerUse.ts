@@ -19,8 +19,12 @@ const runRequestSchema = boundary.object({
 });
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 const REPLAY_TITLE = 'Computer use replay';
+// Bounds what one run can write to disk. A full-window capture is usually well under 1 MB.
+const MAX_STEPS_PER_RUN = 1000;
+const MAX_SCREENSHOT_BASE64_CHARS = 8 * 1024 * 1024;
 const resetRequestSchema = boundary.object({ connectionId: boundary.nonEmptyString });
 
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 const isEnabled = (config: AppConfig) => config.computerUse?.enabled === true;
 
 /**
@@ -62,11 +66,22 @@ export function registerComputerUseHandlers(
     const dir = replayDir(sessionId);
     const run = `${Date.now().toString(36)}-${connectionId.slice(0, 8)}`;
     let count = 0;
+    let droppedSteps = 0;
+    let droppedScreenshots = 0;
     let saving = Promise.resolve();
     const onStep = (value: JsonValue) => {
       const reported = decodeOptionalBoundary(value, reportedStepSchema);
       if (!reported) return;
-      const step = { ...reported, index: reported.index ?? count, args: reported.args ?? {}, result: reported.result ?? null, at: reported.at ?? new Date().toISOString() };
+      if (count >= MAX_STEPS_PER_RUN) {
+        droppedSteps += 1;
+        return;
+      }
+      let screenshotPng = reported.screenshotPng;
+      if (screenshotPng && screenshotPng.length > MAX_SCREENSHOT_BASE64_CHARS) {
+        screenshotPng = undefined;
+        droppedScreenshots += 1;
+      }
+      const step = { ...reported, screenshotPng, index: reported.index ?? count, args: reported.args ?? {}, result: reported.result ?? null, at: reported.at ?? new Date().toISOString() };
       count += 1;
       saving = saving.then(() => saveStep(dir, run, step)).catch((error) => console.error('[computer-use] Failed to save a step:', error));
     };
@@ -76,7 +91,12 @@ export function registerComputerUseHandlers(
     try {
       const replay = await writeReplay(dir);
       await openReplayTab(sessionId, pathToFileURL(replay).href);
-      return { ...result, text: `${result.text}\n\nReplay (${count} ${count === 1 ? 'step' : 'steps'} this run): ${replay}` };
+      const dropped = [
+        droppedSteps > 0 ? `${plural(droppedSteps, 'step')} past the ${MAX_STEPS_PER_RUN}-step limit not saved` : '',
+        droppedScreenshots > 0 ? `${plural(droppedScreenshots, 'screenshot')} over 6 MB not saved` : '',
+      ].filter(Boolean).join('; ');
+      const replayLine = `Replay (${plural(count, 'step')} this run): ${replay}${dropped ? ` (${dropped})` : ''}`;
+      return { ...result, text: `${result.text}\n\n${replayLine}` };
     } catch (error) {
       console.error('[computer-use] Failed to write the replay:', error);
       return result;

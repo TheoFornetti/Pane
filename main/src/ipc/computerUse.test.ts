@@ -98,4 +98,21 @@ describe('computer-use channels', () => {
     expect(opened).toEqual([]);
     await hosts.stopAll('done');
   });
+
+  it('caps the steps and screenshot size one run saves, and says what it dropped', async () => {
+    const { registry, hosts } = setup(true);
+    const code = `
+      const huge = 'A'.repeat(8 * 1024 * 1024 + 4);
+      recordStep({ action: 'click', screenshotPng: huge });
+      for (let i = 1; i < 1003; i++) recordStep({ action: 'scroll', screenshotPng: '${PIXEL.base64}' });
+      return 'done';`;
+    const result = await registry.invoke('computer-use:run', [{ connectionId: 'c1', code, sessionId: 'pane-3' }]);
+
+    const dir = path.join(artifacts, 'pane-3', 'computer-use');
+    const replay = path.join(dir, 'replay.html');
+    expect(result).toMatchObject({ ok: true, text: `done\n\nReplay (1000 steps this run): ${replay} (3 steps past the 1000-step limit not saved; 1 screenshot over 6 MB not saved)` });
+    expect(fs.readFileSync(path.join(dir, 'steps.jsonl'), 'utf8').trim().split('\n')).toHaveLength(1000);
+    expect(fs.readdirSync(path.join(dir, 'steps'))).toHaveLength(999);
+    await hosts.stopAll('done');
+  });
 });

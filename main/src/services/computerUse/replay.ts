@@ -53,14 +53,16 @@ export async function saveStep(dir: string, run: string, step: ComputerUseStep):
   await fs.appendFile(path.join(dir, INDEX_FILE), `${JSON.stringify(saved)}\n`);
 }
 
-/** Rebuilds `replay.html` in `dir` from every saved step and returns its path. */
+/**
+ * Rebuilds `replay.html` in `dir` from every saved step and returns its path. The page links each
+ * screenshot by its path in `steps/`, so a rebuild reads only the step index, never the images.
+ */
 export async function writeReplay(dir: string): Promise<string> {
   const index = await fs.readFile(path.join(dir, INDEX_FILE), 'utf8').catch(() => '');
-  const saved = index.split('\n').filter(Boolean).map((line) => decodeBoundary(JSON.parse(line), savedStepSchema));
-  const steps = await Promise.all(saved.map(async ({ screenshot, ...step }) => ({
-    ...step,
-    image: screenshot ? (await fs.readFile(path.join(dir, screenshot)).catch(() => undefined))?.toString('base64') ?? null : null,
-  })));
+  const steps = index.split('\n').filter(Boolean).map((line) => {
+    const { screenshot, ...step } = decodeBoundary(JSON.parse(line), savedStepSchema);
+    return { ...step, image: screenshot ?? null };
+  });
   const target = path.join(dir, REPLAY_FILE);
   // Write beside and rename, so an open tab never reads half a page.
   const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
@@ -76,10 +78,11 @@ interface ReplayStep {
   args: JsonObject;
   result: JsonValue;
   at: string;
+  /** The screenshot's path relative to the page. */
   image: string | null;
 }
 
-/** One page with no network access: the steps and their screenshots are inlined. */
+/** One page with no network access: the step data is inlined and screenshots load from beside it. */
 function renderReplay(steps: ReplayStep[]): string {
   // `<` escaped so no value can close the script element.
   const data = JSON.stringify(steps).replace(/</g, '\\u003c');
@@ -88,7 +91,7 @@ function renderReplay(steps: ReplayStep[]): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
 <title>Computer use replay</title>
 <style>
 :root { --bg: #ffffff; --panel: #f4f4f5; --text: #18181b; --muted: #71717a; --border: #e4e4e7; --accent: #2563eb; --accent-text: #ffffff; --error: #dc2626; }
@@ -157,7 +160,7 @@ function show(i) {
   const next = el('button', { type: 'button', textContent: 'Next →', disabled: current === steps.length - 1, onclick: () => show(current + 1) });
   view.replaceChildren(
     el('header', {}, prev, next, el('strong', { textContent: 'Step ' + (current + 1) + ' of ' + steps.length + ': ' + step.action, className: failed(step.result) ? 'failed' : '' }), el('span', { className: 'at', textContent: time(step.at) })),
-    el('div', { className: 'shot' }, step.image ? el('img', { src: 'data:image/png;base64,' + step.image, alt: 'Window after ' + step.action }) : el('p', { textContent: 'No screenshot for this step.' })),
+    el('div', { className: 'shot' }, step.image ? el('img', { src: step.image, alt: 'Window after ' + step.action }) : el('p', { textContent: 'No screenshot for this step.' })),
     el('div', { className: 'detail' },
       el('div', {}, el('h3', { textContent: 'Arguments' }), el('pre', { textContent: pretty(step.args) })),
       el('div', {}, el('h3', { textContent: 'Result' }), el('pre', { textContent: pretty(step.result) }))),

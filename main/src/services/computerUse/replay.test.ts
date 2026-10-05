@@ -17,7 +17,7 @@ function stepsIn(html: string): Array<{ run: string; action: string; image: stri
 }
 
 describe('replay', () => {
-  it('writes one page that inlines every step of every run, in order', async () => {
+  it('writes one page listing every step of every run, in order, with screenshots beside it', async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'replay-'));
     const png = PNG_BYTES.toString('base64');
     await saveStep(dir, 'run-a', { index: 0, action: 'click', args: { element: 3 }, result: 'clicked', screenshotPng: png, at: '2026-10-04T23:00:00Z' });
@@ -27,13 +27,13 @@ describe('replay', () => {
     const page = fs.readFileSync(await writeReplay(dir), 'utf8');
 
     expect(stepsIn(page).map(({ run, action, image }) => ({ run, action, image }))).toEqual([
-      { run: 'run-a', action: 'click', image: png },
+      { run: 'run-a', action: 'click', image: 'steps/run-a-0000.png' },
       { run: 'run-a', action: 'type_text', image: null },
-      { run: 'run-b', action: 'press_key', image: png },
+      { run: 'run-b', action: 'press_key', image: 'steps/run-b-0002.png' },
     ]);
     expect(fs.readFileSync(path.join(dir, 'steps', 'run-a-0000.png'))).toEqual(PNG_BYTES);
-    // No network: the policy allows only inline code and data: images.
-    expect(page).toContain(`content="default-src 'none'; img-src data:;`);
+    // No network: the policy allows only inline code and local images.
+    expect(page).toContain(`content="default-src 'none'; img-src file:;`);
   });
 
   it('keeps step text from closing the data script', async () => {

@@ -13,9 +13,10 @@ import {
   type RemoteMobilePushRegistration,
   type RemoteMobilePushStatus,
 } from '../../../shared/types/remoteDaemon';
+import type { ApnsCredentialConfig } from '../../../shared/types/sharedCredentials';
 
 interface MobilePushConfigManager {
-  getConfig(): { remoteDaemon?: RemoteDaemonConfig };
+  getConfig(): { remoteDaemon?: RemoteDaemonConfig; apns?: ApnsCredentialConfig };
   updateConfigWith(update: (current: { remoteDaemon?: RemoteDaemonConfig }) => { remoteDaemon: RemoteDaemonConfig }): Promise<{ remoteDaemon?: RemoteDaemonConfig }>;
 }
 
@@ -39,7 +40,7 @@ interface GcloudUserCredentials { client_id: string; client_secret: string; refr
 type FcmCredentials =
   | { kind: 'key'; projectId: string; key: FcmServiceAccountKey }
   | { kind: 'impersonation'; projectId: string; serviceAccount: string; user: GcloudUserCredentials };
-interface ApnsCredentials { teamId: string; keyId: string; keyPath: string; topic: string; environment: 'sandbox' | 'production'; }
+type ApnsCredentials = ApnsCredentialConfig;
 class ProviderDeliveryError extends Error {
   constructor(readonly status: number, readonly body: string, message: string) { super(message); }
 }
@@ -81,7 +82,7 @@ export class MobilePushSender {
     const registration = this.config().host.mobilePush.registrations.find(item => (
       item.clientId === clientId && item.platform === platform && item.installationId === installationId && !item.revokedAt
     ));
-    const status: RemoteMobilePushStatus = { platform, registration: registration ? 'registered' : 'not-registered', ...providerReadiness(platform) };
+    const status: RemoteMobilePushStatus = { platform, registration: registration ? 'registered' : 'not-registered', ...providerReadiness(platform, this.configManager.getConfig().apns) };
     if (registration) {
       status.needsInputEnabled = registration.needsInputEnabled;
       status.completedEnabled = registration.completedEnabled;
@@ -96,7 +97,7 @@ export class MobilePushSender {
     if (!isSafeIdentifier(request.installationId) || !isSafeProfileId(request.hostProfileId) || !isSafeToken(request.token)) {
       throw new Error('Invalid mobile notification registration');
     }
-    const readiness = providerReadiness(request.platform);
+    const readiness = providerReadiness(request.platform, this.configManager.getConfig().apns);
     if (readiness.provider !== 'ready') return { platform: request.platform, registration: 'not-registered', ...readiness };
     const config = this.config();
     const now = new Date().toISOString();
@@ -233,7 +234,7 @@ export class MobilePushSender {
       aps: { alert: { title, body }, sound: 'default', 'thread-id': event.sessionId },
     };
     if (registration.platform === 'ios') {
-      const credentials = readApnsCredentials();
+      const credentials = readApnsCredentials(this.configManager.getConfig().apns);
       if (!credentials) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
       const response = await this.transport.apns({ token: registration.token, jwt: createApnsJwt(credentials), topic: credentials.topic, collapseId, payload });
       if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'APNs rejected notification');
@@ -302,8 +303,8 @@ export function getMobilePushSender(configManager: MobilePushConfigManager, opti
   return sender;
 }
 
-function providerReadiness(platform: RemoteMobilePlatform): Pick<RemoteMobilePushStatus, 'provider' | 'code' | 'message'> {
-  if (platform === 'ios') return readApnsCredentials()
+function providerReadiness(platform: RemoteMobilePlatform, apns: ApnsCredentialConfig | undefined): Pick<RemoteMobilePushStatus, 'provider' | 'code' | 'message'> {
+  if (platform === 'ios') return readApnsCredentials(apns)
     ? { provider: 'ready', code: 'PUSH_READY', message: 'APNs delivery is configured.' }
     : { provider: 'missing-config', code: 'ERR_APNS_NOT_CONFIGURED', message: 'This host has no valid APNs configuration.' };
   return readFcmCredentials()
@@ -336,17 +337,18 @@ function isSafeToken(value: string): boolean { return value.length > 0 && value.
 function isInvalidTokenResponse(error: ProviderDeliveryError): boolean {
   return error.status === 410 || ((error.status === 400 || error.status === 404) && /BadDeviceToken|Unregistered|registration-token-not-registered/i.test(error.body));
 }
-function readApnsCredentials(): ApnsCredentials | null {
+/** The host environment wins; otherwise the credentials saved in host config, which paired devices share. */
+function readApnsCredentials(saved: ApnsCredentialConfig | undefined): ApnsCredentials | null {
   const { PANE_APNS_TEAM_ID: teamId, PANE_APNS_KEY_ID: keyId, PANE_APNS_KEY_PATH: keyPath, PANE_APNS_TOPIC: topic, PANE_APNS_ENVIRONMENT: environment } = process.env;
+  if (!teamId && !keyId && !keyPath && !topic) return saved ?? null;
   if (!teamId || !keyId || !keyPath || !topic || (environment !== undefined && environment !== 'sandbox' && environment !== 'production')) return null;
-  try { readFileSync(keyPath, 'utf8'); } catch { return null; }
-  return { teamId, keyId, keyPath, topic, environment: environment ?? 'sandbox' };
+  try { return { teamId, keyId, privateKey: readFileSync(keyPath, 'utf8'), topic, environment: environment ?? 'sandbox' }; } catch { return null; }
 }
 function createApnsJwt(credentials: ApnsCredentials): string {
   const header = base64url(JSON.stringify({ alg: 'ES256', kid: credentials.keyId }));
   const claims = base64url(JSON.stringify({ iss: credentials.teamId, iat: Math.floor(Date.now() / 1000) }));
   const signer = createSign('SHA256'); signer.update(`${header}.${claims}`); signer.end();
-  const signature = signer.sign({ key: createPrivateKey(readFileSync(credentials.keyPath, 'utf8')), dsaEncoding: 'ieee-p1363' });
+  const signature = signer.sign({ key: createPrivateKey(credentials.privateKey), dsaEncoding: 'ieee-p1363' });
   return `${header}.${claims}.${signature.toString('base64url')}`;
 }
 const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';

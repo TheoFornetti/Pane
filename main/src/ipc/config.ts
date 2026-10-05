@@ -44,7 +44,7 @@ export function registerConfigHandlers(
     commandRegistry.register('remote:pwa-affordances', buildAffordances);
     commandRegistry.bindChannel(ipcMain, 'remote:pwa-affordances');
 
-    // The one settings write a paired phone may make: the shortcut list and voice keys.
+    // The settings a paired phone may write: the shortcut list and voice keys. Key sharing has its own commands.
     commandRegistry.register('remote:settings:update', async (patch: PaneCommandValue): Promise<RemotePwaAffordances> => {
       const unknown = Object.keys(decodeBoundary(patch, boundary.jsonObject)).filter(field => !(field in remoteSettingsFields));
       if (unknown.length > 0) throw new Error(`remote:settings:update does not accept ${unknown.join(', ')}`);

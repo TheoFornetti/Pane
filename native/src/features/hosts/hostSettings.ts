@@ -5,6 +5,8 @@ import type { RemotePwaAffordances, RemoteSettingsPatch } from '@shared/types/re
 
 import { invokeChannel, useDaemon, useDaemonQueryKey, useInvokeQuery } from '@/daemon';
 
+import { requestSharedCredentialSync } from './SharedCredentialSync';
+
 const AFFORDANCES = 'remote:pwa-affordances';
 
 /**
@@ -22,7 +24,11 @@ export function useSaveHostSettings() {
   const queryKey = useDaemonQueryKey(AFFORDANCES);
   return useMutation({
     mutationFn: (patch: RemoteSettingsPatch) => invokeChannel<RemotePwaAffordances>(client, 'remote:settings:update', [patch]),
-    onSuccess: affordances => queryClient.setQueryData(queryKey, affordances),
+    onSuccess: (affordances, patch) => {
+      queryClient.setQueryData(queryKey, affordances);
+      // A key typed for this host goes to the phone's other hosts too.
+      if (Object.keys(patch).some(field => field !== 'terminalShortcuts')) requestSharedCredentialSync();
+    },
     // The host may have applied a save whose reply was lost; show what it has.
     onError: () => void queryClient.invalidateQueries({ queryKey }),
   });

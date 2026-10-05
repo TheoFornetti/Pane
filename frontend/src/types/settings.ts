@@ -56,6 +56,7 @@ export type SettingsSettingId =
   | 'remote-paired-connection'
   | 'remote-existing-profile'
   | 'voice-transcription'
+  | 'apns-credentials'
   | 'keyboard-shortcuts'
   | 'command-palette-shortcut'
   | 'kitty-keyboard'

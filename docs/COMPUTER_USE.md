@@ -20,10 +20,11 @@ Pane keeps a replay of every run.
 ## Turn it on
 
 Computer use is off by default and is set per machine. Only you should turn it
-on. Agents get no MCP tool for it, `runpane computer-use on` refuses to run
-inside a Pane terminal, and the skill tells agents never to run it. An agent
-running outside Pane could still run the command, so this is a guard, not a
-lock.
+on. Agents get no MCP tool for it, and the skill tells them never to run the
+command. `runpane computer-use on` also refuses to run inside a Pane terminal
+(where `PANE_SESSION_ID` is set), which is where agents usually run. That only
+slows agents down; it is not a security boundary. Any shell without that
+variable, including an agent's, can still turn computer use on.
 
 - **Desktop:** Settings → Remote Access → Computer use, or the status row in
   the host switcher. When Pane is connected to a remote host, the setting
@@ -43,6 +44,7 @@ permissions and runs a self-test. The status shows the result:
 | Installing… | Pane is installing the engine. |
 | Needs permission: *permission* | Click **Open System Settings** and turn on **Cua Driver** in the Privacy pane it opens. On macOS it needs Screen Recording and Accessibility. Pane checks again every 5 seconds, so the status turns Ready soon after you grant it. |
 | No desktop session | The machine has no graphical session to drive (for example a headless Linux server). |
+| Install failed | Pane couldn't install the engine. **View details** shows why. **Check again** retries. |
 | Self-test failed | **View details** shows the engine's error. **Check again** reruns the readiness step. |
 | Ready · Cua Driver · checked *time* | Agents can use it. |
 | Ready · Codex runtime · checked *time* | Agents can use it, through your installed Codex runtime. |

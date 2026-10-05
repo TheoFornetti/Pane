@@ -54,6 +54,11 @@ const context = vm.createContext({
       });
     },
   },
+  /** Our layer reports each action here; the daemon saves it for the session's replay. */
+  recordStep(step: JsonObject): void {
+    // A JSON round trip drops `undefined` fields, such as a missing screenshot.
+    send({ type: 'step', step: decodeBoundary(JSON.parse(JSON.stringify(step)), boundary.jsonObject) });
+  },
   image(source: ImageSource): void {
     const parsed = decodeBoundary(source, imageSourceSchema);
     const added = 'images' in parsed ? parsed.images : [parsed];

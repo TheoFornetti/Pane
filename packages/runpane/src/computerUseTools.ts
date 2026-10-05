@@ -101,10 +101,19 @@ function isThisMachine(machine: string | undefined): boolean {
 /** A reset sent after a cancelled or failed run; the next call waits so the reset can't land on it. */
 let pendingReset: Promise<void> | undefined;
 
+/** The name the user knows an MCP client by, for the foreground notice. */
+export function agentName(clientName: string | undefined): string | undefined {
+  if (!clientName) return undefined;
+  if (/^claude/i.test(clientName)) return 'Claude Code';
+  if (/^codex/i.test(clientName)) return 'Codex';
+  if (/^cursor/i.test(clientName)) return 'Cursor';
+  return clientName;
+}
+
 export async function callComputerUseTool(
   tool: ComputerUseTool,
   input: JsonObject,
-  connectionId: string,
+  { connectionId, agent }: { connectionId: string; agent?: string },
   signal: AbortSignal,
 ): Promise<ComputerUseToolResult> {
   await pendingReset;
@@ -121,7 +130,7 @@ export async function callComputerUseTool(
     runStarted = true;
     // Inside a Pane terminal, the run's steps and replay land in that Pane.
     const sessionId = process.env.PANE_SESSION_ID?.trim() || undefined;
-    const run = invokeDaemon('computer-use:run', [{ connectionId, code, sessionId }], runResultSchema, { timeoutMs: RUN_TIMEOUT_MS });
+    const run = invokeDaemon('computer-use:run', [{ connectionId, code, sessionId, agent }], runResultSchema, { timeoutMs: RUN_TIMEOUT_MS });
     const result = await abortable(run, signal);
     const toolResult: ComputerUseToolResult = {
       content: [

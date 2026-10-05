@@ -18,6 +18,8 @@ export interface ScriptHostSummary {
 
 interface ScriptHostsOptions {
   getEngine: () => ComputerUseEngine;
+  /** Shows the user that an agent is bringing `app` to the front. Resolves with a line for the result. */
+  showForegroundNotice?: (info: { connectionId: string; app: string }) => Promise<string | undefined>;
   /** The compiled child next to this file; tests point it at the TypeScript source. */
   childEntry?: string;
   idleTimeoutMs?: number;
@@ -124,7 +126,7 @@ export class ScriptHosts {
     child.on('message', (message: JsonValue) => {
       // The script can reach `process.send`, so its messages are parsed like any other untrusted input.
       const parsed = decodeOptionalBoundary(message, childMessageSchema);
-      if (parsed) this.onChildMessage(host, parsed);
+      if (parsed) this.onChildMessage(connectionId, host, parsed);
       else this.closeHost(connectionId, host, 'The script process sent a malformed message and was stopped.');
     });
     // A failed fork or a send on a closed channel lands here; unhandled, it would take down the daemon.
@@ -170,7 +172,7 @@ export class ScriptHosts {
     });
   }
 
-  private onChildMessage(host: Host, message: ChildMessage): void {
+  private onChildMessage(connectionId: string, host: Host, message: ChildMessage): void {
     if (message.type === 'done') {
       host.finishRun?.({ ok: message.ok, text: message.text, images: message.images });
       return;
@@ -179,11 +181,27 @@ export class ScriptHosts {
       host.onStep?.(message.step);
       return;
     }
+    if (message.type === 'foregroundNotice') {
+      void this.showForegroundNotice(connectionId, message.app).then((text) => {
+        if (!host.closed) host.child.send({ type: 'foregroundNoticeShown', noticeId: message.noticeId, text } satisfies ParentMessage);
+      });
+      return;
+    }
     // A call queued behind others must not act once its script was stopped, reset, or turned off.
     const call = () => (host.closed ? Promise.resolve(STOPPED) : this.callEngine(message.tool, message.args));
     void this.inLane(laneFor(message.args), call).then((result) => {
       if (!host.closed) host.child.send({ type: 'callResult', callId: message.callId, result } satisfies ParentMessage);
     });
+  }
+
+  /** A failed notice never blocks the action the agent opted into; it's logged instead. */
+  private async showForegroundNotice(connectionId: string, app: string): Promise<string | undefined> {
+    try {
+      return await this.options.showForegroundNotice?.({ connectionId, app });
+    } catch (error) {
+      console.error('[computer-use] Failed to show the foreground notice:', error);
+      return undefined;
+    }
   }
 
   private async callEngine(tool: string, args: JsonObject): Promise<EngineResult> {

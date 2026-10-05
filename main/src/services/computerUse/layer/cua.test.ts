@@ -60,6 +60,14 @@ function fakeDesktop(options: { screens: Array<{ elements: UiElement[]; busy?: b
       log.push('notice');
       return `Pane: Claude Code is bringing ${app} to the front`;
     },
+    async holdLanes(lanes, run) {
+      log.push(`hold ${JSON.stringify(lanes)}`);
+      try {
+        return await run();
+      } finally {
+        log.push('release');
+      }
+    },
     settleMs: 0,
     busyPollMs: 1,
     busyTimeoutMs: 200,
@@ -125,7 +133,7 @@ describe('cua layer', () => {
 
     await app.scroll(2, 'down', 2, { foreground: true });
     const tail = desk.log.slice(desk.log.indexOf('notice'));
-    expect(tail[1]).toMatch(/^scroll \(foreground\) .*"direction":"down","amount":2,"by":"page"/);
+    expect(tail.slice(1, 3)).toEqual(['hold {"pid":42,"clipboard":false}', expect.stringMatching(/^scroll \(foreground\) .*"direction":"down","amount":2,"by":"page"/)]);
     expect(desk.output).toContain('Pane: Claude Code is bringing Notes to the front');
     expect(desk.steps.map((s) => s.result)).toEqual([expect.stringMatching(/^needs_foreground: /), 'ok']);
   });
@@ -161,6 +169,19 @@ describe('cua layer', () => {
     await app.paste('hello');
     expect(desk.log.some((line) => line.startsWith('clipboard'))).toBe(false);
     expect(desk.steps[0].result).toMatch(/^ok: typed instead of pasting/);
+  });
+
+  it('holds the app (and the clipboard, for paste) for all of an action\'s engine calls, then settles', async () => {
+    const desk = fakeDesktop({ screens: [listScreen([])] });
+    const app = await desk.cua.getApp('Notes');
+    desk.log.length = 0;
+    await app.typeText('a\nb');
+    expect(desk.log.map((line) => line.split(' ')[0])).toEqual(['hold', 'typeText', 'pressKey', 'typeText', 'release', 'read']);
+    expect(desk.log[0]).toBe('hold {"pid":42,"clipboard":false}');
+    desk.log.length = 0;
+    await app.paste('x');
+    expect(desk.log[0]).toBe('hold {"pid":42,"clipboard":true}');
+    expect(desk.log.indexOf('release')).toBeGreaterThan(desk.log.lastIndexOf('clipboard "user copy"'));
   });
 
   it('typeText presses Return for each newline', async () => {

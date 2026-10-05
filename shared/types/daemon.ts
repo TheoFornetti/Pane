@@ -113,6 +113,8 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'git:set-identity',
   'remote:pwa-affordances',
   'remote:settings:update',
+  'credentials:shared:get',
+  'credentials:shared:apply',
   'git:restore',
   'git:revert',
   'permission:getPending',

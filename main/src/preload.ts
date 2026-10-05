@@ -589,6 +589,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getSessionPreferences: (): Promise<IPCResponse> => invokeIpc('config:get-session-preferences'),
     updateSessionPreferences: (preferences: AppConfig['sessionCreationPreferences']): Promise<IPCResponse> => invokeIpc('config:update-session-preferences', preferences),
     getMonospaceFonts: (): Promise<IPCResponse> => invokeIpc('config:get-monospace-fonts'),
+    chooseApnsKey: (): Promise<IPCResponse<{ privateKey: string; keyId: string | null } | null>> => invokeIpc('dialog:open-apns-key'),
   },
 
   remoteDaemon: {

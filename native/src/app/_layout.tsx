@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useActiveHost, useHostsStore } from '@/auth/hostsStore';
 import { DaemonProvider, queryClient } from '@/daemon';
+import { SharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
 import { NotificationTapRouter, PushRegistration } from '@/features/notifications/NotificationRouting';
 import { useTheme } from '@/theme';
 
@@ -45,10 +46,13 @@ export default function RootLayout() {
         <ThemeProvider value={navigationTheme}>
           <StatusBar style="auto" />
           {activeHost ? (
-            <DaemonProvider key={activeHost.id} profile={activeHost}>
-              <RootStack signedIn />
-              <PushRegistration />
-            </DaemonProvider>
+            <>
+              <DaemonProvider key={activeHost.id} profile={activeHost}>
+                <RootStack signedIn />
+                <PushRegistration />
+              </DaemonProvider>
+              <SharedCredentialSync />
+            </>
           ) : (
             <RootStack signedIn={false} />
           )}

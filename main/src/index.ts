@@ -107,6 +107,7 @@ import { terminalPanelManager } from './services/terminalPanelManager';
 import { panelManager } from './services/panelManager';
 import { worktreePoolManager } from './services/worktreePoolManager';
 import { usageManager } from './services/usage/usageManager';
+import { SharedCredentialSync } from './services/sharedCredentialSync';
 import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
@@ -228,6 +229,7 @@ function setAppTitle() {
 }
 // Service instances (configManager exported for shell preference access)
 export let configManager: ConfigManager;
+let sharedCredentialSync: SharedCredentialSync | null = null;
 let logger: Logger;
 export let sessionManager: SessionManager;
 let worktreeManager: WorktreeManager;
@@ -1487,6 +1489,10 @@ if (launchRemoteSetup) {
     }
   }, 5000); // Delay to not slow down app startup
 
+  // Share integration keys with the hosts this desktop has paired with.
+  sharedCredentialSync = new SharedCredentialSync(configManager);
+  sharedCredentialSync.start();
+
   // Index agent CLI transcripts for the usage page. Read-only, and deferred so
   // a first pass over a large ~/.claude never delays window creation.
   setTimeout(() => {
@@ -1528,6 +1534,7 @@ if (launchRemoteSetup) {
   logToFile('before-quit fired');
 
   usageManager.stop();
+  void sharedCredentialSync?.stop();
 
   // Guard against multiple shutdown attempts
   if (shutdownInProgress) {

@@ -34,6 +34,7 @@ import { registerPermissionHandlers } from './permissions';
 import { registerAgentUsageHandlers } from './agentUsage';
 import { registerFeedbackHandlers } from './feedback';
 import { registerMobilePushHandlers } from './mobilePush';
+import { registerSharedCredentialHandlers } from './sharedCredentials';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { registerPaneLinkHandler } from '../services/paneLinks';
 import { getPaneEventSink } from '../core/runtime';
@@ -69,6 +70,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerProjectHandlers(ipcMain, services, commandRegistry);
   registerConfigHandlers(ipcMain, services, commandRegistry);
   registerMobilePushHandlers(ipcMain, services, commandRegistry);
+  registerSharedCredentialHandlers(services, commandRegistry);
   registerDialogHandlers(ipcMain, services);
   registerExportHandlers(ipcMain, services);
   registerPermissionHandlers(ipcMain, services, commandRegistry);

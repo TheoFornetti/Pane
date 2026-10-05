@@ -50,6 +50,30 @@ describe('MobilePushSender', () => {
     expect(manager.getConfig().remoteDaemon?.host.mobilePush.registrations).toEqual([]);
   });
 
+  it('sends with APNs credentials saved in host config when the host environment has none', async () => {
+    setEnvironment({});
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pane-mobile-apns-config-'));
+    temporaryDirectories.push(directory);
+    vi.stubEnv('PANE_DIR', directory);
+    const manager = new ConfigManager();
+    await manager.initialize();
+    const config = createDefaultRemoteDaemonConfig();
+    config.host.clients = [{ id: 'client-1', label: 'Phone', tokenHash: 'hash', createdAt: '2026-09-04T00:00:00.000Z' }];
+    const privateKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    await manager.updateConfig({ remoteDaemon: config, apns: { teamId: 'TEAM', keyId: 'KEY', privateKey, topic: 'com.example.shared', environment: 'production' } });
+    const requests: Parameters<MobilePushTransport['apns']>[0][] = [];
+    const sender = new MobilePushSender(manager, {
+      apns: async request => { requests.push(request); return { status: 200, body: '' }; },
+      fcm: async () => ({ status: 200, body: '' }),
+    });
+
+    await expect(sender.register('client-1', { platform: 'ios', token: 'token', installationId: 'install-1', hostProfileId: 'profile' }))
+      .resolves.toMatchObject({ provider: 'ready' });
+    await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt', agentType: 'claude' });
+
+    expect(requests.map(request => request.topic)).toEqual(['com.example.shared']);
+  });
+
   it('delivers blocked and completed transitions once with a host-profile tap route', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const directory = await mkdtemp(path.join(os.tmpdir(), 'pane-mobile-push-'));

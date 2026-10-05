@@ -330,6 +330,7 @@ interface ElectronAPI {
     getSessionPreferences: () => Promise<IPCResponse>;
     updateSessionPreferences: (preferences: SessionCreationPreferences) => Promise<IPCResponse>;
     getMonospaceFonts: () => Promise<IPCResponse>;
+    chooseApnsKey: () => Promise<IPCResponse<{ privateKey: string; keyId: string | null } | null>>;
   };
 
   remoteDaemon: {

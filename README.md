@@ -197,6 +197,8 @@ Windows PowerShell:
 
 The CLI setup command prints the same connection code and, for SSH mode, the forwarding command. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for the full step-by-step setup, mobile install instructions, API key notes, and security model, or [docs/SELF_HOSTED_REMOTE_DAEMON.md](docs/SELF_HOSTED_REMOTE_DAEMON.md) in this repo.
 
+Integration keys (voice dictation, iPhone notifications) set on one host reach your other hosts through the devices you paired. See [Shared integration keys](docs/SHARED_CREDENTIALS.md).
+
 ---
 
 ## Pane Chat

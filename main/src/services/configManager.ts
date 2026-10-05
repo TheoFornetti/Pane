@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto';
 import { HOME_GIT_SCAN_WARNING, isHomeDirectory } from '../utils/gitScanSafety';
 import { getAppDirectory } from '../utils/appDirectory';
 import { clearShellPathCache } from '../utils/shellPath';
+import { stampSharedCredentials } from './sharedCredentials';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
   AppearanceValidationError,
@@ -402,6 +403,7 @@ export class ConfigManager extends EventEmitter {
           defaultsVersion: boundary.optional(boundary.number),
         }));
       }
+      next.sharedCredentials = stampSharedCredentials(this.config, updates, next);
       this.validateAppearanceUpdate(updates, next);
       await this.writeConfigToDisk(next);
       this.config = next;

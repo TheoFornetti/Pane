@@ -36,7 +36,7 @@ Voice dictation uses the transcription provider configured on the host. In the E
 
 Push is host-originated: killed-app delivery is an APNs alert (iOS) or FCM notification payload (Android), not a local notification or background JavaScript claim. The host sends the Pane or Session name and routing metadata; see the payload details below.
 
-For iOS, register `com.dcouple.pane.mobile` (or your signed bundle identifier), enable Push Notifications, add the capability in Xcode, and set these only in the host service environment:
+For iOS, register `com.dcouple.pane.mobile` (or your signed bundle identifier), enable Push Notifications, and add the capability in Xcode. Then give one host the APNs key in Settings → Integrations → iPhone notifications: choose the `.p8` file and enter the team ID. Pane shares it with your other hosts through your paired devices ([Shared integration keys](SHARED_CREDENTIALS.md)). A host can instead read it from its service environment, which wins over the shared key and is never shared:
 
 ```bash
 PANE_APNS_TEAM_ID=... PANE_APNS_KEY_ID=... PANE_APNS_KEY_PATH=/secure/path/AuthKey.p8 PANE_APNS_TOPIC=com.dcouple.pane.mobile PANE_APNS_ENVIRONMENT=sandbox
@@ -48,7 +48,7 @@ Use `PANE_APNS_ENVIRONMENT=production` only for a production/TestFlight-signed b
 
 These are the provider credentials Dcouple uses for `com.dcouple.pane.mobile`. Only paths and IDs are listed here; the files stay outside git.
 
-- **APNs:** team `FBM5YSF467`, key ID `DGM25BV23X` (team scoped, sandbox and production). The key file is `AuthKey_DGM25BV23X.p8`, kept at `~/.config/pane/apns/` (mode 600) on the machine that created it. Copy it to each host outside the repo and set:
+- **APNs:** team `FBM5YSF467`, key ID `DGM25BV23X` (team scoped, sandbox and production). The key file is `AuthKey_DGM25BV23X.p8`, kept at `~/.config/pane/apns/` (mode 600) on the machine that created it. Load it once in Settings → Integrations on one host, or copy it to a host outside the repo and set:
 
   ```bash
   PANE_APNS_TEAM_ID=FBM5YSF467

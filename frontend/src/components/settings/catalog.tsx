@@ -95,8 +95,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Integrations',
     description: 'Provider credentials and voice transcription.',
     icon: BrainCircuit,
-    settingIds: ['voice-transcription'],
-    aliases: ['fal', 'openrouter', 'deepgram', 'voice', 'dictation'],
+    settingIds: ['voice-transcription', 'apns-credentials'],
+    aliases: ['fal', 'openrouter', 'deepgram', 'voice', 'dictation', 'apns', 'push', 'notifications', 'keys'],
   },
   {
     id: 'shortcuts',

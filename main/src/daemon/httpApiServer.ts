@@ -823,11 +823,12 @@ export class PaneRemoteHttpApiServer {
     request: IncomingMessage,
   ): JsonValue[] {
     const args = [...invokeRequest.args];
-    if (invokeRequest.channel.startsWith('mobile:push-')) {
+    const sharesKeys = invokeRequest.channel.startsWith('credentials:shared:');
+    if (invokeRequest.channel.startsWith('mobile:push-') || sharesKeys) {
       if (!auth.client) {
         throw new RemoteDaemonBadRequestError(
-          'ERR_MOBILE_PUSH_PAIRING_REQUIRED',
-          'Mobile notifications require an authenticated paired host.',
+          sharesKeys ? 'ERR_SHARED_CREDENTIALS_PAIRING_REQUIRED' : 'ERR_MOBILE_PUSH_PAIRING_REQUIRED',
+          sharesKeys ? 'Sharing keys requires a paired device.' : 'Mobile notifications require an authenticated paired host.',
           403,
         );
       }

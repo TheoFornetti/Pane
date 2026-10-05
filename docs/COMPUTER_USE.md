@@ -90,8 +90,9 @@ tool's description. Under the API, Pane:
   tree;
 - waits for the app to settle after each action: 1 second, plus up to 5 more
   while it shows a spinner or progress indicator;
-- keeps an element's id stable across reads of the same window, and gives a
-  control a new id when its label changes;
+- keeps an element's id stable across diff reads of the same window. On the
+  Codex runtime a full read renumbers the tree, so agents use ids from their
+  latest read. On Cua Driver a control gets a new id when its label changes;
 - runs calls to the same app one after another, so two agents never
   interleave keystrokes; calls to different apps run in parallel.
 

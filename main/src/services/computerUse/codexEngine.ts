@@ -23,6 +23,8 @@ const VERBS = new Map(Object.entries({
   launch_app: 'if (!cua.computer.launch_app) throw new Error("This Codex runtime can\'t launch apps; open the app first."); await cua.computer.launch_app({ app: a.app }); return {};',
   get_app_state: 'return { state: await (await target()).getAXState({ emit: false, disableDiffing: a.disable_diff === true }) };',
   screenshot: 'await nodeRepl.emitImage(await (await target()).getScreenshot({ emit: false })); return {};',
+  // One read for both: a screenshot alone also moves the runtime's diff baseline.
+  state_and_screenshot: 'const r = await (await target()).getAXStateAndScreenshot({ emit: false }); if (r.screenshot) await nodeRepl.emitImage(r.screenshot); return { state: r.state };',
   click: 'await (await target()).click(point(), { mouseButton: a.mouse_button, clickCount: a.click_count }); return {};',
   drag: 'await (await target()).drag(a.from, a.to); return {};',
   scroll: 'await (await target()).scroll(point(), a.direction, a.pixels !== undefined ? { pixels: a.pixels } : a.pages); return {};',

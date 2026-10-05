@@ -7,25 +7,26 @@ import type { StepRecord } from './driver';
 
 const SHOT = { mime: 'image/jpeg', base64: '/9j/4A==' };
 const FULL = 'Window: "Untitled", App: TextEdit.\n0 standard window Untitled\n\t2 text entry area (settable) First Text View';
-const DIFF = '~\t\t2 text entry area (settable) Value: hi, ID: First Text View';
+/** Each diff read numbers itself, so a test can tell which read a line came from. */
+const diff = (n: number) => `~\t\t2 text entry area (settable) Value: read ${n}`;
 
 /**
  * The Codex engine on macOS, as the layer sees it: app-keyed verbs, its own rendered text, a diff
- * after the first read, and a full tree on `disable_diff`.
+ * on every read (its baseline outlives connections, and a screenshot read moves it too), and a full
+ * tree on `disable_diff`.
  */
 function codexMac() {
   const calls: Array<{ tool: string; args: JsonObject }> = [];
-  let reads = 0;
+  let diffs = 0;
   async function call(tool: string, args: JsonObject): Promise<EngineResult> {
     calls.push({ tool, args });
     switch (tool) {
       case 'list_apps':
         return { ok: true, data: { apps: [{ id: 'com.apple.TextEdit', displayName: 'TextEdit', isRunning: true }, { id: 'com.apple.Notes', displayName: 'Notes', isRunning: false }] } };
       case 'get_app_state':
-        reads += 1;
-        return { ok: true, data: { state: args.disable_diff === true || reads === 1 ? FULL : DIFF } };
-      case 'screenshot':
-        return { ok: true, data: {}, images: [SHOT] };
+        return { ok: true, data: { state: args.disable_diff === true ? FULL : diff(++diffs) } };
+      case 'state_and_screenshot':
+        return { ok: true, data: { state: diff(++diffs) }, images: [SHOT] };
       default:
         return { ok: true, data: {} };
     }
@@ -45,7 +46,7 @@ function codexMac() {
 }
 
 describe('the layer over the Codex runtime', () => {
-  it("passes the runtime's own tree and diffs through, and acts by its element ids", async () => {
+  it("passes the runtime's own tree and diffs through, including the diff its step screenshot read, and acts by its element ids", async () => {
     const { cua, calls, output } = codexMac();
 
     const app = await cua.getApp('TextEdit');
@@ -55,10 +56,11 @@ describe('the layer over the Codex runtime', () => {
     await app.click(2);
 
     expect(output[0]).toContain(FULL);
-    expect(state).toContain(DIFF);
+    // The step screenshot after typing read diff 1; the agent's own read is diff 2.
+    expect(state).toContain(`${diff(1)}\n${diff(2)}`);
     expect(full).toContain(FULL);
-    expect(calls.filter((c) => c.tool !== 'list_apps' && c.tool !== 'screenshot')).toEqual([
-      { tool: 'get_app_state', args: { app: 'com.apple.TextEdit', disable_diff: false } },
+    expect(calls.filter((c) => c.tool !== 'list_apps' && c.tool !== 'state_and_screenshot')).toEqual([
+      { tool: 'get_app_state', args: { app: 'com.apple.TextEdit', disable_diff: true } },
       { tool: 'type_text', args: { app: 'com.apple.TextEdit', text: 'hi' } },
       { tool: 'get_app_state', args: { app: 'com.apple.TextEdit', disable_diff: false } },
       { tool: 'get_app_state', args: { app: 'com.apple.TextEdit', disable_diff: true } },
@@ -75,7 +77,7 @@ describe('the layer over the Codex runtime', () => {
 
     expect(calls.filter((c) => c.tool === 'get_app_state')).toHaveLength(readsBefore);
     expect(steps).toEqual([expect.objectContaining({ index: 0, action: 'pressKey', result: 'ok' })]);
-    expect(calls.at(-1)).toEqual({ tool: 'screenshot', args: { app: 'com.apple.TextEdit' } });
+    expect(calls.at(-1)).toEqual({ tool: 'state_and_screenshot', args: { app: 'com.apple.TextEdit' } });
   });
 
   it("uses the runtime's own select_text and paste, leaving the clipboard to it", async () => {

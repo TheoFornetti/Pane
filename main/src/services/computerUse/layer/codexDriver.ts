@@ -23,6 +23,9 @@ const windowsSchema = boundary.object({
 const stateSchema = boundary.object({ state: boundary.string });
 const noteSchema = boundary.object({ broughtForward: boundary.optional(boundary.boolean) });
 
+/** The runtime's whole answer when nothing changed since its last read. */
+const NO_CHANGE = /^There has been no change in the accessibility tree/;
+
 /** Pixels per line when the layer scrolls by lines; Codex scrolls by pages or pixels. */
 const PIXELS_PER_LINE = 40;
 
@@ -30,6 +33,13 @@ export function codexDriver(call: CallEngine, platform: DesktopDriver['platform'
   /** macOS: stand-in window ids, one per app, and the bundle id each stands for. */
   const appByWindow = new Map<number, string>();
   const windowByApp = new Map<string, number>();
+  /** The runtime keeps its diff baseline across connections, so this driver's first read of a window is full. */
+  const readBefore = new Set<number>();
+  /**
+   * A runtime screenshot also moves its diff baseline, so captures read the state with it and keep
+   * the diff here for the agent's next read.
+   */
+  const unseenDiffs = new Map<number, string[]>();
 
   function windowFor(appId: string): number {
     let id = windowByApp.get(appId);
@@ -90,12 +100,21 @@ export function codexDriver(call: CallEngine, platform: DesktopDriver['platform'
     },
 
     async readWindow(window, options = {}): Promise<WindowSnapshot> {
-      const result = await data('get_app_state', { ...targetOf(window), disable_diff: options.full === true });
-      return { elements: [], busy: false, text: decodeOptionalBoundary(result.data, stateSchema)?.state ?? '' };
+      const full = options.full === true || !readBefore.has(window.id);
+      const result = await data('get_app_state', { ...targetOf(window), disable_diff: full });
+      readBefore.add(window.id);
+      const state = decodeOptionalBoundary(result.data, stateSchema)?.state ?? '';
+      const earlier = full ? [] : unseenDiffs.get(window.id) ?? [];
+      unseenDiffs.delete(window.id);
+      const parts = [...earlier, state].filter((part) => !NO_CHANGE.test(part));
+      return { elements: [], busy: false, text: parts.length > 0 ? parts.join('\n') : state };
     },
 
     async captureWindow(window): Promise<EngineImage | undefined> {
-      return (await data('screenshot', targetOf(window))).images?.[0];
+      const result = await data('state_and_screenshot', targetOf(window));
+      const state = decodeOptionalBoundary(result.data, stateSchema)?.state ?? '';
+      if (readBefore.has(window.id) && !NO_CHANGE.test(state)) unseenDiffs.set(window.id, [...(unseenDiffs.get(window.id) ?? []), state]);
+      return result.images?.[0];
     },
 
     perform(window, action: DriverAction): Promise<ActionOutcome> {

@@ -14,8 +14,6 @@ export interface DesktopDriver {
    * its own tree, diffs and settle; element ids are the engine's.
    */
   readonly renders?: 'native';
-  /** Every input brings the window to the front (the Codex runtime on Windows), so the layer shows the notice first. */
-  readonly inputBringsForward?: boolean;
   listApps(): Promise<AppInfo[]>;
   listWindows(pid?: number): Promise<WindowInfo[]>;
   /**

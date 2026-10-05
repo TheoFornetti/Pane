@@ -280,8 +280,7 @@ export class App {
     const at = new Date().toISOString();
     const index = this.layer.nextStep++;
     const stepArgs: JsonObject = { app: this.name, windowId: this.window.id, ...args };
-    const forward = options.foreground === true || this.layer.driver.inputBringsForward === true;
-    if (forward) stepArgs.foreground = true;
+    if (options.foreground) stepArgs.foreground = true;
     let failure: Error | undefined;
     let result: JsonValue = 'ok';
     try {

@@ -20,7 +20,10 @@ export function buildScriptHostChild() {
   return { entry, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
-/** An engine that records `start`/`end` of each call; each call takes `delayMs`. `screenshot` returns PIXEL. */
+/**
+ * An engine that records `start`/`end` of each call; each call takes `delayMs`. `screenshot` returns
+ * PIXEL, and `list_apps` lists TextEdit as pid 7.
+ */
 export function fakeEngine(delayMs = 0) {
   const log: string[] = [];
   let stops = 0;
@@ -33,6 +36,7 @@ export function fakeEngine(delayMs = 0) {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       log.push(`end ${label}`);
       if (tool === 'screenshot') return { ok: true, images: [PIXEL] };
+      if (tool === 'list_apps') return { ok: true, data: { apps: [{ pid: 7, name: 'TextEdit' }] } };
       return { ok: true, data: { tool, args } };
     },
     async stop() { stops += 1; },

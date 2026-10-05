@@ -76,7 +76,7 @@ describe('computer-use channels', () => {
   it('saves the steps a run records into its Pane and opens the replay in a tab', async () => {
     const { registry, hosts, opened } = setup(true);
     const code = `
-      recordStep({ index: 0, action: 'click', args: { app: 'TextEdit', element: 3 }, result: 'clicked', screenshotPng: '${PIXEL.base64}', at: '2026-10-04T23:00:00.000Z' });
+      recordStep({ index: 0, action: 'click', args: { app: 'TextEdit', element: 3 }, result: 'clicked', screenshot: ${JSON.stringify(PIXEL)}, at: '2026-10-04T23:00:00.000Z' });
       recordStep({ index: 1, action: 'type_text', args: { text: 'hi' }, result: 'typed', at: '2026-10-04T23:00:01.000Z' });
       return 'done';`;
     const result = await registry.invoke('computer-use:run', [{ connectionId: 'c1', code, sessionId: 'pane-1' }]);

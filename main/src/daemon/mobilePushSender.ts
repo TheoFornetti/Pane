@@ -30,7 +30,7 @@ export interface MobilePushRegistrationRequest {
 
 interface ProviderResponse { status: number; body: string; }
 export interface MobilePushTransport {
-  apns(request: { token: string; jwt: string; topic: string; payload: JsonObject }): Promise<ProviderResponse>;
+  apns(request: { token: string; jwt: string; topic: string; collapseId: string; payload: JsonObject }): Promise<ProviderResponse>;
   fcm(request: { token: string; accessToken: string; projectId: string; payload: JsonObject }): Promise<ProviderResponse>;
 }
 interface FcmServiceAccountKey { project_id: string; client_email: string; private_key: string; token_uri?: string; }
@@ -45,6 +45,12 @@ class ProviderDeliveryError extends Error {
 }
 
 const MAX_RECENT_EVENTS = 64;
+/**
+ * How long an agent must stay idle after visible work before the phone hears
+ * it finished. Measured on Claude Code 2.1.289: the longest idle inside one
+ * turn was 3.5 s, on top of the monitor's 10 s settle.
+ */
+export const STABLE_IDLE_MS = 10_000;
 const PROVIDER_TIMEOUT_MS = 15_000;
 const senderByConfigManager = new WeakMap<MobilePushConfigManager, MobilePushSender>();
 
@@ -52,10 +58,24 @@ const senderByConfigManager = new WeakMap<MobilePushConfigManager, MobilePushSen
  * Host-owned sender. Its credentials are read only from operator environment
  * variables, never from a pairing payload, remote config, or the mobile app.
  */
+type AttentionKind = 'needs-input' | 'completed';
+
+export interface MobilePushSenderOptions {
+  /** The Pane or Session name a panel's alert is titled with. */
+  resolveName?: (paneId: string) => string | undefined;
+}
+
 export class MobilePushSender {
   private mutationQueue: Promise<void> = Promise.resolve();
+  /** Panels whose agent visibly worked and has not been reported finished yet. */
+  private readonly unreportedWork = new Set<string>();
+  private readonly finishTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(private readonly configManager: MobilePushConfigManager, private readonly transport: MobilePushTransport = createProviderTransport()) {}
+  constructor(
+    private readonly configManager: MobilePushConfigManager,
+    private readonly transport: MobilePushTransport = createProviderTransport(),
+    private readonly options: MobilePushSenderOptions = {},
+  ) {}
 
   getStatus(clientId: string, platform: RemoteMobilePlatform, installationId: string): RemoteMobilePushStatus {
     const registration = this.config().host.mobilePush.registrations.find(item => (
@@ -137,40 +157,54 @@ export class MobilePushSender {
   }
 
   observeStatus(event: PanelAgentStatusEvent): Promise<void> {
+    // Plain shells go quiet all the time; only agents tell the phone anything.
+    if (!event.agentType) return Promise.resolve();
+    this.scheduleFinished(event);
     return this.mutate(() => this.processStatus(event));
+  }
+
+  /**
+   * "Finished" waits for visible work followed by a stable idle: output alone
+   * (typing, a redraw) never arms it, and a pause inside a turn re-arms it.
+   */
+  private scheduleFinished(event: PanelAgentStatusEvent): void {
+    clearTimeout(this.finishTimers.get(event.panelId));
+    this.finishTimers.delete(event.panelId);
+    const ended = event.reason === 'exit' || event.reason === 'destroyed';
+    if (ended || event.state === 'blocked') {
+      this.unreportedWork.delete(event.panelId);
+      return;
+    }
+    if (event.state !== 'idle') return;
+    if (event.workedVisibly) this.unreportedWork.add(event.panelId);
+    if (!this.unreportedWork.has(event.panelId)) return;
+    this.finishTimers.set(event.panelId, setTimeout(() => {
+      this.finishTimers.delete(event.panelId);
+      this.unreportedWork.delete(event.panelId);
+      void this.mutate(() => this.notify(event, 'completed')).catch(() => {
+        console.warn('[Pane mobile push] Could not send a finished alert');
+      });
+    }, STABLE_IDLE_MS));
   }
 
   private async processStatus(event: PanelAgentStatusEvent): Promise<void> {
     const config = this.config();
-    if (!config.host.mobilePush.registrations.some(item => !item.revokedAt && config.host.clients.some(client => client.id === item.clientId))) return;
+    if (!hasLiveRegistration(config)) return;
     const previous = config.host.mobilePush.panelStates[event.panelId];
-    const terminalEnded = event.reason === 'exit' || event.reason === 'destroyed';
-    const kind = terminalEnded ? null : event.state === 'blocked' && previous !== 'blocked'
-      ? 'needs-input'
-      : previous === 'working' && event.state === 'idle'
-        ? 'completed'
-        : null;
-    if (!kind) {
-      if (previous !== event.state) {
-        await this.save({
-          ...config,
-          host: {
-            ...config.host,
-            mobilePush: {
-              ...config.host.mobilePush,
-              panelStates: { ...config.host.mobilePush.panelStates, [event.panelId]: event.state },
-            },
-          },
-        });
-      }
+    const ended = event.reason === 'exit' || event.reason === 'destroyed';
+    if (!ended && event.state === 'blocked' && previous !== 'blocked') {
+      await this.notify(event, 'needs-input');
       return;
     }
+    if (previous !== event.state) await this.save(withPanelState(config, event));
+  }
+
+  private async notify(event: PanelAgentStatusEvent, kind: AttentionKind): Promise<void> {
+    const config = this.config();
+    if (!hasLiveRegistration(config)) return;
     const sequence = config.host.mobilePush.attentionSequence + 1;
     const eventId = `pane:${event.sessionId}:${event.panelId}:${kind}:${sequence}`;
-    const updatedConfig: RemoteDaemonConfig = {
-      ...config,
-      host: { ...config.host, mobilePush: { ...config.host.mobilePush, attentionSequence: sequence, panelStates: { ...config.host.mobilePush.panelStates, [event.panelId]: event.state } } },
-    };
+    const updatedConfig = withPanelState(config, event, sequence);
     await this.save(updatedConfig);
     for (const registration of updatedConfig.host.mobilePush.registrations) {
       if (registration.revokedAt || !isEnabled(registration, kind)) continue;
@@ -179,24 +213,29 @@ export class MobilePushSender {
       try {
         await this.deliver(registration, eventId, event, kind);
         await this.markDelivered(registration.id, eventId);
+        console.log('[Pane mobile push] Delivered', { platform: registration.platform, kind });
       } catch (error) {
         if (error instanceof ProviderDeliveryError && isInvalidTokenResponse(error)) await this.revokeRegistration(registration.id);
         const status = error instanceof ProviderDeliveryError ? error.status : undefined;
-        console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, status });
+        const reason = error instanceof ProviderDeliveryError ? providerReason(error.body) : undefined;
+        console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, kind, status, reason });
       }
     }
   }
 
-  private async deliver(registration: RemoteMobilePushRegistration, eventId: string, event: PanelAgentStatusEvent, kind: 'needs-input' | 'completed'): Promise<void> {
-    const title = kind === 'completed' ? 'Pane finished a turn' : 'Pane needs attention';
+  private async deliver(registration: RemoteMobilePushRegistration, eventId: string, event: PanelAgentStatusEvent, kind: AttentionKind): Promise<void> {
+    const title = this.options.resolveName?.(event.sessionId)?.trim() || 'Pane';
+    const body = kind === 'completed' ? `${title} needs your attention` : `${title} is blocked`;
+    // One alert per Pane: a newer one replaces the last, and the phone clears them by Pane.
+    const collapseId = createHash('sha256').update(event.sessionId).digest('hex');
     const payload: JsonObject = {
       eventId, hostProfileId: registration.hostProfileId, paneId: event.sessionId, panelId: event.panelId,
-      aps: { alert: { title, body: 'Open Pane to continue.' }, sound: 'default' },
+      aps: { alert: { title, body }, sound: 'default', 'thread-id': event.sessionId },
     };
     if (registration.platform === 'ios') {
       const credentials = readApnsCredentials();
       if (!credentials) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
-      const response = await this.transport.apns({ token: registration.token, jwt: createApnsJwt(credentials), topic: credentials.topic, payload });
+      const response = await this.transport.apns({ token: registration.token, jwt: createApnsJwt(credentials), topic: credentials.topic, collapseId, payload });
       if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'APNs rejected notification');
       return;
     }
@@ -204,7 +243,11 @@ export class MobilePushSender {
     if (!credentials) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
     const response = await this.transport.fcm({
       token: registration.token, accessToken: await createFcmAccessToken(credentials), projectId: credentials.projectId,
-      payload: { message: { token: registration.token, notification: { title, body: 'Open Pane to continue.' }, data: { eventId, hostProfileId: registration.hostProfileId, paneId: event.sessionId, panelId: event.panelId } } },
+      payload: { message: {
+        token: registration.token, notification: { title, body },
+        android: { notification: { tag: collapseId } },
+        data: { eventId, hostProfileId: registration.hostProfileId, paneId: event.sessionId, panelId: event.panelId },
+      } },
     });
     if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'FCM rejected notification');
   }
@@ -251,10 +294,10 @@ export class MobilePushSender {
 }
 
 /** One host config has one serial mutation stream across IPC and SSE delivery. */
-export function getMobilePushSender(configManager: MobilePushConfigManager): MobilePushSender {
+export function getMobilePushSender(configManager: MobilePushConfigManager, options?: MobilePushSenderOptions): MobilePushSender {
   const existing = senderByConfigManager.get(configManager);
   if (existing) return existing;
-  const sender = new MobilePushSender(configManager);
+  const sender = new MobilePushSender(configManager, undefined, options);
   senderByConfigManager.set(configManager, sender);
   return sender;
 }
@@ -268,10 +311,21 @@ function providerReadiness(platform: RemoteMobilePlatform): Pick<RemoteMobilePus
     : { provider: 'missing-config', code: 'ERR_FCM_NOT_CONFIGURED', message: 'This host has no valid FCM sender configuration.' };
 }
 
+function hasLiveRegistration(config: RemoteDaemonConfig): boolean {
+  return config.host.mobilePush.registrations.some(item => !item.revokedAt && config.host.clients.some(client => client.id === item.clientId));
+}
+function withPanelState(config: RemoteDaemonConfig, event: PanelAgentStatusEvent, attentionSequence = config.host.mobilePush.attentionSequence): RemoteDaemonConfig {
+  const mobilePush = { ...config.host.mobilePush, attentionSequence, panelStates: { ...config.host.mobilePush.panelStates, [event.panelId]: event.state } };
+  return { ...config, host: { ...config.host, mobilePush } };
+}
+/** APNs `reason` or FCM `status` from an error body, never the token. */
+function providerReason(body: string): string | undefined {
+  return /"(?:reason|status)"\s*:\s*"([A-Za-z_]+)"/.exec(body)?.[1];
+}
 function configWithRegistrations(config: RemoteDaemonConfig, registrations: RemoteMobilePushRegistration[]): RemoteDaemonConfig {
   return { ...config, host: { ...config.host, mobilePush: { ...config.host.mobilePush, registrations } } };
 }
-function isEnabled(registration: RemoteMobilePushRegistration, kind: 'needs-input' | 'completed'): boolean {
+function isEnabled(registration: RemoteMobilePushRegistration, kind: AttentionKind): boolean {
   return kind === 'needs-input' ? registration.needsInputEnabled : registration.completedEnabled;
 }
 function isSuccess(status: number): boolean { return status >= 200 && status < 300; }
@@ -349,7 +403,7 @@ async function postOAuthToken(tokenUri: string, form: Record<string, string>): P
 }
 function createProviderTransport(): MobilePushTransport {
   return {
-    apns: ({ token, jwt, topic, payload }) => new Promise((resolve, reject) => {
+    apns: ({ token, jwt, topic, collapseId, payload }) => new Promise((resolve, reject) => {
       const host = process.env.PANE_APNS_ENVIRONMENT === 'production' ? 'https://api.push.apple.com' : 'https://api.sandbox.push.apple.com';
       const client = connectHttp2(host);
       let settled = false;
@@ -364,9 +418,6 @@ function createProviderTransport(): MobilePushTransport {
       const timeout = setTimeout(() => finish(new Error('APNs delivery timed out')), PROVIDER_TIMEOUT_MS);
       client.on('error', finish);
       client.on('close', () => finish(new Error('APNs connection closed before delivery completed')));
-      // APNs restricts collapse identifiers to 64 bytes. The opaque event ID
-      // can contain UUIDs, so derive a fixed-size, non-sensitive identifier.
-      const collapseId = createHash('sha256').update(String(payload.eventId)).digest('hex');
       const request = client.request({ ':method': 'POST', ':path': `/3/device/${encodeURIComponent(token)}`, authorization: `bearer ${jwt}`, 'apns-topic': topic, 'apns-push-type': 'alert', 'apns-collapse-id': collapseId });
       let body = '';
       request.setEncoding('utf8');

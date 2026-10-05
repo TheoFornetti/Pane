@@ -2,9 +2,11 @@ import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
+  useAudioPlayer,
   useAudioRecorder,
   useAudioStream,
 } from 'expo-audio';
+import * as Haptics from 'expo-haptics';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 
 import type {
@@ -19,15 +21,21 @@ import { invokeChannel, useDaemon } from '@/daemon';
 import { useAffordances } from '../hosts/hostSettings';
 
 import { LiveTranscript, voiceStreamUrl, wavStreamHeader } from './liveTranscript';
+import { MAX_RECORDING_MS, SilenceWatch, pcmLevelDbfs, recordingClock } from './recordingLimits';
 import { micMode } from './voiceKeys';
 
-const MAX_RECORDING_MS = 60_000;
 const SAMPLE_RATE = 16_000;
 const OPEN_TIMEOUT_MS = 8_000;
 const KEEPALIVE_MS = 5_000;
 /** Time for Deepgram to return the last words after `Finalize`. */
 const FINALIZE_WAIT_MS = 800;
 const CONFIRM_POLL_MS = 100;
+/** How often a recording checks its limit, its silence and the recorder's level meter. */
+const TICK_MS = 250;
+const SILENCE_NOTICE = 'Stopped after 30 seconds of silence.';
+const LIMIT_NOTICE = 'Stopped at the 15-minute limit.';
+/** Mono speech at 64 kbps keeps a 15-minute clip near 7 MB, under the host's 10 MB cap. */
+const CLIP_OPTIONS = { ...RecordingPresets.HIGH_QUALITY, numberOfChannels: 1, bitRate: 64_000, isMeteringEnabled: true };
 
 export type DictationPhase = 'idle' | 'starting' | 'listening' | 'transcribing';
 
@@ -49,7 +57,10 @@ export function useVoiceDictation(onText: (text: string) => void) {
   const socket = useRef<WebSocket | null>(null);
   const transcript = useRef<LiveTranscript | null>(null);
   const sentHeader = useRef(false);
-  const startedAt = useRef(0);
+  /** When the current recording started; the timer, the countdown and the limit all count from it. */
+  const [startedAt, setStartedAt] = useState(0);
+  const silence = useRef(new SilenceWatch(0));
+  const cuedCountdown = useRef(false);
   const keepAlive = useRef<ReturnType<typeof setInterval> | null>(null);
   const mounted = useRef(true);
   // The mode this recording started in; a save from the setup sheet can start one the affordances don't show yet.
@@ -60,6 +71,7 @@ export function useVoiceDictation(onText: (text: string) => void) {
     channels: 1,
     encoding: 'int16',
     onBuffer: buffer => {
+      silence.current.hear(pcmLevelDbfs(buffer.data), Date.now());
       const open = socket.current;
       if (open?.readyState !== WebSocket.OPEN) return;
       if (!sentHeader.current) {
@@ -69,7 +81,8 @@ export function useVoiceDictation(onText: (text: string) => void) {
       open.send(buffer.data);
     },
   });
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorder = useAudioRecorder(CLIP_OPTIONS);
+  const countdownCue = useAudioPlayer(require('../../../assets/sounds/countdown.wav'));
 
   const clearTimers = () => {
     if (keepAlive.current !== null) clearInterval(keepAlive.current);
@@ -138,9 +151,9 @@ export function useVoiceDictation(onText: (text: string) => void) {
     const stoppedAt = Date.now();
     const request: VoiceStreamingFinalizeRequest = {
       rawText: live.rawText,
-      durationMs: stoppedAt - startedAt.current,
+      durationMs: stoppedAt - startedAt,
       language: 'en',
-      timings: { asrMs: stoppedAt - startedAt.current, firstTranscriptMs: live.firstTranscriptMs },
+      timings: { asrMs: stoppedAt - startedAt, firstTranscriptMs: live.firstTranscriptMs },
       metadata: live.metadata,
     };
     const result = await invokeChannel<VoiceTranscriptionResult>(client, 'voice:finalize-streaming', [request]);
@@ -158,14 +171,15 @@ export function useVoiceDictation(onText: (text: string) => void) {
     const request: VoiceTranscriptionRequest = {
       audioDataUrl: await fileToDataUrl(recorder.uri),
       mimeType: 'audio/mp4',
-      durationMs: Date.now() - startedAt.current,
+      durationMs: Date.now() - startedAt,
       language: 'en',
     };
     const result = await invokeChannel<VoiceTranscriptionResult>(client, 'voice:transcribe', [request]);
     return result.text;
   };
 
-  const stop = async () => {
+  /** Stops and inserts the text so far; `notice` then shows in the error line. */
+  const stop = async (notice?: string) => {
     if (phase !== 'listening') return;
     clearTimers();
     setPhase('transcribing');
@@ -174,6 +188,7 @@ export function useVoiceDictation(onText: (text: string) => void) {
       if (text.trim()) onText(text.trim());
       setPhase('idle');
       setPreview('');
+      if (notice) setError(notice);
     } catch (cause) {
       fail(cause);
     } finally {
@@ -182,11 +197,31 @@ export function useVoiceDictation(onText: (text: string) => void) {
       await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
     }
   };
-  const stopAtLimit = useEffectEvent(() => void stop());
+  /** Returns true once it has stopped the recording. */
+  const tick = useEffectEvent((): boolean => {
+    const now = Date.now();
+    if (activeMode.current === 'recorded') silence.current.hear(recorder.getStatus().metering ?? -160, now);
+    if (now - startedAt >= MAX_RECORDING_MS) {
+      void stop(LIMIT_NOTICE);
+      return true;
+    }
+    if (silence.current.silent(now)) {
+      void stop(SILENCE_NOTICE);
+      return true;
+    }
+    if (!cuedCountdown.current && recordingClock(now - startedAt).countdown) {
+      cuedCountdown.current = true;
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      void countdownCue.seekTo(0).then(() => countdownCue.play());
+    }
+    return false;
+  });
   useEffect(() => {
     if (phase !== 'listening') return;
-    const limit = setTimeout(stopAtLimit, MAX_RECORDING_MS);
-    return () => clearTimeout(limit);
+    const timer = setInterval(() => {
+      if (tick()) clearInterval(timer);
+    }, TICK_MS);
+    return () => clearInterval(timer);
   }, [phase]);
 
   /**
@@ -205,7 +240,10 @@ export function useVoiceDictation(onText: (text: string) => void) {
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) throw new Error('Allow microphone access in Settings to dictate.');
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      startedAt.current = Date.now();
+      const now = Date.now();
+      setStartedAt(now);
+      silence.current = new SilenceWatch(now);
+      cuedCountdown.current = false;
       if (startMode === 'streaming') await startStreaming(confirmMs);
       else await startRecording();
       setPhase('listening');
@@ -238,6 +276,8 @@ export function useVoiceDictation(onText: (text: string) => void) {
     host: voice,
     start,
     phase,
+    /** When the current recording started, in epoch ms. */
+    startedAt,
     preview,
     error,
     clearError: () => setError(null),

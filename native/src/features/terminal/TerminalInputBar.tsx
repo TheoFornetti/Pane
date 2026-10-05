@@ -6,6 +6,7 @@ import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
+import { recordingClock } from '../voice/recordingLimits';
 import type { useVoiceDictation } from '../voice/useVoiceDictation';
 
 type Voice = ReturnType<typeof useVoiceDictation>;
@@ -175,7 +176,7 @@ function SendButton({ hasText, dimmed, onPress }: { hasText: boolean; dimmed: bo
   );
 }
 
-/** The mic; while recording, a red stop key with the elapsed time beside it. */
+/** The mic; while recording, a red stop key with the elapsed time, then the last minute counting down, beside it. */
 function MicButton({ voice, disabled, onSetup }: { voice: Voice; disabled: boolean; onSetup: () => void }) {
   const theme = useTheme();
   const { colors } = theme;
@@ -185,7 +186,7 @@ function MicButton({ voice, disabled, onSetup }: { voice: Voice; disabled: boole
 
   return (
     <View style={styles.micRow}>
-      {listening ? <RecordingTime /> : null}
+      {listening ? <RecordingTime startedAt={voice.startedAt} /> : null}
       <Pressable
         testID="terminal-mic"
         accessibilityRole="button"
@@ -223,21 +224,20 @@ function MicButton({ voice, disabled, onSetup }: { voice: Voice; disabled: boole
   );
 }
 
-/** Seconds since recording started, counted from when it appears. */
-function RecordingTime() {
+/** Time since the hook started recording; in the last minute, the time left. */
+function RecordingTime({ startedAt }: { startedAt: number }) {
   const { colors } = useTheme();
-  const [seconds, setSeconds] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const started = Date.now();
-    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    // Ticks faster than a second so the label turns over within 250 ms of the hook's limit check.
+    const timer = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(timer);
   }, []);
+  const clock = recordingClock(now - startedAt);
   return (
-    <View style={styles.timer} accessibilityLabel={`Recording, ${seconds} seconds`}>
+    <View style={styles.timer} accessibilityLabel={clock.countdown ? `Recording, ${clock.seconds} seconds left` : `Recording, ${clock.seconds} seconds`}>
       <Icon ios="waveform" android="graphic_eq" size={15} color={colors.danger} />
-      <Text variant="footnote" tone="danger" style={styles.timerText}>
-        {`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`}
-      </Text>
+      <Text variant="footnote" tone="danger" style={styles.timerText}>{clock.label}</Text>
     </View>
   );
 }
@@ -262,7 +262,8 @@ const styles = StyleSheet.create({
   action: { width: ACTION, minWidth: ACTION_MIN, flexShrink: 1, height: ACTION, alignItems: 'center', justifyContent: 'center' },
   micRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginRight: 4 },
   timer: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  timerText: { fontWeight: '600', fontVariant: ['tabular-nums'] },
+  // Wide enough for "14:59", so the count-up and the countdown share one footprint.
+  timerText: { width: 38, textAlign: 'right', fontWeight: '600', fontVariant: ['tabular-nums'] },
   send: {
     width: 78,
     height: ACTION,

@@ -107,19 +107,19 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop }: Panel
 
 const styles = StyleSheet.create({
   bar: {
-    minHeight: 48,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
     paddingHorizontal: 8,
-    paddingTop: 8,
+    paddingTop: 4,
     borderBottomWidth: 1,
   },
   scroll: { flex: 1 },
   tabs: { alignItems: 'flex-end', gap: 4 },
   // Open at the bottom, so the tab reads as attached to the terminal below it.
   tab: {
-    height: 40,
+    height: 36,
     maxWidth: 192,
     flexDirection: 'row',
     alignItems: 'center',
@@ -130,8 +130,8 @@ const styles = StyleSheet.create({
   },
   label: { flexShrink: 1 },
   stop: {
-    height: 30,
-    marginBottom: 7,
+    height: 28,
+    marginBottom: 4,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -140,5 +140,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   stopLabel: { fontWeight: '600' },
-  add: { width: 32, height: 32, marginBottom: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  add: { width: 30, height: 30, marginBottom: 3, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
 });

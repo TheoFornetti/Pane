@@ -50,6 +50,21 @@ describe('CLAUDE_MANIFEST', () => {
     expect(r.state).toBe('blocked');
   });
 
+  // Claude Code 2.1.289 titles: "◐ Hi" / "◑ Hi" while a turn runs, "✳ Hi" between turns.
+  it.each(['◐ Hi', '◑ Hi'])('sees the half-circle title %s as visible work over an idle prompt box', title => {
+    const s = ['some prior output', '────────────', ' ❯ ', '────────────'].join('\n');
+    const r = detectAgentState(CLAUDE_MANIFEST, screen(s, title));
+    expect(r.state).toBe('working');
+    expect(r.visibleWorking).toBe(true);
+  });
+
+  it('keeps the star title between turns idle', () => {
+    const s = ['some prior output', '────────────', ' ❯ ', '────────────'].join('\n');
+    const r = detectAgentState(CLAUDE_MANIFEST, screen(s, '✳ Hi'));
+    expect(r.state).toBe('idle');
+    expect(r.visibleWorking).toBe(false);
+  });
+
   it('classifies an empty prompt box as idle via live_prompt_box', () => {
     const s = ['some prior output', '────────────', ' ❯ ', '────────────'].join('\n');
     const r = detectAgentState(CLAUDE_MANIFEST, screen(s));

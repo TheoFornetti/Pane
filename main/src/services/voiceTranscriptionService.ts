@@ -23,7 +23,7 @@ const OPENROUTER_CHAT_COMPLETIONS_ENDPOINT = 'https://openrouter.ai/api/v1/chat/
 const DEEPGRAM_AUTH_GRANT_ENDPOINT = 'https://api.deepgram.com/v1/auth/grant';
 const CLEANUP_MODEL = 'google/gemini-3.1-flash-lite' as const;
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
-const MAX_AUDIO_DURATION_MS = 60_000;
+const MAX_AUDIO_DURATION_MS = 15 * 60_000;
 const MAX_PROVIDER_ERROR_LENGTH = 400;
 const DEEPGRAM_NOVA3_STREAMING_COST_PER_HOUR_USD = 0.462;
 
@@ -494,7 +494,7 @@ function validateVoiceTranscriptionRequest(request: VoiceTranscriptionRequest): 
   }
 
   if (request.durationMs !== undefined && request.durationMs > MAX_AUDIO_DURATION_MS + 1_000) {
-    throw new Error('Recording is too long. Keep voice clips under 60 seconds.');
+    throw new Error('Recording is too long. Keep voice clips under 15 minutes.');
   }
 
   if (request.language !== undefined && request.language !== 'en') {
@@ -532,7 +532,7 @@ function validateVoiceTranscriptionRequest(request: VoiceTranscriptionRequest): 
 
 function validateVoiceStreamingFinalizeRequest(request: VoiceStreamingFinalizeRequest): ValidatedStreamingFinalizeInput {
   if (request.durationMs !== undefined && request.durationMs > MAX_AUDIO_DURATION_MS + 5_000) {
-    throw new Error('Streaming recording is too long. Keep voice clips under 60 seconds.');
+    throw new Error('Streaming recording is too long. Keep voice clips under 15 minutes.');
   }
   if (request.language !== undefined && request.language !== 'en') {
     throw new Error('Voice transcription currently supports English only.');

@@ -16,6 +16,7 @@ import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 import { draftKey, readDraft, writeDraft } from '../composer/composerDrafts';
 import { insertAtSelection, type Selection } from '../composer/insertText';
 import { useAffordances } from '../hosts/hostSettings';
+import { clearPaneNotifications } from '../notifications/device';
 import { useMarkPaneSeen } from '../panes/hooks';
 import { ShortcutsSheet } from '../shortcuts/ShortcutsSheet';
 import { AttachSheet } from '../upload/AttachSheet';
@@ -74,7 +75,10 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   // Watching a pane counts as seeing it: clear its Ready badge on the way in
   // and out, however the screen was opened (list, notification or link).
   const markSeen = useMarkPaneSeen();
-  const markThisPaneSeen = useEffectEvent(() => markSeen(paneId));
+  const markThisPaneSeen = useEffectEvent(() => {
+    markSeen(paneId);
+    void clearPaneNotifications(paneId);
+  });
   useEffect(() => {
     markThisPaneSeen();
     return () => markThisPaneSeen();
@@ -142,7 +146,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
           )}
         </View>
       )}
-      {/* The box sits on the home indicator's safe area, or a hair above the keyboard. */}
+      {/* The box sits on the bottom safe area (HIG: controls stay out of it), or a hair above the keyboard. */}
       <View style={{ height: keyboardVisible ? KEYBOARD_GAP : insets.bottom }} />
     </KeyboardAvoidingView>
   );
@@ -395,5 +399,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   notice: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1 },
-  inputArea: { borderTopWidth: 1, paddingHorizontal: 12, paddingTop: 10, gap: 8 },
+  inputArea: { borderTopWidth: 1, paddingHorizontal: 12, paddingTop: 6, gap: 6 },
 });

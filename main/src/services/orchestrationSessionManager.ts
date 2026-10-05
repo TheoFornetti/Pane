@@ -464,6 +464,11 @@ export class OrchestrationSessionManager extends EventEmitter {
    * The Session's current members, for a Session-scoped `runpane watch`. The journal calls this on
    * every read, so it reads the in-memory store without taking the Session lock.
    */
+  /** The Session that owns a hidden workspace pane, by that pane's id. Reads the in-memory store, like `workspaceMembership`. */
+  nameForWorkspace(paneId: string): string | undefined {
+    return this.store.read().sessions.find(session => session.internalSessionId === paneId)?.name;
+  }
+
   workspaceMembership(sessionId: string): WorkspaceSessionMembership | undefined {
     const record = this.store.read().sessions.find(session => session.id === sessionId);
     if (!record) return undefined;

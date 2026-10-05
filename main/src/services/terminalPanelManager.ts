@@ -276,6 +276,8 @@ interface TerminalProcess {
   shellProcessName?: string;
   /** Foreground-process and screen evidence gathered while `agentType` is unresolved. */
   agentProbe?: AgentProbe;
+  /** The agent showed its own working signal since it last went idle. */
+  workedVisibly?: boolean;
   /** Last status scan, reused while the emulator pushes no new screen. */
   lastStatusScan?: { screen: ScreenState; detection: AgentDetectionResult };
   /** The CLI came up with typed initial input still to send; the status poll sends it. */
@@ -1997,7 +1999,12 @@ export class TerminalPanelManager extends EventEmitter {
       sessionId: terminal.sessionId,
       state,
       reason,
+      agentType: terminal.agentType,
     };
+    if (state === 'idle') {
+      payload.workedVisibly = terminal.workedVisibly ?? false;
+      terminal.workedVisibly = false;
+    }
     this.sendRendererEvent('panel:agentStatus', payload);
     this.emit('agent-status', payload);
     this.emitActivityStatus(terminal);
@@ -2044,6 +2051,7 @@ export class TerminalPanelManager extends EventEmitter {
           });
           terminal.lastStatusScan = { screen, detection };
         }
+        if (detection.visibleWorking) terminal.workedVisibly = true;
         const next = this.agentStatusMonitor.update(terminal.panelId, detection, Date.now());
         if (next) this.emitAgentStatus(terminal, next, detection.matchedRuleId);
         this.releaseHeldInitialInput(terminal, manifest.id);

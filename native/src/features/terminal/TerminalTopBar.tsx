@@ -28,10 +28,10 @@ const STATUS_LABEL: Record<RemotePaneConnectionStatus, string> = {
 };
 
 /**
- * The web app's status bar, drawn inside the top safe area: back, the host's
- * connection dot, label and address, and a "…" menu with host settings and,
- * when a terminal is open, Clear scrollback. The pane name follows the host
- * label, where the web app has none.
+ * The web app's status bar, drawn below the top safe area: back, the host's
+ * connection dot and label, and a "…" menu with host settings and, when a
+ * terminal is open, Clear scrollback. The pane name follows the host label,
+ * where the web app has none. The address shows only while not connected.
  */
 export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: string; onClearScrollback?: () => void }) {
   const theme = useTheme();
@@ -82,10 +82,12 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
                 </>
               ) : null}
             </View>
-            <Text variant="footnote" tone="muted" numberOfLines={1}>
-              {lastError || profile.baseUrl}
-              {lastSeenAt ? ` · seen ${formatLastSeen(lastSeenAt)}` : ''}
-            </Text>
+            {status === 'connected' ? null : (
+              <Text variant="footnote" tone="muted" numberOfLines={1}>
+                {lastError || profile.baseUrl}
+                {lastSeenAt ? ` · seen ${formatLastSeen(lastSeenAt)}` : ''}
+              </Text>
+            )}
           </View>
         </View>
         <Pressable
@@ -172,13 +174,13 @@ const DOT = 10;
 
 const styles = StyleSheet.create({
   row: {
-    minHeight: 56,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 2,
   },
   leading: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8 },
   back: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
@@ -187,7 +189,7 @@ const styles = StyleSheet.create({
   semibold: { fontWeight: '600' },
   shrink: { flexShrink: 1 },
   pane: { flexShrink: 2 },
-  more: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  more: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   dotBox: { width: DOT, height: DOT, alignItems: 'center', justifyContent: 'center' },
   dot: { width: DOT, height: DOT, borderRadius: DOT / 2 },
   ring: { position: 'absolute' },

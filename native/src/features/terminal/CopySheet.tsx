@@ -9,7 +9,7 @@ import { Button, Icon, Text } from '@/ui';
 
 import { ComposerSheet } from '../composer/ComposerSheet';
 
-const HISTORY_LINES = 200;
+const HISTORY_LINES = 300;
 
 export interface CopySheetProps {
   visible: boolean;
@@ -20,9 +20,9 @@ export interface CopySheetProps {
 }
 
 /**
- * The terminal's recent output as selectable text. Copy selection takes what
- * is selected, Copy all takes everything shown, and Last 200 lines swaps in
- * the host's clean scrollback.
+ * The terminal's recent output as selectable text. Last 300 lines copies the
+ * host's clean scrollback and shows it, Copy all takes everything shown, and
+ * Copy selection takes what is selected.
  */
 export function CopySheet({ visible, onClose, panelId, screenText }: CopySheetProps) {
   const theme = useTheme();
@@ -46,13 +46,16 @@ export function CopySheet({ visible, onClose, panelId, screenText }: CopySheetPr
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setStatus({ message, error: false });
   };
-  const loadHistory = async () => {
+  const copyHistory = async () => {
     setLoading(true);
     setStatus(null);
     try {
       const result = await invokeChannel<{ content: string }>(client, 'terminal:getScrollbackClean', [panelId, HISTORY_LINES]);
-      setHistory(result.content);
+      const content = result.content.replace(/\s+$/, '');
+      if (!content) throw new Error('No output yet.');
+      setHistory(content);
       setSelection({ start: 0, end: 0 });
+      await copy(content, `Copied the last ${HISTORY_LINES} lines`);
     } catch (cause) {
       setStatus({ message: cause instanceof Error ? cause.message : 'Could not load the scrollback.', error: true });
     } finally {
@@ -104,16 +107,16 @@ export function CopySheet({ visible, onClose, panelId, screenText }: CopySheetPr
           <Button
             testID="copy-history"
             title={`Last ${HISTORY_LINES} lines`}
-            variant="secondary"
+            icon={<Icon ios="doc.on.doc" android="content_copy" size={15} color={colors.onAccent} />}
             loading={loading}
-            onPress={() => void loadHistory()}
+            onPress={() => void copyHistory()}
           />
         </View>
         <View style={styles.button}>
           <Button
             testID="copy-selection"
             title="Copy selection"
-            icon={<Icon ios="doc.on.doc" android="content_copy" size={15} color={colors.onAccent} />}
+            variant="secondary"
             disabled={!selected}
             onPress={() => void copy(selected, 'Copied selection')}
           />

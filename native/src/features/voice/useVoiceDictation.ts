@@ -19,6 +19,7 @@ import { invokeChannel, useDaemon } from '@/daemon';
 import { useAffordances } from '../hosts/hostSettings';
 
 import { LiveTranscript, voiceStreamUrl, wavStreamHeader } from './liveTranscript';
+import { micMode } from './voiceKeys';
 
 const MAX_RECORDING_MS = 60_000;
 const SAMPLE_RATE = 16_000;
@@ -39,9 +40,7 @@ export function useVoiceDictation(onText: (text: string) => void) {
   const { client, profile } = useDaemon();
   const affordances = useAffordances();
   const voice = affordances.data?.voiceTranscription;
-  const mode: VoiceTranscriptionMode | null = voice?.availableModes.includes(voice.defaultMode)
-    ? voice.defaultMode
-    : voice?.availableModes[0] ?? null;
+  const mode = voice ? micMode(voice) : null;
 
   const [phase, setPhase] = useState<DictationPhase>('idle');
   const [preview, setPreview] = useState('');
@@ -235,8 +234,8 @@ export function useVoiceDictation(onText: (text: string) => void) {
     available: mode !== null,
     /** False until the host's voice setup has loaded. */
     loaded: voice !== undefined,
-    /** Which keys the host has, never their values. */
-    configured: voice?.configured,
+    /** The host's voice setup: which keys it has (never their values) and the modes it can run. */
+    host: voice,
     start,
     phase,
     preview,

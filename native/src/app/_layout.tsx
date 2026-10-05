@@ -72,6 +72,7 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
         <Stack.Screen name="settings/shortcuts" options={{ title: 'Shortcuts' }} />
         <Stack.Screen name="settings/shortcut" options={{ presentation: 'modal', title: 'Edit shortcut' }} />
+        <Stack.Screen name="settings/voice" options={{ title: 'Voice' }} />
         {/* The terminal draws the PWA's top bar itself. */}
         <Stack.Screen name="pane/[paneId]/index" options={{ headerShown: false }} />
         <Stack.Screen

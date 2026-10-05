@@ -32,8 +32,6 @@ export interface LayerHost {
    * so one action's several calls never interleave with theirs. Absent where nothing else shares the engine.
    */
   holdLanes?<T>(lanes: { pid?: number; clipboard?: boolean }, run: () => Promise<T>): Promise<T>;
-  /** Tells the user an app is about to come forward. Resolves with a line for the result, if any. */
-  showForegroundNotice(info: { app: string; action: string }): Promise<string | undefined>;
   /** Wait after each action before reading again. */
   settleMs?: number;
   /** Longest extra wait while the app reports busy or loading. */
@@ -77,6 +75,8 @@ function needsForegroundMessage(app: string, verb: Verb): string {
 
 export class App {
   private window: WindowInfo;
+  /** Foreground notice lines the engine host returned during the current action. */
+  private readonly notices = new Set<string>();
 
   constructor(private readonly layer: Layer, window: WindowInfo, readonly name: string) {
     this.window = window;
@@ -266,12 +266,15 @@ export class App {
   }
 
   private async perform(action: DriverAction, options: ForegroundOption): Promise<ActionOutcome> {
-    return this.layer.driver.perform(this.window, action, { foreground: options.foreground === true });
+    const outcome = await this.layer.driver.perform(this.window, action, { foreground: options.foreground === true });
+    if (outcome.notice) this.notices.add(outcome.notice);
+    return outcome;
   }
 
   /**
-   * Runs one action: the notice first when it may bring the app forward, then the action, a settle
-   * and a step record. Throws the needs_foreground copy or the engine's message when it fails.
+   * Runs one action, then a settle and a step record. Throws the needs_foreground copy or the
+   * engine's message when it fails. A foreground action's notice comes from the engine host, which
+   * shows it before the call; its line goes in the result once.
    */
   private async act(verb: Verb, args: JsonObject, options: ForegroundOption, run: () => Promise<ActionOutcome>): Promise<void> {
     const at = new Date().toISOString();
@@ -282,10 +285,6 @@ export class App {
     let failure: Error | undefined;
     let result: JsonValue = 'ok';
     try {
-      if (forward) {
-        const notice = await this.layer.host.showForegroundNotice({ app: this.name, action: verb });
-        if (notice) this.layer.host.write(notice);
-      }
       const attempt = async () => {
         const first = await run();
         if (first.ok || !first.stale) return first;
@@ -295,7 +294,9 @@ export class App {
       };
       const lanes = { pid: this.window.pid, clipboard: verb === 'paste' };
       const { holdLanes } = this.layer.host;
+      this.notices.clear();
       const outcome = holdLanes ? await holdLanes(lanes, attempt) : await attempt();
+      for (const notice of this.notices) this.layer.host.write(notice);
       if (outcome.ok) {
         if (outcome.note) result = `ok: ${outcome.note}`;
       } else {

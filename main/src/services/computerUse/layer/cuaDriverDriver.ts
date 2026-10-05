@@ -117,14 +117,16 @@ export function cuaDriverDriver(call: CallEngine, platform: Platform = currentPl
   }
 
   function outcome(result: EngineResult): ActionOutcome {
+    const { notice } = result;
     if (result.ok) {
       const effect = decodeOptionalBoundary(result.data, successSchema)?.effect;
-      return effect === 'suspected_noop' || effect === 'unverifiable' ? { ok: true, note: `effect ${effect.replace('_', ' ')}` } : { ok: true };
+      const note = effect === 'suspected_noop' || effect === 'unverifiable' ? `effect ${effect.replace('_', ' ')}` : undefined;
+      return { ok: true, note, notice };
     }
     const payload = decodeOptionalBoundary(result.data, errorSchema);
     const code = payload?.code ?? payload?.refusal?.code ?? result.error?.code ?? '';
     const needsForeground = FOREGROUND_CODES.has(code) || payload?.escalation?.recommended === 'foreground';
-    return { ok: false, needsForeground, message: result.error?.message ?? code, stale: STALE_CODES.has(code) };
+    return { ok: false, needsForeground, message: result.error?.message ?? code, stale: STALE_CODES.has(code), notice };
   }
 
   function targetArgs(window: WindowInfo, target: ActionTarget): JsonObject {

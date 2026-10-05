@@ -87,10 +87,11 @@ export type DriverAction =
   | { kind: 'selectTextMatch'; ref: string; text: string; prefix: string; suffix: string; selectionType: 'text' | 'cursor_before' | 'cursor_after' }
   | { kind: 'paste'; text: string; format: 'text' | 'md' | 'html' };
 
+/** `notice`: the line the engine host returned after showing the user a foreground notice. */
 export type ActionOutcome =
-  | { ok: true; note?: string }
+  | { ok: true; note?: string; notice?: string }
   /** `stale`: the engine's handles were replaced by a newer read; reading again and retrying fixes it. */
-  | { ok: false; needsForeground: boolean; message: string; stale?: boolean };
+  | { ok: false; needsForeground: boolean; message: string; stale?: boolean; notice?: string };
 
 export interface ClipboardContents {
   text?: string;

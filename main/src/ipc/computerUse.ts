@@ -10,7 +10,7 @@ import { getAppSubdirectory } from '../utils/appDirectory';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 const COMPUTER_USE_OFF_MESSAGE = "Computer use is off on this machine. Turn it on in Pane's Remote Access settings.";
-const REMOTE_REFUSAL = 'Computer use runs only from this machine for now.';
+const REMOTE_REFUSAL = 'Only this machine is supported yet.';
 
 const runRequestSchema = boundary.object({
   connectionId: boundary.nonEmptyString,

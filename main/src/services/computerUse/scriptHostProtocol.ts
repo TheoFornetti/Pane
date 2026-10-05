@@ -6,15 +6,16 @@ export type ParentMessage =
   /** `engine` picks the layer's driver for this run. */
   | { type: 'run'; runId: number; code: string; maxOutputChars: number; engine: EngineId }
   | { type: 'callResult'; callId: number; result: EngineResult }
-  /** The foreground notice is up; `text` is the line for the script's result. */
-  | { type: 'foregroundNoticeShown'; noticeId: number; text?: string };
+  /** The lanes a `hold` asked for are now this host's alone. */
+  | { type: 'held'; holdId: number };
 
 export type ChildMessage =
   | { type: 'call'; callId: number; tool: string; args: JsonObject }
   /** A step our layer took, for the replay; the daemon validates it. */
   | { type: 'step'; step: JsonValue }
-  /** An action is about to bring `app` to the front; the child waits for `foregroundNoticeShown`. */
-  | { type: 'foregroundNotice'; noticeId: number; app: string; action: string }
+  /** Keeps other agents off an app (and the clipboard) across several calls, until `release`. */
+  | { type: 'hold'; holdId: number; pid?: number; clipboard: boolean }
+  | { type: 'release'; holdId: number }
   | { type: 'done'; runId: number; ok: boolean; text: string; images: EngineImage[] };
 
 export const imageSchema = boundary.object({ mime: boundary.string, base64: boundary.string });
@@ -28,11 +29,12 @@ export const childMessageSchema: BoundarySchema<ChildMessage> = boundary.union(
   }),
   boundary.object({ type: boundary.literal('step'), step: boundary.json }),
   boundary.object({
-    type: boundary.literal('foregroundNotice'),
-    noticeId: boundary.number,
-    app: boundary.string,
-    action: boundary.string,
+    type: boundary.literal('hold'),
+    holdId: boundary.number,
+    pid: boundary.optional(boundary.number),
+    clipboard: boundary.boolean,
   }),
+  boundary.object({ type: boundary.literal('release'), holdId: boundary.number }),
   boundary.object({
     type: boundary.literal('done'),
     runId: boundary.number,

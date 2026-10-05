@@ -39,7 +39,8 @@ function fakeDesktop(options: { screens: Array<{ elements: UiElement[]; busy?: b
         options.staleOnce = undefined;
         return { ok: false, needsForeground: false, message: 'stale_element_token', stale: true };
       }
-      return { ok: true };
+      // The engine host shows the notice before a foreground call and returns its line.
+      return foreground ? { ok: true, notice: 'Pane: Claude Code is bringing Notes to the front' } : { ok: true };
     },
     readClipboard: async () => clipboard,
     async writeClipboard(text) {
@@ -49,17 +50,11 @@ function fakeDesktop(options: { screens: Array<{ elements: UiElement[]; busy?: b
   };
   const output: string[] = [];
   const steps: StepRecord[] = [];
-  const notices: string[] = [];
   const host: LayerHost = {
     driver,
     write: (text) => output.push(text),
     emitImage: () => output.push('[image]'),
     recordStep: (step) => steps.push(step),
-    showForegroundNotice: async ({ app }) => {
-      notices.push(app);
-      log.push('notice');
-      return `Pane: Claude Code is bringing ${app} to the front`;
-    },
     async holdLanes(lanes, run) {
       log.push(`hold ${JSON.stringify(lanes)}`);
       try {
@@ -72,7 +67,7 @@ function fakeDesktop(options: { screens: Array<{ elements: UiElement[]; busy?: b
     busyPollMs: 1,
     busyTimeoutMs: 200,
   };
-  return { cua: createCua(host).cua, log, output, steps, notices };
+  return { cua: createCua(host).cua, log, output, steps };
 }
 
 const listScreen = (rows: string[], extra: UiElement[] = []) => ({
@@ -123,19 +118,18 @@ describe('cua layer', () => {
     ]);
   });
 
-  it('refuses background input with the needs_foreground copy, and a foreground retry shows the notice first', async () => {
+  it('refuses background input with the needs_foreground copy, and a foreground retry puts the notice line in the result once', async () => {
     const desk = fakeDesktop({ screens: [listScreen(['Milk'])], refuseBackground: ['scroll'] });
     const app = await desk.cua.getApp('Notes');
     await expect(app.scroll(2, 'd')).rejects.toThrow(
       "needs_foreground: Notes can't receive scrolling in the background on this OS. Retry with { foreground: true } to bring it to the front; the user will see a notice first.",
     );
-    expect(desk.notices).toEqual([]);
-
     await app.scroll(2, 'down', 2, { foreground: true });
-    const tail = desk.log.slice(desk.log.indexOf('notice'));
-    expect(tail.slice(1, 3)).toEqual(['hold {"pid":42,"clipboard":false}', expect.stringMatching(/^scroll \(foreground\) .*"direction":"down","amount":2,"by":"page"/)]);
-    expect(desk.output).toContain('Pane: Claude Code is bringing Notes to the front');
-    expect(desk.steps.map((s) => s.result)).toEqual([expect.stringMatching(/^needs_foreground: /), 'ok']);
+    expect(desk.log).toContainEqual(expect.stringMatching(/^scroll \(foreground\) .*"direction":"down","amount":2,"by":"page"/));
+    // Three foreground calls, one line.
+    await app.typeText('a\nb', { foreground: true });
+    expect(desk.output.filter((line) => line === 'Pane: Claude Code is bringing Notes to the front')).toHaveLength(2);
+    expect(desk.steps.map((s) => s.result)).toEqual([expect.stringMatching(/^needs_foreground: /), 'ok', 'ok']);
   });
 
   it('re-reads and retries once when another read replaced the engine handles', async () => {

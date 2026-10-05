@@ -22,8 +22,8 @@ Pane keeps a replay of every run.
 Computer use is off by default and is set per machine. Only you should turn it
 on. Agents get no MCP tool for it, and the skill tells them never to run the
 command. `runpane computer-use on` also refuses to run inside a Pane terminal
-(where `PANE_SESSION_ID` is set), which is where agents usually run. That only
-slows agents down; it is not a security boundary. Any shell without that
+(where `PANE_SESSION_ID` is set), which is where agents usually run. That refusal
+slows agents down but is no security boundary. Any shell without that
 variable, including an agent's, can still turn computer use on.
 
 - **Desktop:** Settings → Remote Access → Computer use, or the status row in

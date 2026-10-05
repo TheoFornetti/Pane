@@ -39,8 +39,9 @@ export default function SettingsScreen() {
         <ListRow testID="settings-sign-out" title="Sign Out" destructive onPress={confirmSignOut} />
       </ListSection>
 
-      <ListSection title="Composer" footer={`Saved on ${profile.label}, so desktop sees the same list.`}>
+      <ListSection title="Composer" footer={`Saved on ${profile.label}, so desktop sees the same settings.`}>
         <ListRow testID="settings-shortcuts" title="Shortcuts" subtitle="Text you insert with one tap" trailing="chevron" onPress={() => router.push('/settings/shortcuts')} />
+        <ListRow testID="settings-voice" title="Voice" subtitle="Keys for dictation" trailing="chevron" onPress={() => router.push('/settings/voice')} />
       </ListSection>
 
       <NotificationSettings />

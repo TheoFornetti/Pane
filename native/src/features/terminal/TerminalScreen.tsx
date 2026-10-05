@@ -311,9 +311,9 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
         visible={showVoiceSetup}
         onClose={() => setShowVoiceSetup(false)}
         voice={voice}
-        onStarted={() => {
+        onStarted={saved => {
           setShowVoiceSetup(false);
-          setVoiceSaved(true);
+          setVoiceSaved(saved);
         }}
       />
       <CopySheet visible={showCopy} onClose={() => setShowCopy(false)} panelId={panel.id} screenText={terminal.screenText} />

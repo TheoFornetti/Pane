@@ -1,6 +1,5 @@
-import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
-import { Linking, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import type { VoiceTranscriptionMode } from '@shared/types/voiceTranscription';
 
@@ -11,30 +10,27 @@ import { Button, Icon, Text } from '@/ui';
 import { ComposerSheet } from '../composer/ComposerSheet';
 import { saveErrorMessage, useSaveHostSettings } from '../hosts/hostSettings';
 import type { useVoiceDictation } from './useVoiceDictation';
-import { maskSecrets, voiceKeysFor, type VoiceKey } from './voiceKeys';
+import { KEY_INFO, VoiceKeyField } from './VoiceKeyField';
+import { canStartVoice, hostNeedsUpdate, maskSecrets, voiceKeysFor, type VoiceKey } from './voiceKeys';
 
 /** Long enough for Deepgram to refuse a bad key before the sheet closes. */
 const CONFIRM_MS = 2500;
-
-const KEY_INFO: Record<VoiceKey, { name: string; role: string; url: string }> = {
-  deepgramApiKey: { name: 'Deepgram', role: 'live transcription', url: 'https://console.deepgram.com' },
-  openRouterApiKey: { name: 'OpenRouter', role: 'cleans up the text', url: 'https://openrouter.ai/keys' },
-  falApiKey: { name: 'fal', role: 'recorded transcription', url: 'https://fal.ai/dashboard/keys' },
-};
 
 export interface VoiceSetupSheetProps {
   visible: boolean;
   onClose: () => void;
   voice: ReturnType<typeof useVoiceDictation>;
-  /** Called once the keys are saved and recording has started. */
-  onStarted: () => void;
+  /** Called once recording has started; `saved` when the sheet saved keys first. */
+  onStarted: (saved: boolean) => void;
 }
 
 /**
- * Opens from the mic when the host lacks a voice key. It asks only for the
+ * Opens from the mic when the host can't record yet. It asks only for the
  * keys the host doesn't have, saves them to the host, then starts recording
- * in the same tap. Keys the host has show as "Set", never their value; typed
- * keys leave the phone only in the save request and are cleared after it.
+ * in the same tap. A host before v2.4.159 also needs OpenRouter, so there the
+ * sheet asks for it and suggests updating Pane. Keys the host has show as
+ * "Set", never their value; typed keys leave the phone only in the save
+ * request and are cleared after it.
  */
 export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSetupSheetProps) {
   const theme = useTheme();
@@ -47,11 +43,20 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const keys = voice.configured ? voiceKeysFor(mode, voice.configured) : [];
-  const asked = keys.filter(item => !item.set || replacing.includes(item.key));
+  const host = voice.host;
+  const keys = host ? voiceKeysFor(mode, host) : [];
   const missing = keys.filter(item => !item.set && !item.optional);
-  // The mode's own key must be filled; the cleanup key can be left blank.
-  const ready = asked.some(item => typed[item.key]?.trim()) && asked.every(item => item.optional || typed[item.key]?.trim());
+  const needsUpdate = host ? hostNeedsUpdate(mode, host) : false;
+  const ready = host ? canStartVoice(mode, host, typed) : false;
+  const entries = keys.flatMap(({ key }) => {
+    const value = typed[key]?.trim();
+    return value ? [[key, value] as const] : [];
+  });
+  const subtitle = needsUpdate
+    ? `Dictation runs on ${profile.label}. Its version of Pane also needs an OpenRouter key.`
+    : missing.length > 0
+      ? `Dictation runs on ${profile.label}. It needs one more key, then recording starts.`
+      : `Dictation runs on ${profile.label}. Replace a key, or start recording.`;
 
   const reset = () => {
     setTyped({});
@@ -63,16 +68,11 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
     onClose();
   };
   const submit = async () => {
-    const entries = asked.flatMap(item => {
-      const value = typed[item.key]?.trim();
-      return value ? [[item.key, value] as const] : [];
-    });
-    const patch = Object.fromEntries(entries);
     const secrets = entries.map(([, value]) => value);
     setBusy(true);
     setError(null);
     try {
-      await save.mutateAsync(patch);
+      if (entries.length > 0) await save.mutateAsync(Object.fromEntries(entries));
       // Saved on the host; the phone keeps no copy.
       reset();
       const failure = await voice.start(mode, CONFIRM_MS);
@@ -81,7 +81,7 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
         setError(/\b(401|403)\b/.test(failure) ? 'The key was refused. Replace it and try again.' : maskSecrets(failure, secrets));
         return;
       }
-      onStarted();
+      onStarted(entries.length > 0);
     } catch (cause) {
       setError(maskSecrets(saveErrorMessage(cause, profile.label), secrets));
     } finally {
@@ -96,66 +96,20 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
       <View style={styles.content}>
         <View style={styles.header}>
           <Text variant="headline" accessibilityRole="header">Set up voice on {profile.label}</Text>
-          <Text variant="subhead" tone="secondary">
-            {missing.length === 0
-              ? `Dictation runs on ${profile.label}. Replace a key, then recording starts.`
-              : `Dictation runs on ${profile.label}. It needs one more key, then recording starts.`}
-          </Text>
+          <Text variant="subhead" tone="secondary">{subtitle}</Text>
         </View>
-        {keys.map(({ key, set, optional }) => {
-          const info = KEY_INFO[key];
-          const asking = !set || replacing.includes(key);
-          return (
-            <View key={key} style={styles.field}>
-              <Text variant="footnote" tone="secondary" style={styles.label}>
-                {optional ? `Clean up text (optional) · ${info.name} key` : `${info.name} key · ${info.role}`}
-              </Text>
-              {asking ? (
-                <View style={[styles.input, { borderRadius: theme.radius.md, borderColor: typed[key] ? colors.accent : colors.border, backgroundColor: colors.surfaceRaised }]}>
-                  <TextInput
-                    testID={`voice-key-${key}`}
-                    accessibilityLabel={`${info.name} key`}
-                    value={typed[key] ?? ''}
-                    onChangeText={value => setTyped(current => ({ ...current, [key]: value }))}
-                    placeholder={optional ? 'Skip to keep the transcript as heard' : `Paste your ${info.name} key`}
-                    placeholderTextColor={colors.textMuted}
-                    secureTextEntry
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    autoComplete="off"
-                    textContentType="none"
-                    importantForAutofill="no"
-                    keyboardAppearance={theme.scheme}
-                    style={[theme.typography.subhead, styles.secret, { color: colors.text }]}
-                  />
-                  <Pressable
-                    testID={`voice-key-paste-${key}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Paste ${info.name} key`}
-                    hitSlop={8}
-                    onPress={() => void Clipboard.getStringAsync().then(value => setTyped(current => ({ ...current, [key]: value.trim() })))}
-                  >
-                    <Text variant="callout" tone="accent" style={styles.bold}>Paste</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <View style={[styles.input, { borderRadius: theme.radius.md, borderColor: colors.border, backgroundColor: colors.surfaceRaised }]}>
-                  <Icon ios="checkmark" android="check" size={14} color={colors.success} />
-                  <Text variant="subhead" style={[styles.secret, styles.bold, { color: colors.success }]} testID={`voice-key-set-${key}`}>Set</Text>
-                  <Pressable
-                    testID={`voice-key-replace-${key}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Replace ${info.name} key`}
-                    hitSlop={8}
-                    onPress={() => setReplacing(current => [...current, key])}
-                  >
-                    <Text variant="callout" tone="secondary">Replace</Text>
-                  </Pressable>
-                </View>
-              )}
-            </View>
-          );
-        })}
+        {keys.map(({ key, set, optional }) => (
+          <VoiceKeyField
+            key={key}
+            voiceKey={key}
+            set={set}
+            optional={optional}
+            asking={!set || replacing.includes(key)}
+            value={typed[key] ?? ''}
+            onChange={value => setTyped(current => ({ ...current, [key]: value }))}
+            onReplace={() => setReplacing(current => [...current, key])}
+          />
+        ))}
         <Text variant="footnote" tone="muted">
           Sent once over this phone's connection and stored on {profile.label}. Pane never shows a saved key again.
           {missing[0] ? (
@@ -167,14 +121,22 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
         {error ? (
           <Text variant="footnote" tone="danger" testID="voice-setup-error" accessibilityLiveRegion="polite">{error}</Text>
         ) : null}
-        <Button
-          testID="voice-setup-save"
-          title="Save and start recording"
-          icon={<Icon ios="mic.fill" android="mic" size={15} color={colors.onAccent} />}
-          disabled={!ready}
-          loading={busy}
-          onPress={() => void submit()}
-        />
+        {needsUpdate && !ready ? (
+          <View style={styles.notice}>
+            <Text variant="callout" tone="secondary" style={styles.center} testID="voice-setup-update">
+              Update Pane on {profile.label} to use voice without OpenRouter.
+            </Text>
+          </View>
+        ) : (
+          <Button
+            testID="voice-setup-save"
+            title={entries.length > 0 ? 'Save and start recording' : 'Start recording'}
+            icon={<Icon ios="mic.fill" android="mic" size={15} color={colors.onAccent} />}
+            disabled={!ready}
+            loading={busy}
+            onPress={() => void submit()}
+          />
+        )}
         <Pressable
           testID="voice-setup-mode"
           accessibilityRole="button"
@@ -196,10 +158,9 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
 const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, gap: 14 },
   header: { gap: 4 },
-  field: { gap: 6 },
-  label: { fontWeight: '600' },
-  input: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, borderWidth: 1 },
-  secret: { flex: 1, paddingVertical: 0 },
+  // The Button's height, so swapping the notice for the button doesn't move the sheet.
+  notice: { minHeight: 44, justifyContent: 'center' },
+  center: { textAlign: 'center' },
   bold: { fontWeight: '600' },
   switchMode: { alignItems: 'center', paddingVertical: 4 },
 });

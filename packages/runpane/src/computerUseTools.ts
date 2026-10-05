@@ -49,8 +49,8 @@ export const COMPUTER_USE_TOOLS: readonly ComputerUseTool[] = [
     toolsets: TOOLSETS,
     description: [
       'Run a JavaScript script that sees and operates desktop apps on a Pane machine, in the background.',
-      '`code` is the body of an async function: top-level await works, `return` gives the text result, `console.log` adds lines, and `image(...)` adds a picture.',
-      'Start with `globalThis.app = await cua.getApp("<name or bundle id>")`, read `await app.getAXState()`, act by element index, then read again to verify.',
+      '`code` is the body of an async function: top-level await works. Reads such as `getAXState()` show their own result; `return` and `console.log` add text, and `image(...)` adds a picture.',
+      'Start with `globalThis.app = await cua.getApp("<name or bundle id>")`, which shows the tree; act by element id (`await app.click(12)`); then `await app.getAXState()` shows what changed.',
       'Only `globalThis` values persist to the next call. Scripts stop after 300 s; output is capped at about 25k tokens.',
       'Background is the default. A `needs_foreground` result means retry that action with `{ foreground: true }`, which shows the user a notice first.',
       'Each run saves step screenshots and a replay; on a public repo, ask the user before attaching them to a PR.',

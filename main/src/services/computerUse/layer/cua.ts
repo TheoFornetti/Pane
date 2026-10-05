@@ -88,30 +88,18 @@ export class App {
   // --- Observation
 
   async getAXState(options: StateOptions = {}): Promise<string> {
-    const snapshot = await this.read({ screenshot: false });
-    const tree = this.layer.treeFor(this.window.id);
-    const body = tree.render({ full: options.disableDiffing === true || options.disableDiff === true });
-    const text = `${this.header(snapshot)}\n${body}`;
-    if (options.emit !== false) this.layer.host.write(text);
-    return text;
+    return (await this.observe(options, false)).state;
   }
 
   async getScreenshot(options: ObservationOptions = {}): Promise<EngineImage> {
-    const snapshot = await this.read({ screenshot: true, tree: false });
+    const snapshot = await this.read({ wait: true });
     if (!snapshot.screenshot) throw new Error(`${this.name} returned no screenshot. Screen Recording may be off for the engine.`);
     if (options.emit !== false) this.layer.host.emitImage(snapshot.screenshot);
     return snapshot.screenshot;
   }
 
-  async getAXStateAndScreenshot(options: StateOptions = {}): Promise<{ state: string; screenshot?: EngineImage }> {
-    const snapshot = await this.read({ screenshot: true });
-    const body = this.layer.treeFor(this.window.id).render({ full: options.disableDiffing === true || options.disableDiff === true });
-    const state = `${this.header(snapshot)}\n${body}`;
-    if (options.emit !== false) {
-      this.layer.host.write(state);
-      if (snapshot.screenshot) this.layer.host.emitImage(snapshot.screenshot);
-    }
-    return { state, screenshot: snapshot.screenshot };
+  getAXStateAndScreenshot(options: StateOptions = {}): Promise<{ state: string; screenshot?: EngineImage }> {
+    return this.observe(options, true);
   }
 
   // --- Actions
@@ -145,25 +133,17 @@ export class App {
 
   /** Types into the focused element. Each `\n` presses Return. */
   typeText(text: string, options: ForegroundOption = {}): Promise<void> {
-    return this.act('typeText', { text }, options, async () => {
-      const lines = String(text).split('\n');
-      let outcome: ActionOutcome = { ok: true };
-      for (const [i, line] of lines.entries()) {
-        if (i > 0) outcome = await this.perform({ kind: 'pressKey', key: 'Return' }, options);
-        if (outcome.ok && line) outcome = await this.perform({ kind: 'typeText', text: line }, options);
-        if (!outcome.ok) return outcome;
-      }
-      return outcome;
-    });
+    return this.act('typeText', { text }, options, () => this.typeLines(String(text), options));
   }
 
   pressKey(key: string, options: ForegroundOption = {}): Promise<void> {
     return this.act('pressKey', { key }, options, () => this.perform({ kind: 'pressKey', key: String(key) }, options));
   }
 
-  setValue(elementIndex: number, value: string, options: ForegroundOption = {}): Promise<void> {
-    return this.act('setValue', { elementIndex, value }, options, () =>
-      this.perform({ kind: 'setValue', ref: this.refFor(elementIndex), value: String(value) }, options),
+  /** Sets the value directly, so it never needs the app in front; `foreground` is ignored. */
+  setValue(elementIndex: number, value: string): Promise<void> {
+    return this.act('setValue', { elementIndex, value }, {}, () =>
+      this.perform({ kind: 'setValue', ref: this.refFor(elementIndex), value: String(value) }, {}),
     );
   }
 
@@ -176,10 +156,14 @@ export class App {
     return this.act('selectText', { elementIndex, text, prefix, suffix, selectionType }, options, async () => {
       const ref = this.refFor(elementIndex);
       const value = this.layer.treeFor(this.window.id).valueFor(elementIndex) ?? '';
-      const at = findText(value, String(text), prefix, suffix);
-      if (at === undefined) return { ok: false, needsForeground: false, message: `Element ${elementIndex} doesn't contain ${JSON.stringify(text)}${prefix || suffix ? ' with that prefix and suffix' : ''}.` };
-      const start = selectionType === 'cursor_after' ? at + text.length : at;
-      const length = selectionType === 'text' ? text.length : 0;
+      const wanted = String(text);
+      const at = findText(value, wanted, String(prefix), String(suffix));
+      if (at === undefined) return { ok: false, needsForeground: false, message: `Element ${elementIndex} doesn't contain ${JSON.stringify(wanted)}${prefix || suffix ? ' with that prefix and suffix' : ''}.` };
+      // Arrow keys move by user-visible character, so offsets count graphemes, not UTF-16 units.
+      const before = graphemeCount(value.slice(0, at));
+      const size = graphemeCount(wanted);
+      const start = selectionType === 'cursor_after' ? before + size : before;
+      const length = selectionType === 'text' ? size : 0;
       return this.perform({ kind: 'selectText', ref, start, length }, options);
     });
   }
@@ -195,11 +179,11 @@ export class App {
     const format = options.format ?? 'text';
     return this.act('paste', { text, format }, options, async () => {
       if (format === 'html') return { ok: false, needsForeground: false, message: "This engine can't paste HTML yet. Paste it as text or md." };
-      const saved = await this.layer.driver.readClipboard();
-      if (!saved.restorable) {
+      const saved = await this.layer.driver.readClipboard().catch(() => undefined);
+      if (!saved?.restorable) {
         // Pasting would lose what the user copied, so type the text instead.
-        const typed = await this.perform({ kind: 'typeText', text: String(text) }, options);
-        return typed.ok ? { ok: true, note: "typed instead of pasting, because the user's clipboard holds content that can't be restored" } : typed;
+        const typed = await this.typeLines(String(text), options);
+        return typed.ok ? { ok: true, note: "typed instead of pasting, because the user's clipboard couldn't be saved and restored" } : typed;
       }
       await this.layer.driver.writeClipboard(String(text));
       try {
@@ -215,13 +199,37 @@ export class App {
 
   private header(snapshot: WindowSnapshot): string {
     const title = snapshot.title ?? this.window.title;
-    return `${this.name}${title ? ` · ${JSON.stringify(title)}` : ''} · window ${this.window.id}`;
+    return `${this.name}${title ? ` · ${JSON.stringify(title)}` : ''} · window ${this.window.id}${snapshot.busy ? ' · still loading' : ''}`;
+  }
+
+  private async observe(options: StateOptions, withImage: boolean): Promise<{ state: string; screenshot?: EngineImage }> {
+    const snapshot = await this.read({ wait: true });
+    const body = this.layer.treeFor(this.window.id).render({ full: options.disableDiffing === true || options.disableDiff === true });
+    const state = `${this.header(snapshot)}\n${body}`;
+    if (options.emit !== false) {
+      this.layer.host.write(state);
+      if (withImage && snapshot.screenshot) this.layer.host.emitImage(snapshot.screenshot);
+    }
+    return { state, screenshot: withImage ? snapshot.screenshot : undefined };
   }
 
   private refFor(elementIndex: number): string {
-    const ref = this.layer.treeFor(this.window.id).refFor(Number(elementIndex));
-    if (ref === undefined) throw new Error(`Element ${elementIndex} isn't in ${this.name}'s window now. Call getAXState() and use an id from it.`);
+    const tree = this.layer.treeFor(this.window.id);
+    const id = Number(elementIndex);
+    if (!tree.has(id)) throw new Error(`Element ${elementIndex} isn't in ${this.name}'s window now. Call getAXState() and use an id from it.`);
+    const ref = tree.refFor(id);
+    if (ref === undefined) throw new Error(`Element ${elementIndex} can't be acted on by id. Act on its point instead, from getScreenshot().`);
     return ref;
+  }
+
+  private async typeLines(text: string, options: ForegroundOption): Promise<ActionOutcome> {
+    let outcome: ActionOutcome = { ok: true };
+    for (const [i, line] of text.split('\n').entries()) {
+      if (i > 0) outcome = await this.perform({ kind: 'pressKey', key: 'Return' }, options);
+      if (outcome.ok && line) outcome = await this.perform({ kind: 'typeText', text: line }, options);
+      if (!outcome.ok) return outcome;
+    }
+    return outcome;
   }
 
   private resolveTarget(target: number | Vec2): ActionTarget {
@@ -249,7 +257,12 @@ export class App {
         const notice = await this.layer.host.showForegroundNotice({ app: this.name, action: verb });
         if (notice) this.layer.host.write(notice);
       }
-      const outcome = await run();
+      let outcome = await run();
+      if (!outcome.ok && outcome.stale) {
+        // Another read of this window (by another agent, say) replaced the engine's handles.
+        await this.read({ wait: false });
+        outcome = await run();
+      }
       if (outcome.ok) {
         if (outcome.note) result = `ok: ${outcome.note}`;
       } else {
@@ -275,31 +288,34 @@ export class App {
   /** Waits for the app to settle after an action and returns the window's screenshot. */
   private async settle(wait: boolean): Promise<EngineImage | undefined> {
     if (wait) await sleep(this.layer.settleMs);
-    return (await this.read({ screenshot: true })).screenshot;
+    return (await this.read({ wait })).screenshot;
   }
 
-  /** Reads the window, waiting up to the busy timeout while it reports busy or loading. */
-  private async read(options: { screenshot: boolean; tree?: boolean }): Promise<WindowSnapshot> {
-    const tree = options.tree !== false;
+  /**
+   * Reads the tree and a screenshot together: the engine keeps one snapshot per window, so a
+   * partial read would invalidate either the element handles or the pixel mapping. With `wait`,
+   * re-reads up to the busy timeout while the app reports busy or loading.
+   */
+  private async read({ wait }: { wait: boolean }): Promise<WindowSnapshot> {
     const deadline = Date.now() + this.layer.busyTimeoutMs;
     for (;;) {
-      const snapshot = await this.readOnce({ tree, screenshot: options.screenshot });
-      if (tree) this.layer.treeFor(this.window.id).update(snapshot.elements);
-      if (!tree || !snapshot.busy || Date.now() >= deadline) return snapshot;
+      const snapshot = await this.readOnce();
+      this.layer.treeFor(this.window.id).update(snapshot.elements);
+      if (!wait || !snapshot.busy || Date.now() >= deadline) return snapshot;
       await sleep(this.layer.busyPollMs);
     }
   }
 
   /** Reads once; when the window closed, follows the app to its main window. */
-  private async readOnce(options: { tree: boolean; screenshot: boolean }): Promise<WindowSnapshot> {
+  private async readOnce(): Promise<WindowSnapshot> {
     try {
-      return await this.layer.driver.readWindow(this.window, options);
+      return await this.layer.driver.readWindow(this.window);
     } catch (error) {
       if (!(error instanceof WindowGoneError)) throw error;
       const next = mainWindow(await this.layer.driver.listWindows(this.window.pid));
       if (!next) throw new Error(`${this.name} has no open window now.`);
       this.window = next;
-      return this.layer.driver.readWindow(this.window, options);
+      return this.layer.driver.readWindow(this.window);
     }
   }
 }
@@ -389,10 +405,12 @@ export function createCua(host: LayerHost) {
   }
 
   return {
-    getApp,
-    listApps,
-    listWindows,
-    computer: { target: driver.platform },
+    /** The object scripts see as `cua`. */
+    cua: { getApp, listApps, listWindows, computer: { target: driver.platform } },
+    /** Numbers the next run's steps from 0, as each run gets its own replay. */
+    beginRun(): void {
+      layer.nextStep = 0;
+    },
   };
 }
 
@@ -450,6 +468,11 @@ function normalizeDirection(direction: Direction): ScrollDirection {
 }
 
 /** Where `text` starts in `value`, honoring an optional prefix and suffix around it. */
+/** User-visible characters in `text`. */
+function graphemeCount(text: string): number {
+  return [...new Intl.Segmenter().segment(text)].length;
+}
+
 function findText(value: string, text: string, prefix: string, suffix: string): number | undefined {
   const needle = `${prefix}${text}${suffix}`;
   const at = value.indexOf(needle);

@@ -109,6 +109,7 @@ export function registerComputerUseHandlers(
   commandRegistry.register('computer-use:reset', (request: PaneCommandValue) => {
     if (isRemotePaneCommand()) return { ok: false, reset: false };
     const { connectionId } = decodeBoundary(request, resetRequestSchema);
+    agentsByConnection.delete(connectionId);
     return { ok: true, reset: hosts.reset(connectionId) };
   });
 

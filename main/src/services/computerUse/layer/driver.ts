@@ -12,8 +12,8 @@ export interface DesktopDriver {
   listWindows(pid?: number): Promise<WindowInfo[]>;
   /** Starts an app without bringing it forward. Resolves with its pid when the engine reports one. */
   launchApp(app: AppInfo): Promise<number | undefined>;
-  /** Reads a window. Throws `WindowGoneError` when the window no longer exists. */
-  readWindow(window: WindowInfo, options: { tree: boolean; screenshot: boolean }): Promise<WindowSnapshot>;
+  /** Reads a window's tree and screenshot. Throws `WindowGoneError` when the window no longer exists. */
+  readWindow(window: WindowInfo): Promise<WindowSnapshot>;
   perform(window: WindowInfo, action: DriverAction, options: { foreground: boolean }): Promise<ActionOutcome>;
   readClipboard(): Promise<ClipboardContents>;
   writeClipboard(text: string): Promise<void>;
@@ -69,7 +69,8 @@ export type DriverAction =
 
 export type ActionOutcome =
   | { ok: true; note?: string }
-  | { ok: false; needsForeground: boolean; message: string };
+  /** `stale`: the engine's handles were replaced by a newer read; reading again and retrying fixes it. */
+  | { ok: false; needsForeground: boolean; message: string; stale?: boolean };
 
 export interface ClipboardContents {
   text?: string;

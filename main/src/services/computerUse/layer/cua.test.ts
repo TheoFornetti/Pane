@@ -14,7 +14,7 @@ function el(role: string, parent: number | null, extra: Partial<UiElement> = {})
  * A desktop with one Notes window. `screens` is the sequence of trees each read returns (the last
  * repeats); `refuseBackground` lists action kinds that only work in the foreground.
  */
-function fakeDesktop(options: { screens: Array<{ elements: UiElement[]; busy?: boolean }>; refuseBackground?: string[]; clipboard?: { text?: string; restorable: boolean }; apps?: AppInfo[] }) {
+function fakeDesktop(options: { screens: Array<{ elements: UiElement[]; busy?: boolean }>; refuseBackground?: string[]; staleOnce?: string; clipboard?: { text?: string; restorable: boolean }; apps?: AppInfo[] }) {
   const log: string[] = [];
   let reads = 0;
   let clipboard = options.clipboard ?? { text: 'user copy', restorable: true };
@@ -26,15 +26,19 @@ function fakeDesktop(options: { screens: Array<{ elements: UiElement[]; busy?: b
       log.push(`launch ${app.id}`);
       return 42;
     },
-    async readWindow(window, read): Promise<WindowSnapshot> {
+    async readWindow(window): Promise<WindowSnapshot> {
       const screen = options.screens[Math.min(reads, options.screens.length - 1)];
       reads += 1;
-      log.push(`read ${window.id}${read.screenshot ? ' +shot' : ''}`);
-      return { title: window.title, elements: screen.elements, busy: screen.busy === true, screenshot: read.screenshot ? SHOT : undefined };
+      log.push(`read ${window.id}`);
+      return { title: window.title, elements: screen.elements, busy: screen.busy === true, screenshot: SHOT };
     },
     async perform(_window, action: DriverAction, { foreground }): Promise<ActionOutcome> {
       log.push(`${action.kind}${foreground ? ' (foreground)' : ''} ${JSON.stringify(action)}`);
       if (!foreground && options.refuseBackground?.includes(action.kind)) return { ok: false, needsForeground: true, message: 'background_unavailable' };
+      if (options.staleOnce === action.kind) {
+        options.staleOnce = undefined;
+        return { ok: false, needsForeground: false, message: 'stale_element_token', stale: true };
+      }
       return { ok: true };
     },
     readClipboard: async () => clipboard,
@@ -60,7 +64,7 @@ function fakeDesktop(options: { screens: Array<{ elements: UiElement[]; busy?: b
     busyPollMs: 1,
     busyTimeoutMs: 200,
   };
-  return { cua: createCua(host), log, output, steps, notices };
+  return { cua: createCua(host).cua, log, output, steps, notices };
 }
 
 const listScreen = (rows: string[], extra: UiElement[] = []) => ({
@@ -124,6 +128,14 @@ describe('cua layer', () => {
     expect(tail[1]).toMatch(/^scroll \(foreground\) .*"direction":"down","amount":2,"by":"page"/);
     expect(desk.output).toContain('Pane: Claude Code is bringing Notes to the front');
     expect(desk.steps.map((s) => s.result)).toEqual([expect.stringMatching(/^needs_foreground: /), 'ok']);
+  });
+
+  it('re-reads and retries once when another read replaced the engine handles', async () => {
+    const desk = fakeDesktop({ screens: [listScreen(['Milk'])], staleOnce: 'click' });
+    const app = await desk.cua.getApp('Notes');
+    await app.click(2);
+    expect(desk.log.filter((line) => /^(read|click)/.test(line)).map((line) => line.split(' ')[0])).toEqual(['read', 'click', 'read', 'click', 'read']);
+    expect(desk.steps[0].result).toBe('ok');
   });
 
   it('rejects an element id the window no longer has', async () => {

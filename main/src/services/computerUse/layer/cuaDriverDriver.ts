@@ -79,6 +79,8 @@ const successSchema = boundary.object({ effect: optionalString });
 
 /** Refusals that a foreground retry fixes. */
 const FOREGROUND_CODES = new Set(['background_unavailable', 'off_space_or_ax_unresolved', 'background_occluded']);
+/** The window's snapshot was replaced, or lacks the screenshot mapping a pixel action needs. */
+const STALE_CODES = new Set(['stale_element_token', 'screenshot_context_missing']);
 const WINDOW_GONE_CODES = new Set(['window_id_not_found', 'window_not_found']);
 
 interface SecondaryAction {
@@ -122,7 +124,7 @@ export function cuaDriverDriver(call: CallEngine, platform: Platform = currentPl
     const payload = decodeOptionalBoundary(result.data, errorSchema);
     const code = payload?.code ?? payload?.refusal?.code ?? result.error?.code ?? '';
     const needsForeground = FOREGROUND_CODES.has(code) || payload?.escalation?.recommended === 'foreground';
-    return { ok: false, needsForeground, message: result.error?.message ?? code };
+    return { ok: false, needsForeground, message: result.error?.message ?? code, stale: STALE_CODES.has(code) };
   }
 
   function targetArgs(window: WindowInfo, target: ActionTarget): JsonObject {
@@ -135,10 +137,9 @@ export function cuaDriverDriver(call: CallEngine, platform: Platform = currentPl
 
   async function key(window: WindowInfo, combo: string, foreground: boolean): Promise<ActionOutcome> {
     const { key: name, modifiers } = parseKey(combo, platform);
-    const base = { pid: window.pid, ...delivery(window, foreground) };
-    return modifiers.length === 0
-      ? outcome(await call('press_key', { ...base, key: name }))
-      : outcome(await call('hotkey', { ...base, keys: [...modifiers, name] }));
+    const args: JsonObject = { pid: window.pid, ...delivery(window, foreground), key: name };
+    if (modifiers.length > 0) args.modifiers = modifiers;
+    return outcome(await call('press_key', args));
   }
 
   return {
@@ -178,20 +179,15 @@ export function cuaDriverDriver(call: CallEngine, platform: Platform = currentPl
       return launched?.pid ?? undefined;
     },
 
-    async readWindow(window, options): Promise<WindowSnapshot> {
-      const result = await call('get_window_state', {
-        pid: window.pid,
-        window_id: window.id,
-        include_screenshot: options.screenshot,
-        include_accessibility_tree: options.tree,
-      });
+    async readWindow(window): Promise<WindowSnapshot> {
+      const result = await call('get_window_state', { pid: window.pid, window_id: window.id });
       if (!result.ok) {
         const payload = decodeOptionalBoundary(result.data, errorSchema);
         if (WINDOW_GONE_CODES.has(payload?.code ?? result.error?.code ?? '')) throw new WindowGoneError(result.error?.message);
         throw new Error(result.error?.message ?? 'Reading the window failed.');
       }
       const state = decodeOptionalBoundary(result.data, windowStateSchema) ?? { tree_markdown: undefined, elements: undefined, window_title: undefined };
-      const elements = options.tree ? toUiElements(state.tree_markdown ?? '', state.elements ?? [], secondary) : [];
+      const elements = toUiElements(state.tree_markdown ?? '', state.elements ?? [], secondary);
       return {
         title: state.window_title || undefined,
         elements,
@@ -204,7 +200,8 @@ export function cuaDriverDriver(call: CallEngine, platform: Platform = currentPl
       const base = { pid: window.pid, ...delivery(window, foreground) };
       switch (action.kind) {
         case 'click': {
-          if (action.count === 2 && 'ref' in action.target) return outcome(await call('double_click', { ...base, element_token: action.target.ref }));
+          if ('ref' in action.target && action.count === 2) return outcome(await call('double_click', { ...base, element_token: action.target.ref }));
+          if ('ref' in action.target && action.count > 2) return { ok: false, needsForeground: false, message: 'Cua Driver clicks an element at most twice. Click its point for more.' };
           const count: JsonObject = action.count === 1 ? {} : { count: action.count };
           return outcome(await call('click', { ...base, ...targetArgs(window, action.target), button: action.button, ...count }));
         }
@@ -267,13 +264,27 @@ function currentPlatform(): Platform {
   return process.platform === 'win32' ? 'windows' : 'linux';
 }
 
+/**
+ * Splits Cua's markdown into rows. Cua writes titles and values unescaped, so a multi-line value
+ * continues on lines that can look like rows; a row with an unclosed quote takes the next line.
+ */
+function markdownRows(markdown: string): string[] {
+  const rows: string[] = [];
+  for (const line of markdown.split('\n')) {
+    const last = rows.length - 1;
+    if (last >= 0 && (rows[last].split('"').length - 1) % 2 === 1) rows[last] += `\n${line}`;
+    else rows.push(line);
+  }
+  return rows;
+}
+
 /** Merges Cua's markdown tree (every row, with structure) and its structured elements (exact fields). */
 function toUiElements(markdown: string, cuaElements: CuaElement[], secondary: ReadonlyMap<string, SecondaryAction>): UiElement[] {
   const byIndex = new Map(cuaElements.flatMap((e) => (e.element_index === undefined ? [] : [[e.element_index, e] as const])));
   const elements: UiElement[] = [];
   const stack: Array<{ depth: number; at: number }> = [];
-  for (const line of markdown.split('\n')) {
-    const match = /^( *)- (?:\[(\d+)\] )?(.*)$/.exec(line);
+  for (const line of markdownRows(markdown)) {
+    const match = /^( *)- (?:\[(\d+)\] )?([\s\S]*)$/.exec(line);
     if (!match) continue;
     const depth = match[1].length / 2;
     while (stack.length > 0 && stack[stack.length - 1].depth >= depth) stack.pop();
@@ -296,7 +307,7 @@ function toUiElements(markdown: string, cuaElements: CuaElement[], secondary: Re
 function fromCuaElement(e: CuaElement, parent: number | null, secondary: ReadonlyMap<string, SecondaryAction>): UiElement {
   const states = [...(e.selected ? ['selected'] : []), ...(e.enabled === false ? ['disabled'] : [])];
   return {
-    ref: e.element_token ?? '',
+    ref: e.element_token,
     role: normalizeRole(e.role),
     label: e.label || undefined,
     value: e.value,
@@ -311,13 +322,19 @@ function fromDisplayRow(text: string, parent: number | null): UiElement {
   const role = /^\S+/.exec(text)?.[0] ?? '';
   let rest = text.slice(role.length).trim();
   let value: string | undefined;
-  const valueMatch = /(?:^| )= "(.*)"(?: \([^)]*\))?$/.exec(rest);
+  let description: string | undefined;
+  const descriptionMatch = / ?\(([^()]*)\)$/.exec(rest);
+  if (descriptionMatch) {
+    description = descriptionMatch[1];
+    rest = rest.slice(0, descriptionMatch.index).trim();
+  }
+  const valueMatch = /(?:^| )= "([\s\S]*)"$/.exec(rest);
   if (valueMatch) {
     value = valueMatch[1];
     rest = rest.slice(0, valueMatch.index).trim();
   }
-  const label = rest.replace(/^"(.*)"$/, '$1').replace(/^\((.*)\)$/, '$1');
-  return { ref: '', role: normalizeRole(role), label: label || undefined, value, actions: [], states: [], parent };
+  const label = /^"([\s\S]*)"$/.exec(rest)?.[1] || description;
+  return { role: normalizeRole(role), label: label || undefined, value, actions: [], states: [], parent };
 }
 
 /** `AXStaticText` → `staticText`, UIA `Button` → `button`; AT-SPI names stay as they are. */
@@ -363,6 +380,7 @@ export function parseKey(combo: string, platform: Platform) {
   const lower = last.toLowerCase();
   // xdotool's Delete is forward delete; macOS Cua calls that forward_delete.
   const key = KEYS.get(lower) ?? (lower === 'delete' && platform === 'mac' ? 'forward_delete' : lower);
-  if (last.length === 1 && last !== lower && !modifiers.includes('shift')) modifiers.push('shift');
+  // `A` alone means shift+a; with other modifiers (`ctrl+T`) it means the plain letter.
+  if (last.length === 1 && last !== lower && modifiers.length === 0) modifiers.push('shift');
   return { key, modifiers: [...new Set(modifiers)] };
 }

@@ -6,8 +6,8 @@
 
 /** One element as the engine reports it, in depth-first order (a parent comes before its children). */
 export interface UiElement {
-  /** The engine's handle for acting on this element in the current snapshot. */
-  ref: string;
+  /** The engine's handle for acting on this element in the current snapshot; absent for display-only rows. */
+  ref?: string;
   role: string;
   label?: string;
   value?: string;
@@ -65,7 +65,9 @@ export class WindowTree {
         });
       };
       take((node, element) => node.element.role === element.role && node.element.label === element.label);
-      take((node, element) => node.element.role === element.role);
+      // Only where the label is the value itself (engines fall back to it), so a stale id never
+      // moves to a different control that happens to share the role, like OK becoming Delete.
+      take((node, element) => node.element.role === element.role && (labelIsValue(node.element) || labelIsValue(element)));
       children.forEach((childIndex, i) => {
         const id = ids[i] ?? this.nextId++;
         nodes[childIndex] = { id, parentId, element: elements[childIndex] };
@@ -74,6 +76,10 @@ export class WindowTree {
     };
     assign(null, ROOT_ID);
     this.current = nodes;
+  }
+
+  has(id: number): boolean {
+    return this.current.some((node) => node.id === id);
   }
 
   /** The engine handle for an element id in the latest snapshot. */
@@ -149,6 +155,10 @@ export class WindowTree {
     if (lines.length === 0) return [];
     return [`Changes since the last read: ${added.length} added, ${removed.length} removed, ${changed.length} changed.`, ...lines];
   }
+}
+
+function labelIsValue(element: UiElement): boolean {
+  return !element.label || element.label === element.value;
 }
 
 function groupByParent(nodes: Node[]): Map<number, Node[]> {

@@ -67,6 +67,15 @@ describe('WindowTree', () => {
     expect(tree.render({ full: true })).toBe(['1 list', '  4 row "A"', '  2 row "B"', '  3 row "C"'].join('\n'));
   });
 
+  it('never moves an id to a different control that only shares its role', () => {
+    const tree = new WindowTree();
+    tree.update([el('sheet', null), el('button', 0, { label: 'Cancel' }), el('button', 0, { label: 'OK' })]);
+    tree.render();
+    tree.update([el('sheet', null), el('button', 0, { label: 'Keep' }), el('button', 0, { label: 'Delete' })]);
+    expect(tree.has(2)).toBe(false);
+    expect(tree.render({ full: true })).toBe(['1 sheet', '  4 button "Keep"', '  5 button "Delete"'].join('\n'));
+  });
+
   it('resolves ids to the latest snapshot handle', () => {
     const tree = new WindowTree();
     tree.update([el('window', null), el('button', 0, { label: 'Go', ref: 'old' })]);

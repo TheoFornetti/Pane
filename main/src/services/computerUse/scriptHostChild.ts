@@ -66,7 +66,7 @@ function showForegroundNotice(info: { app: string; action: string }): Promise<st
   });
 }
 
-const cua = createCua({
+const layer = createCua({
   driver: cuaDriverDriver(callEngine),
   write: (text) => {
     output += `${text}\n`;
@@ -79,7 +79,7 @@ const cua = createCua({
 });
 
 const context = vm.createContext({
-  cua,
+  cua: layer.cua,
   engine: {
     // Scripts are untyped, so both arguments are parsed before they leave this process.
     call(tool: string, args: JsonObject = {}): Promise<EngineResult> {
@@ -107,6 +107,7 @@ const context = vm.createContext({
 async function run(runId: number, code: string): Promise<void> {
   output = '';
   images = [];
+  layer.beginRun();
   let ok = true;
   try {
     // An async body allows top-level await and `return`. State that should outlive the call goes on globalThis.

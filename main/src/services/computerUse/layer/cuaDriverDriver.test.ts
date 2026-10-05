@@ -46,24 +46,56 @@ function engine(responses: Record<string, EngineResult>) {
 describe('cuaDriverDriver', () => {
   it('reads a window into one tree: structure and text from the markdown, tokens from elements', async () => {
     const { call } = engine({ get_window_state: { ok: true, data: TEXTEDIT_STATE, images: [SHOT] } });
-    const snapshot = await cuaDriverDriver(call, 'mac').readWindow(WINDOW, { tree: true, screenshot: true });
+    const snapshot = await cuaDriverDriver(call, 'mac').readWindow(WINDOW);
     expect(snapshot.title).toBe('Untitled');
     expect(snapshot.busy).toBe(false);
     expect(snapshot.screenshot).toEqual(SHOT);
     expect(snapshot.elements.map(({ ref, role, label, value, actions, parent }) => ({ ref, role, label, value, actions, parent }))).toEqual([
-      { ref: '', role: 'window', label: 'Untitled', value: undefined, actions: [], parent: null },
+      { ref: undefined, role: 'window', label: 'Untitled', value: undefined, actions: [], parent: null },
       { ref: 's0000002a:0', role: 'button', label: 'close button', value: undefined, actions: [], parent: 0 },
-      { ref: '', role: 'scrollArea', label: undefined, value: undefined, actions: [], parent: 0 },
+      { ref: undefined, role: 'scrollArea', label: undefined, value: undefined, actions: [], parent: 0 },
       { ref: 's0000002a:1', role: 'textArea', label: undefined, value: 'Dear Ada,', actions: ['Show Menu'], parent: 2 },
-      { ref: '', role: 'staticText', label: 'Saved', value: undefined, actions: [], parent: 0 },
+      { ref: undefined, role: 'staticText', label: 'Saved', value: undefined, actions: [], parent: 0 },
       { ref: 's0000002a:2', role: 'popUpButton', label: 'Styles', value: 'Body', actions: ['Show Menu'], parent: 0 },
+    ]);
+  });
+
+  it('keeps a multi-line value inside its row, and reads titles and descriptions of display rows', async () => {
+    const markdown = [
+      '- AXWindow "Notes"',
+      '  - [0] AXTextArea = "foo',
+      '- bar',
+      'baz" [actions=[showmenu]]',
+      '  - AXStaticText "Saved" (status)',
+      '  - AXImage (logo)',
+      '  - [1] AXButton "Save" [actions=[press]]',
+    ].join('\n');
+    const { call } = engine({
+      get_window_state: {
+        ok: true,
+        data: {
+          tree_markdown: markdown,
+          elements: [
+            { role: 'AXTextArea', depth: 1, element_index: 0, element_token: 's1:0', value: 'foo\n- bar\nbaz', actions: ['AXShowMenu'] },
+            { role: 'AXButton', depth: 1, element_index: 1, element_token: 's1:1', label: 'Save', actions: ['AXPress'] },
+          ],
+        },
+      },
+    });
+    const { elements } = await cuaDriverDriver(call, 'mac').readWindow(WINDOW);
+    expect(elements.map(({ role, label, value, parent }) => [role, label, value, parent])).toEqual([
+      ['window', 'Notes', undefined, null],
+      ['textArea', undefined, 'foo\n- bar\nbaz', 0],
+      ['staticText', 'Saved', undefined, 0],
+      ['image', 'logo', undefined, 0],
+      ['button', 'Save', undefined, 0],
     ]);
   });
 
   it('reports busy while a spinner or an indeterminate progress indicator shows', async () => {
     const read = async (markdown: string) => {
       const { call } = engine({ get_window_state: { ok: true, data: { tree_markdown: markdown, elements: [] } } });
-      return (await cuaDriverDriver(call, 'mac').readWindow(WINDOW, { tree: true, screenshot: false })).busy;
+      return (await cuaDriverDriver(call, 'mac').readWindow(WINDOW)).busy;
     };
     expect(await read('- AXWindow\n  - AXProgressIndicator')).toBe(true);
     expect(await read('- AXWindow\n  - AXBusyIndicator')).toBe(true);
@@ -74,7 +106,7 @@ describe('cuaDriverDriver', () => {
     const { call } = engine({
       get_window_state: { ok: false, data: { code: 'window_id_not_found' }, error: { code: 'window_id_not_found', message: 'window_id 31 not found' } },
     });
-    await expect(cuaDriverDriver(call, 'mac').readWindow(WINDOW, { tree: true, screenshot: false })).rejects.toBeInstanceOf(WindowGoneError);
+    await expect(cuaDriverDriver(call, 'mac').readWindow(WINDOW)).rejects.toBeInstanceOf(WindowGoneError);
   });
 
   it('flags each refusal shape that a foreground retry fixes', async () => {
@@ -83,12 +115,13 @@ describe('cuaDriverDriver', () => {
       [{ code: 'background_unavailable', escalation: { recommended: 'foreground' } }, true],
       [{ code: 'off_space_or_ax_unresolved', effect: 'refused' }, true],
       [{ status: 'refused', refusal: { code: 'stale_element_token', message: 'stale' } }, false],
+      [{ code: 'screenshot_context_missing' }, false],
       [{ code: 'window_not_found' }, false],
     ];
     for (const [data, needsForeground] of cases) {
       const { call } = engine({ scroll: refuse(data) });
       const outcome = await cuaDriverDriver(call, 'mac').perform(WINDOW, { kind: 'scroll', target: { ref: 's1:1' }, direction: 'down', amount: 1, by: 'page' }, { foreground: false });
-      expect(outcome).toEqual({ ok: false, needsForeground, message: 'refused' });
+      expect(outcome).toMatchObject({ ok: false, needsForeground, message: 'refused' });
     }
   });
 
@@ -120,12 +153,12 @@ describe('cuaDriverDriver', () => {
   it('selects text by focusing the field and walking there with arrow keys', async () => {
     const { call, calls } = engine({});
     await cuaDriverDriver(call, 'mac').perform(WINDOW, { kind: 'selectText', ref: 's1:1', start: 2, length: 1 }, { foreground: false });
-    expect(calls.map(([tool, args]) => `${tool} ${JSON.stringify(args.keys ?? args.key ?? args.element_token)}`)).toEqual([
+    expect(calls.map(([tool, args]) => (tool === 'click' ? `click ${JSON.stringify(args.element_token)}` : `${tool} ${JSON.stringify(args.key)} ${JSON.stringify(args.modifiers)}`))).toEqual([
       'click "s1:1"',
-      'hotkey ["cmd","up"]',
-      'press_key "right"',
-      'press_key "right"',
-      'hotkey ["shift","right"]',
+      'press_key "up" ["cmd"]',
+      'press_key "right" undefined',
+      'press_key "right" undefined',
+      'press_key "right" ["shift"]',
     ]);
   });
 
@@ -166,6 +199,7 @@ describe('parseKey', () => {
     expect(parseKey('Delete', 'mac')).toEqual({ key: 'forward_delete', modifiers: [] });
     expect(parseKey('BackSpace', 'windows')).toEqual({ key: 'backspace', modifiers: [] });
     expect(parseKey('A', 'mac')).toEqual({ key: 'a', modifiers: ['shift'] });
+    expect(parseKey('ctrl+T', 'linux')).toEqual({ key: 't', modifiers: ['ctrl'] });
     expect(parseKey('ctrl++', 'linux')).toEqual({ key: '+', modifiers: ['ctrl'] });
     expect(() => parseKey('hyper+x', 'mac')).toThrow('Unknown modifier "hyper"');
   });

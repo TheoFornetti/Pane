@@ -225,6 +225,9 @@ export function cuaDriverDriver(call: CallEngine, platform: Platform = currentPl
         }
         case 'selectText':
           return selectByKeys(window, action, foreground);
+        case 'selectTextMatch':
+        case 'paste':
+          return { ok: false, needsForeground: false, message: `Cua Driver has no native ${action.kind}; the layer does it.` };
       }
     },
 

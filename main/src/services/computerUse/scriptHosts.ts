@@ -168,7 +168,7 @@ export class ScriptHosts {
         }
         resolve(result);
       };
-      host.child.send({ type: 'run', runId, code, maxOutputChars: this.maxOutputChars } satisfies ParentMessage);
+      host.child.send({ type: 'run', runId, code, maxOutputChars: this.maxOutputChars, engine: this.options.getEngine().id } satisfies ParentMessage);
     });
   }
 

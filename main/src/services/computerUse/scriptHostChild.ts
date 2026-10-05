@@ -8,9 +8,10 @@ import { Writable } from 'node:stream';
 import { inspect } from 'node:util';
 import vm from 'node:vm';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
-import type { EngineImage, EngineResult } from './engine';
+import type { EngineId, EngineImage, EngineResult } from './engine';
 import { imageSchema, type ChildMessage, type ParentMessage } from './scriptHostProtocol';
 import { createCua } from './layer/cua';
+import { codexDriver } from './layer/codexDriver';
 import { cuaDriverDriver } from './layer/cuaDriverDriver';
 import type { StepRecord } from './layer/driver';
 
@@ -67,20 +68,31 @@ function showForegroundNotice(info: { app: string; action: string }): Promise<st
   });
 }
 
-const layer = createCua({
-  driver: cuaDriverDriver(callEngine),
-  write: (text) => {
-    output += `${text}\n`;
-  },
-  emitImage: (image) => {
-    images.push(image);
-  },
-  recordStep,
-  showForegroundNotice,
-});
+const platform = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux';
+
+/** One layer per engine, so ids and diffs stay with the engine that made them if Auto switches engines. */
+const layers = new Map<EngineId, ReturnType<typeof createCua>>();
+function layerFor(engine: EngineId): ReturnType<typeof createCua> {
+  let layer = layers.get(engine);
+  if (!layer) {
+    layer = createCua({
+      driver: engine === 'codex' ? codexDriver(callEngine, platform) : cuaDriverDriver(callEngine, platform),
+      write: (text) => {
+        output += `${text}\n`;
+      },
+      emitImage: (image) => {
+        images.push(image);
+      },
+      recordStep,
+      showForegroundNotice,
+    });
+    layers.set(engine, layer);
+  }
+  return layer;
+}
 
 const context = vm.createContext({
-  cua: layer.cua,
+  cua: undefined,
   engine: {
     // Scripts are untyped, so both arguments are parsed before they leave this process.
     call(tool: string, args: JsonObject = {}): Promise<EngineResult> {
@@ -106,10 +118,12 @@ const context = vm.createContext({
   TextDecoder,
 });
 
-async function run(runId: number, code: string, maxOutputChars: number): Promise<void> {
+async function run(runId: number, code: string, maxOutputChars: number, engine: EngineId): Promise<void> {
   output = '';
   images = [];
+  const layer = layerFor(engine);
   layer.beginRun();
+  context.cua = layer.cua;
   let ok = true;
   try {
     // An async body allows top-level await and `return`. State that should outlive the call goes on globalThis.
@@ -135,7 +149,7 @@ async function run(runId: number, code: string, maxOutputChars: number): Promise
 
 process.on('message', (message: ParentMessage) => {
   if (message.type === 'run') {
-    void run(message.runId, message.code, message.maxOutputChars);
+    void run(message.runId, message.code, message.maxOutputChars, message.engine);
     return;
   }
   if (message.type === 'foregroundNoticeShown') {

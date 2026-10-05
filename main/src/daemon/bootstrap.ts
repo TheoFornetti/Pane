@@ -30,6 +30,7 @@ import { isLockOwnerLive } from '../ipc/runpane';
 import { PaneDaemonServer } from './server';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
+import { getMobilePushSender } from './mobilePushSender';
 import { createFanoutEventSink, noopPaneEventSink, type PaneEventSink } from '../core/eventSink';
 import {
   setPaneRuntime,
@@ -241,6 +242,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     // cannot be read. Session APIs retry and return the exact failure instead
     // of silently replacing the user's metadata.
     logger.error('[Sessions] Failed to initialize durable Session metadata', error instanceof Error ? error : new Error(String(error)));
+  });
+  // Phone alerts are titled with the Session's name for its orchestrator, else the Pane's.
+  getMobilePushSender(configManager, {
+    resolveName: paneId => orchestrationSessionManager.nameForWorkspace(paneId) ?? sessionManager.getSession(paneId)?.name,
   });
   const taskQueue = new TaskQueue({
     sessionManager,

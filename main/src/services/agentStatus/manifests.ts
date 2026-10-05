@@ -14,8 +14,11 @@
 
 import type { AgentManifest } from './manifestEngine';
 
-/** Braille spinner glyphs Claude/Codex animate in their OSC title / status line. */
-const SPINNER_TITLE = /^[\u{2800}-\u{28FF}] /u;
+/**
+ * Spinner glyphs agents animate in their OSC title while a turn runs: Braille
+ * (Codex, older Claude) and Claude Code 2.1.289's half circles (`✳` when idle).
+ */
+const SPINNER_TITLE = /^[\u{2800}-\u{28FF}\u{25D0}-\u{25D3}] /u;
 const CODEX_SPINNER = /(?:^| )[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?: |$)/u;
 /** Codex's header while it boots; its composer shows early and may give way to the trust prompt. */
 export const CODEX_LOADING_HEADER = /\bmodel:\s+loading\b/;

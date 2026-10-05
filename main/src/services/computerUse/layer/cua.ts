@@ -27,6 +27,11 @@ export interface LayerHost {
   emitImage(image: EngineImage): void;
   /** Persists one step; absent where nothing records runs. */
   recordStep?(step: StepRecord): void;
+  /**
+   * Keeps other agents' engine calls off app `pid` (and the clipboard) while `run` makes its calls,
+   * so one action's several calls never interleave with theirs. Absent where nothing else shares the engine.
+   */
+  holdLanes?<T>(lanes: { pid?: number; clipboard?: boolean }, run: () => Promise<T>): Promise<T>;
   /** Tells the user an app is about to come forward. Resolves with a line for the result, if any. */
   showForegroundNotice(info: { app: string; action: string }): Promise<string | undefined>;
   /** Wait after each action before reading again. */
@@ -257,12 +262,16 @@ export class App {
         const notice = await this.layer.host.showForegroundNotice({ app: this.name, action: verb });
         if (notice) this.layer.host.write(notice);
       }
-      let outcome = await run();
-      if (!outcome.ok && outcome.stale) {
+      const attempt = async () => {
+        const first = await run();
+        if (first.ok || !first.stale) return first;
         // Another read of this window (by another agent, say) replaced the engine's handles.
         await this.read({ wait: false });
-        outcome = await run();
-      }
+        return run();
+      };
+      const lanes = { pid: this.window.pid, clipboard: verb === 'paste' };
+      const { holdLanes } = this.layer.host;
+      const outcome = holdLanes ? await holdLanes(lanes, attempt) : await attempt();
       if (outcome.ok) {
         if (outcome.note) result = `ok: ${outcome.note}`;
       } else {

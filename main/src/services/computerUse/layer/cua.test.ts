@@ -39,7 +39,8 @@ function fakeDesktop(options: { screens: Array<{ elements: UiElement[]; busy?: b
         options.staleOnce = undefined;
         return { ok: false, needsForeground: false, message: 'stale_element_token', stale: true };
       }
-      return { ok: true };
+      // The engine host shows the notice before a foreground call and returns its line.
+      return foreground ? { ok: true, notice: 'Pane: Claude Code is bringing Notes to the front' } : { ok: true };
     },
     readClipboard: async () => clipboard,
     async writeClipboard(text) {
@@ -49,22 +50,24 @@ function fakeDesktop(options: { screens: Array<{ elements: UiElement[]; busy?: b
   };
   const output: string[] = [];
   const steps: StepRecord[] = [];
-  const notices: string[] = [];
   const host: LayerHost = {
     driver,
     write: (text) => output.push(text),
     emitImage: () => output.push('[image]'),
     recordStep: (step) => steps.push(step),
-    showForegroundNotice: async ({ app }) => {
-      notices.push(app);
-      log.push('notice');
-      return `Pane: Claude Code is bringing ${app} to the front`;
+    async holdLanes(lanes, run) {
+      log.push(`hold ${JSON.stringify(lanes)}`);
+      try {
+        return await run();
+      } finally {
+        log.push('release');
+      }
     },
     settleMs: 0,
     busyPollMs: 1,
     busyTimeoutMs: 200,
   };
-  return { cua: createCua(host).cua, log, output, steps, notices };
+  return { cua: createCua(host).cua, log, output, steps };
 }
 
 const listScreen = (rows: string[], extra: UiElement[] = []) => ({
@@ -115,19 +118,18 @@ describe('cua layer', () => {
     ]);
   });
 
-  it('refuses background input with the needs_foreground copy, and a foreground retry shows the notice first', async () => {
+  it('refuses background input with the needs_foreground copy, and a foreground retry puts the notice line in the result once', async () => {
     const desk = fakeDesktop({ screens: [listScreen(['Milk'])], refuseBackground: ['scroll'] });
     const app = await desk.cua.getApp('Notes');
     await expect(app.scroll(2, 'd')).rejects.toThrow(
       "needs_foreground: Notes can't receive scrolling in the background on this OS. Retry with { foreground: true } to bring it to the front; the user will see a notice first.",
     );
-    expect(desk.notices).toEqual([]);
-
     await app.scroll(2, 'down', 2, { foreground: true });
-    const tail = desk.log.slice(desk.log.indexOf('notice'));
-    expect(tail[1]).toMatch(/^scroll \(foreground\) .*"direction":"down","amount":2,"by":"page"/);
-    expect(desk.output).toContain('Pane: Claude Code is bringing Notes to the front');
-    expect(desk.steps.map((s) => s.result)).toEqual([expect.stringMatching(/^needs_foreground: /), 'ok']);
+    expect(desk.log).toContainEqual(expect.stringMatching(/^scroll \(foreground\) .*"direction":"down","amount":2,"by":"page"/));
+    // Three foreground calls, one line.
+    await app.typeText('a\nb', { foreground: true });
+    expect(desk.output.filter((line) => line === 'Pane: Claude Code is bringing Notes to the front')).toHaveLength(2);
+    expect(desk.steps.map((s) => s.result)).toEqual([expect.stringMatching(/^needs_foreground: /), 'ok', 'ok']);
   });
 
   it('re-reads and retries once when another read replaced the engine handles', async () => {
@@ -161,6 +163,19 @@ describe('cua layer', () => {
     await app.paste('hello');
     expect(desk.log.some((line) => line.startsWith('clipboard'))).toBe(false);
     expect(desk.steps[0].result).toMatch(/^ok: typed instead of pasting/);
+  });
+
+  it('holds the app (and the clipboard, for paste) for all of an action\'s engine calls, then settles', async () => {
+    const desk = fakeDesktop({ screens: [listScreen([])] });
+    const app = await desk.cua.getApp('Notes');
+    desk.log.length = 0;
+    await app.typeText('a\nb');
+    expect(desk.log.map((line) => line.split(' ')[0])).toEqual(['hold', 'typeText', 'pressKey', 'typeText', 'release', 'read']);
+    expect(desk.log[0]).toBe('hold {"pid":42,"clipboard":false}');
+    desk.log.length = 0;
+    await app.paste('x');
+    expect(desk.log[0]).toBe('hold {"pid":42,"clipboard":true}');
+    expect(desk.log.indexOf('release')).toBeGreaterThan(desk.log.lastIndexOf('clipboard "user copy"'));
   });
 
   it('typeText presses Return for each newline', async () => {

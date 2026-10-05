@@ -68,7 +68,7 @@ describe('cua in the script host', () => {
     ]);
   });
 
-  it('returns needs_foreground, and a foreground retry shows the notice before acting', async () => {
+  it('returns needs_foreground, and the daemon shows the notice before a foreground retry acts', async () => {
     const { engine, calls } = finderEngine({ refuseBackgroundScroll: true });
     const notices: string[] = [];
     hosts = new ScriptHosts({
@@ -90,6 +90,7 @@ describe('cua in the script host', () => {
     const retried = await hosts.run('a', `await app.scroll(2, 'down', 1, { foreground: true })`);
     expect(retried).toEqual({ ok: true, text: 'Pane: Claude Code is bringing Finder to the front', images: [] });
     expect(notices).toEqual(['a:Finder']);
-    expect(calls.slice(0, 2)).toEqual(['notice', 'scroll (foreground)']);
+    expect(calls.indexOf('notice')).toBeGreaterThan(-1);
+    expect(calls.indexOf('notice')).toBeLessThan(calls.indexOf('scroll (foreground)'));
   });
 });

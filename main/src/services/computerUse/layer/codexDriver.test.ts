@@ -38,7 +38,6 @@ function codexMac() {
     write: (text) => output.push(text),
     emitImage: () => output.push('[image]'),
     recordStep: (step) => steps.push(step),
-    showForegroundNotice: async () => undefined,
     // Large on purpose: a native engine settles itself, so the layer must not wait.
     settleMs: 60_000,
   });
@@ -60,11 +59,11 @@ describe('the layer over the Codex runtime', () => {
     expect(state).toContain(`${diff(1)}\n${diff(2)}`);
     expect(full).toContain(FULL);
     expect(calls.filter((c) => c.tool !== 'list_apps' && c.tool !== 'state_and_screenshot')).toEqual([
-      { tool: 'get_app_state', args: { app: 'com.apple.TextEdit', disable_diff: true } },
-      { tool: 'type_text', args: { app: 'com.apple.TextEdit', text: 'hi' } },
-      { tool: 'get_app_state', args: { app: 'com.apple.TextEdit', disable_diff: false } },
-      { tool: 'get_app_state', args: { app: 'com.apple.TextEdit', disable_diff: true } },
-      { tool: 'click', args: { app: 'com.apple.TextEdit', element_index: 2, mouse_button: 'left', click_count: 1 } },
+      { tool: 'get_app_state', args: { app: 'com.apple.TextEdit', pid: 1, disable_diff: true } },
+      { tool: 'type_text', args: { app: 'com.apple.TextEdit', pid: 1, text: 'hi' } },
+      { tool: 'get_app_state', args: { app: 'com.apple.TextEdit', pid: 1, disable_diff: false } },
+      { tool: 'get_app_state', args: { app: 'com.apple.TextEdit', pid: 1, disable_diff: true } },
+      { tool: 'click', args: { app: 'com.apple.TextEdit', pid: 1, element_index: 2, mouse_button: 'left', click_count: 1 } },
     ]);
   });
 
@@ -77,7 +76,7 @@ describe('the layer over the Codex runtime', () => {
 
     expect(calls.filter((c) => c.tool === 'get_app_state')).toHaveLength(readsBefore);
     expect(steps).toEqual([expect.objectContaining({ index: 0, action: 'pressKey', result: 'ok' })]);
-    expect(calls.at(-1)).toEqual({ tool: 'state_and_screenshot', args: { app: 'com.apple.TextEdit' } });
+    expect(calls.at(-1)).toEqual({ tool: 'state_and_screenshot', args: { app: 'com.apple.TextEdit', pid: 1 } });
   });
 
   it("uses the runtime's own select_text and paste, leaving the clipboard to it", async () => {
@@ -88,8 +87,8 @@ describe('the layer over the Codex runtime', () => {
     await app.paste('**bold**', { format: 'md' });
 
     expect(calls.filter((c) => c.tool === 'select_text' || c.tool === 'paste')).toEqual([
-      { tool: 'select_text', args: { app: 'com.apple.TextEdit', element_index: 2, text: 'hi', prefix: '', suffix: '!', selection_type: 'text' } },
-      { tool: 'paste', args: { app: 'com.apple.TextEdit', text: '**bold**', format: 'md' } },
+      { tool: 'select_text', args: { app: 'com.apple.TextEdit', pid: 1, element_index: 2, text: 'hi', prefix: '', suffix: '!', selection_type: 'text' } },
+      { tool: 'paste', args: { app: 'com.apple.TextEdit', pid: 1, text: '**bold**', format: 'md' } },
     ]);
   });
 
@@ -104,33 +103,31 @@ describe('the layer over the Codex runtime', () => {
       }, 'mac'),
       write: () => undefined,
       emitImage: () => undefined,
-      showForegroundNotice: async () => undefined,
-    });
+      });
     const app = await cua.getApp('Terminal');
 
     await expect(app.typeText('ls')).rejects.toThrow('not allowed to use the app');
   });
 
-  it('shows the foreground notice before each input on Windows, where the runtime brings the window forward', async () => {
-    const order: string[] = [];
+  it('marks each input on Windows as foreground, so the daemon shows the notice, and puts its line in the result', async () => {
+    const inputs: JsonObject[] = [];
+    const output: string[] = [];
     const { cua } = createCua({
       driver: codexDriver(async (tool, args) => {
-        order.push(tool);
         if (tool === 'list_windows') return { ok: true, data: { windows: [{ id: 5, app: 'Notepad', title: 'notes.txt' }] } };
-        if (tool === 'get_app_state') return { ok: true, data: { state: `window ${String(args.window_id)}` } };
-        return { ok: true, data: { broughtForward: true } };
+        if (tool === 'get_app_state' || tool === 'state_and_screenshot') return { ok: true, data: { state: 'There has been no change in the accessibility tree.' } };
+        inputs.push({ tool, ...args });
+        // The daemon shows the notice for foreground calls and returns its line.
+        return { ok: true, data: { broughtForward: true }, notice: args.delivery_mode === 'foreground' ? 'Notice shown: Notepad came to the front.' : undefined };
       }, 'windows'),
-      write: () => undefined,
+      write: (text) => output.push(text),
       emitImage: () => undefined,
-      showForegroundNotice: async ({ app }) => {
-        order.push(`notice ${app}`);
-        return undefined;
-      },
     });
     const app = await cua.getApp({ windowId: 5 });
 
     await app.typeText('hi');
 
-    expect(order.slice(order.indexOf('notice Notepad'))).toEqual(['notice Notepad', 'type_text', 'state_and_screenshot']);
+    expect(inputs).toEqual([{ tool: 'type_text', window_id: 5, pid: 5, delivery_mode: 'foreground', text: 'hi' }]);
+    expect(output).toContain('Notice shown: Notepad came to the front.');
   });
 });

@@ -26,6 +26,8 @@ export interface EngineResult {
   data?: JsonValue;
   error?: { code: string; message: string };
   images?: EngineImage[];
+  /** Set by the daemon when it showed the user the foreground notice before this call. */
+  notice?: string;
 }
 
 export interface ComputerUseEngine {

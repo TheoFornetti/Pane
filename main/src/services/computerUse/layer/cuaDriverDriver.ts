@@ -57,10 +57,18 @@ const elementSchema = boundary.object({
 });
 type CuaElement = ReturnType<typeof elementSchema.decode>;
 const windowStateSchema = boundary.object({
+  degraded: optionalBoolean,
+  screenshot_error: boundary.optional(boundary.jsonObject),
   snapshot_id: optionalString,
   window_title: optionalString,
   tree_markdown: optionalString,
   elements: boundary.optional(boundary.array(elementSchema)),
+});
+
+const grantsSchema = boundary.object({
+  accessibility: optionalBoolean,
+  screen_recording: optionalBoolean,
+  source: boundary.optional(boundary.object({ attribution: optionalString })),
 });
 
 const launchSchema = boundary.object({ pid: boundary.optional(boundary.nullable(boundary.number)) });
@@ -117,14 +125,16 @@ export function cuaDriverDriver(call: CallEngine, platform: Platform = currentPl
   }
 
   function outcome(result: EngineResult): ActionOutcome {
+    const { notice } = result;
     if (result.ok) {
       const effect = decodeOptionalBoundary(result.data, successSchema)?.effect;
-      return effect === 'suspected_noop' || effect === 'unverifiable' ? { ok: true, note: `effect ${effect.replace('_', ' ')}` } : { ok: true };
+      const note = effect === 'suspected_noop' || effect === 'unverifiable' ? `effect ${effect.replace('_', ' ')}` : undefined;
+      return { ok: true, note, notice };
     }
     const payload = decodeOptionalBoundary(result.data, errorSchema);
     const code = payload?.code ?? payload?.refusal?.code ?? result.error?.code ?? '';
     const needsForeground = FOREGROUND_CODES.has(code) || payload?.escalation?.recommended === 'foreground';
-    return { ok: false, needsForeground, message: result.error?.message ?? code, stale: STALE_CODES.has(code) };
+    return { ok: false, needsForeground, message: result.error?.message ?? code, stale: STALE_CODES.has(code), notice };
   }
 
   function targetArgs(window: WindowInfo, target: ActionTarget): JsonObject {
@@ -186,8 +196,10 @@ export function cuaDriverDriver(call: CallEngine, platform: Platform = currentPl
         if (WINDOW_GONE_CODES.has(payload?.code ?? result.error?.code ?? '')) throw new WindowGoneError(result.error?.message);
         throw new Error(result.error?.message ?? 'Reading the window failed.');
       }
-      const state = decodeOptionalBoundary(result.data, windowStateSchema) ?? { tree_markdown: undefined, elements: undefined, window_title: undefined };
+      const state = decodeOptionalBoundary(result.data, windowStateSchema) ?? { degraded: undefined, screenshot_error: undefined, tree_markdown: undefined, elements: undefined, window_title: undefined };
       const elements = toUiElements(state.tree_markdown ?? '', state.elements ?? [], secondary);
+      // Without its macOS grants Cua returns an empty, degraded tree that looks like an empty window.
+      if (elements.length === 0 && (state.degraded || state.screenshot_error)) await refuseWithoutPermissions();
       return {
         title: state.window_title || undefined,
         elements,
@@ -243,6 +255,17 @@ export function cuaDriverDriver(call: CallEngine, platform: Platform = currentPl
       await data('clipboard_write', { text });
     },
   };
+
+  /** Throws the user-facing refusal when Cua reports a missing macOS grant for itself. */
+  async function refuseWithoutPermissions(): Promise<void> {
+    const check = await call('check_permissions', { prompt: false });
+    const grants = check.ok ? decodeOptionalBoundary(check.data, grantsSchema) : undefined;
+    // Only the helper running as CuaDriver.app answers for its own grants.
+    if (grants?.source?.attribution !== 'driver-daemon') return;
+    const missing = [...(grants.accessibility === false ? ['Accessibility'] : []), ...(grants.screen_recording === false ? ['Screen Recording'] : [])];
+    if (missing.length === 0) return;
+    throw new Error(`Computer use needs permission on this machine: ${missing.join(' and ')}. Ask the user to grant it (Settings → Remote Access).`);
+  }
 
   /**
    * Cua can't set a selection range, so this focuses the field, moves to its start, and walks there

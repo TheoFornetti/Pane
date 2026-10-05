@@ -51,10 +51,15 @@ export function codexDriver(call: CallEngine, platform: DesktopDriver['platform'
     return id;
   }
 
-  /** How a verb names its target: the app on macOS, the window elsewhere. */
+  /**
+   * How a verb names its target: the app on macOS, the window elsewhere. `pid` is the stand-in
+   * window's own number: the runtime ignores it, and the daemon queues calls and the layer's lane
+   * holds by it.
+   */
   function targetOf(window: WindowInfo): JsonObject {
-    if (platform !== 'mac') return { window_id: window.id };
-    return { app: appByWindow.get(window.id) ?? window.app };
+    const target: JsonObject = platform === 'mac' ? { app: appByWindow.get(window.id) ?? window.app } : { window_id: window.id };
+    target.pid = window.pid;
+    return target;
   }
 
   function pointOf(target: ActionTarget): JsonObject {
@@ -68,10 +73,14 @@ export function codexDriver(call: CallEngine, platform: DesktopDriver['platform'
   }
 
   async function act(window: WindowInfo, tool: string, args: JsonObject): Promise<ActionOutcome> {
-    const result = await call(tool, { ...targetOf(window), ...args });
-    if (!result.ok) return { ok: false, needsForeground: false, message: result.error?.message ?? `${tool} failed.` };
-    // On Windows the runtime brings the window forward to send input; say so in the result.
-    return decodeOptionalBoundary(result.data, noteSchema)?.broughtForward ? { ok: true, note: 'the window came to the front for this input' } : { ok: true };
+    const callArgs = { ...targetOf(window), ...args };
+    // On Windows the runtime brings the window forward for every input; marking the call makes the
+    // daemon show the user its foreground notice first.
+    if (platform === 'windows') callArgs.delivery_mode = 'foreground';
+    const result = await call(tool, callArgs);
+    const { notice } = result;
+    if (!result.ok) return { ok: false, needsForeground: false, message: result.error?.message ?? `${tool} failed.`, notice };
+    return decodeOptionalBoundary(result.data, noteSchema)?.broughtForward ? { ok: true, note: 'the window came to the front for this input', notice } : { ok: true, notice };
   }
 
   async function listApps(): Promise<AppInfo[]> {
@@ -82,17 +91,16 @@ export function codexDriver(call: CallEngine, platform: DesktopDriver['platform'
   const driver: DesktopDriver = {
     platform,
     renders: 'native',
-    inputBringsForward: platform === 'windows',
 
     listApps,
 
 
     async listWindows(): Promise<WindowInfo[]> {
       if (platform === 'mac') {
-        return (await listApps()).filter((app) => app.isRunning).map((app) => ({ id: windowFor(app.id), pid: 0, app: app.displayName ?? app.id }));
+        return (await listApps()).filter((app) => app.isRunning).map((app) => { const id = windowFor(app.id); return { id, pid: id, app: app.displayName ?? app.id }; });
       }
       const { windows } = decodeOptionalBoundary((await data('list_windows', {})).data, windowsSchema) ?? { windows: [] };
-      return windows.map((w) => ({ id: w.id, pid: 0, app: w.app, title: w.title }));
+      return windows.map((w) => ({ id: w.id, pid: w.id, app: w.app, title: w.title }));
     },
 
     async launchApp(app: AppInfo): Promise<number | undefined> {
@@ -160,7 +168,8 @@ export function codexDriver(call: CallEngine, platform: DesktopDriver['platform'
     driver.resolveApp = async (target) => {
       const app = (await listApps()).find((a) => a.id === target || a.displayName?.toLowerCase() === target.toLowerCase());
       const name = app?.displayName ?? target.split('/').pop()?.replace(/\.app$/, '') ?? target;
-      return { window: { id: windowFor(app?.id ?? target), pid: 0, app: name }, name };
+      const id = windowFor(app?.id ?? target);
+      return { window: { id, pid: id, app: name }, name };
     };
   }
   return driver;

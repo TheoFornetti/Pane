@@ -70,7 +70,7 @@ describe('computer-use channels', () => {
   it('refuses calls that arrive from another machine', async () => {
     const { registry } = setup(true);
     const result = await registry.invokeRemote('computer-use:run', [{ connectionId: 'c1', code: 'return 1' }]);
-    expect(result).toEqual({ ok: false, text: 'Computer use runs only from this machine for now.', images: [] });
+    expect(result).toEqual({ ok: false, text: 'Only this machine is supported yet.', images: [] });
   });
 
   it('saves the steps a run records into its Pane and opens the replay in a tab', async () => {

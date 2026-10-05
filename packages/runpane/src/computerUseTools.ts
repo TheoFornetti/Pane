@@ -49,8 +49,8 @@ export const COMPUTER_USE_TOOLS: readonly ComputerUseTool[] = [
     toolsets: TOOLSETS,
     description: [
       'Run a JavaScript script that sees and operates desktop apps on a Pane machine, in the background.',
-      '`code` is the body of an async function: top-level await works, `return` gives the text result, `console.log` adds lines, and `image(...)` adds a picture.',
-      'Start with `globalThis.app = await cua.getApp("<name or bundle id>")`, read `await app.getAXState()`, act by element index, then read again to verify.',
+      '`code` is the body of an async function: top-level await works. Reads such as `getAXState()` show their own result; `return` and `console.log` add text, and `image(...)` adds a picture.',
+      'Start with `globalThis.app = await cua.getApp("<name or bundle id>")`, which shows the tree; act by element id (`await app.click(12)`); then `await app.getAXState()` shows what changed.',
       'Only `globalThis` values persist to the next call. Scripts stop after 300 s; output is capped at about 25k tokens.',
       'Background is the default. A `needs_foreground` result means retry that action with `{ foreground: true }`, which shows the user a notice first.',
       'Each run saves step screenshots and a replay; on a public repo, ask the user before attaching them to a PR.',
@@ -98,6 +98,9 @@ function isThisMachine(machine: string | undefined): boolean {
   return ['', 'local', 'localhost', 'this', host, host.replace(/\.local$/, '')].includes(wanted);
 }
 
+/** A reset sent after a cancelled or failed run; the next call waits so the reset can't land on it. */
+let pendingReset: Promise<void> | undefined;
+
 /** The name the user knows an MCP client by, for the foreground notice. */
 export function agentName(clientName: string | undefined): string | undefined {
   if (!clientName) return undefined;
@@ -113,6 +116,8 @@ export async function callComputerUseTool(
   { connectionId, agent }: { connectionId: string; agent?: string },
   signal: AbortSignal,
 ): Promise<ComputerUseToolResult> {
+  await pendingReset;
+  let runStarted = false;
   try {
     if (tool.name === 'js_reset') {
       const { machine } = decodeBoundary(input, resetInputSchema);
@@ -122,6 +127,7 @@ export async function callComputerUseTool(
     }
     const { code, machine } = decodeBoundary(input, jsInputSchema);
     if (!isThisMachine(machine)) return errorText(OTHER_MACHINE_REFUSAL);
+    runStarted = true;
     // Inside a Pane terminal, the run's steps and replay land in that Pane.
     const sessionId = process.env.PANE_SESSION_ID?.trim() || undefined;
     const run = invokeDaemon('computer-use:run', [{ connectionId, code, sessionId, agent }], runResultSchema, { timeoutMs: RUN_TIMEOUT_MS });
@@ -135,9 +141,10 @@ export async function callComputerUseTool(
     if (!result.ok) toolResult.isError = true;
     return toolResult;
   } catch (error) {
-    if (signal.aborted) {
-      // A cancelled run may still be going; ending its host is the only way to stop it.
-      await invokeDaemon('computer-use:reset', [{ connectionId }], resetResultSchema).catch(() => undefined);
+    if (runStarted) {
+      // A cancelled or timed-out run may still be going; ending its host is the only way to stop it.
+      pendingReset = releaseComputerUseConnection(connectionId);
+      await pendingReset;
     }
     return errorText(error instanceof Error ? error.message : String(error));
   }
@@ -145,7 +152,7 @@ export async function callComputerUseTool(
 
 /** Ends this connection's script host when the agent disconnects, so it does not wait out the idle timeout. */
 export async function releaseComputerUseConnection(connectionId: string): Promise<void> {
-  await invokeDaemon('computer-use:reset', [{ connectionId }], resetResultSchema, { timeoutMs: 2_000 }).catch(() => undefined);
+  await invokeDaemon('computer-use:reset', [{ connectionId }], resetResultSchema, { timeoutMs: 2_000 }).then(() => undefined, () => undefined);
 }
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {

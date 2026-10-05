@@ -102,6 +102,21 @@ describe('cuaDriverDriver', () => {
     expect(await read('- AXWindow\n  - AXProgressIndicator = "40"')).toBe(false);
   });
 
+  it('refuses with the missing grants when Cua returns an empty, degraded tree for lack of permission', async () => {
+    const degraded = { ok: true, data: { degraded: true, degraded_reason: 'ax_window_unresolved: …', elements: [], screenshot_error: { code: 'px_capture_unavailable' } } };
+    const grants = (accessibility: boolean, screenRecording: boolean): EngineResult => ({
+      ok: true,
+      data: { accessibility, screen_recording: screenRecording, source: { attribution: 'driver-daemon' } },
+    });
+    const noGrants = engine({ get_window_state: degraded, check_permissions: grants(false, false) });
+    await expect(cuaDriverDriver(noGrants.call, 'mac').readWindow(WINDOW)).rejects.toThrow(
+      'Computer use needs permission on this machine: Accessibility and Screen Recording. Ask the user to grant it (Settings → Remote Access).',
+    );
+    // With both grants, an empty degraded read is just a window Cua can't resolve yet.
+    const granted = engine({ get_window_state: degraded, check_permissions: grants(true, true) });
+    expect((await cuaDriverDriver(granted.call, 'mac').readWindow(WINDOW)).elements).toEqual([]);
+  });
+
   it('turns a missing window into WindowGoneError', async () => {
     const { call } = engine({
       get_window_state: { ok: false, data: { code: 'window_id_not_found' }, error: { code: 'window_id_not_found', message: 'window_id 31 not found' } },

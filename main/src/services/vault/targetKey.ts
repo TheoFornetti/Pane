@@ -45,6 +45,16 @@ export async function loadOrCreateTargetKey(paneDir: string): Promise<TargetKeyP
   }
 }
 
+/** For connection codes: pairing must not depend on the vault, so a key that can't be read or created is left out. */
+export async function readTargetPublicKeyForPairing(paneDir: string): Promise<string | undefined> {
+  try {
+    return (await loadOrCreateTargetKey(paneDir)).publicKey;
+  } catch (error) {
+    console.warn(`[vault] Leaving the vault key out of the connection code: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
+}
+
 async function readTargetKey(keyPath: string): Promise<TargetKeyPair | null> {
   let raw: string;
   try {

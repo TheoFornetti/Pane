@@ -540,8 +540,10 @@ export function normalizePaneRemoteConnectionImportPayload<Value>(
   if (tunnel) {
     payload.tunnel = tunnel;
   }
-  if (decoded.vaultKey !== undefined) {
-    payload.vaultKey = readVaultTargetKey(decoded.vaultKey);
+  const vaultKey = decoded.vaultKey?.trim();
+  // 32 raw bytes in unpadded base64url. Any other value is dropped, so a malformed key never blocks pairing.
+  if (vaultKey && /^[A-Za-z0-9_-]{43}$/.test(vaultKey)) {
+    payload.vaultKey = vaultKey;
   }
   return payload;
 }
@@ -679,15 +681,6 @@ function normalizeRemoteDaemonHostAccess(value: JsonValue | undefined): RemoteDa
   } catch {
     return undefined;
   }
-}
-
-function readVaultTargetKey(value: string): string {
-  const key = value.trim();
-  // 32 raw bytes in unpadded base64url.
-  if (!/^[A-Za-z0-9_-]{43}$/.test(key)) {
-    throw new Error('Remote connection vault key must be a base64url X25519 public key');
-  }
-  return key;
 }
 
 function normalizeRemoteImportTunnel(

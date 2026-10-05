@@ -58,13 +58,22 @@ describe('sealed bundles', () => {
     await expect(openSealedBundle(target, sealed, new Date('2026-10-02T00:00:00.000Z'))).rejects.toThrow(/expired/);
   });
 
+  it('refuses a bundle that stays valid longer than a standing approval can', async () => {
+    const target = newTargetKey();
+    const sealed = await sealBundle(target.publicKey, Buffer.from(CANARY), {
+      bundleId: 'b1',
+      expiresAt: '2026-11-04T00:00:00.000Z',
+    });
+    await expect(openSealedBundle(target, sealed, new Date('2026-10-04T00:00:00.000Z'))).rejects.toThrow(/30 days/);
+  });
+
   it('refuses a bundle whose header a relay rewrote', async () => {
     const target = newTargetKey();
     const sealed = await sealBundle(target.publicKey, Buffer.from(CANARY), {
       bundleId: 'b1',
       expiresAt: '2026-10-01T00:00:00.000Z',
     });
-    const extended: SealedBundle = { ...sealed, header: { ...sealed.header, expiresAt: '2099-01-01T00:00:00.000Z' } };
+    const extended: SealedBundle = { ...sealed, header: { ...sealed.header, expiresAt: '2026-10-03T00:00:00.000Z' } };
     await expect(openSealedBundle(target, extended, new Date('2026-10-02T00:00:00.000Z'))).rejects.toThrow();
   });
 });

@@ -10,6 +10,8 @@ export const vaultHpkeSuite = new CipherSuite({
 });
 
 const HPKE_INFO = new TextEncoder().encode('pane-vault-bundle/v1');
+/** The longest a standing approval lasts; a bundle claiming a later expiry is refused. */
+const MAX_BUNDLE_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Travels in the clear and is authenticated as the AEAD's associated data, so a relay can read it but not change it. */
 interface SealedBundleHeader {
@@ -78,6 +80,9 @@ export async function openSealedBundle(
   const expiresAt = Date.parse(bundle.header.expiresAt);
   if (!Number.isFinite(expiresAt) || expiresAt <= now.getTime()) {
     throw new Error('Vault bundle has expired');
+  }
+  if (expiresAt > now.getTime() + MAX_BUNDLE_LIFETIME_MS) {
+    throw new Error('Vault bundle expires more than 30 days out');
   }
   const recipientKey = await vaultHpkeSuite.kem.deserializePrivateKey(toArrayBuffer(fromBase64Url(target.privateKey)));
   const plaintext = await vaultHpkeSuite.open(

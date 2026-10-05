@@ -231,8 +231,12 @@ export class ScriptHosts {
   }
 }
 
-/** Cua's per-window tools name the app by `pid`; calls without one share a lane. */
+/** Cua names the app by `pid`, the Codex runtime by `app` or `window_id`; calls without one share a lane. */
 function laneFor(args: JsonObject): string {
   const pid = decodeOptionalBoundary(args.pid, boundary.number);
-  return pid === undefined ? GLOBAL_LANE : `pid:${pid}`;
+  if (pid !== undefined) return `pid:${pid}`;
+  const app = decodeOptionalBoundary(args.app, boundary.string);
+  if (app !== undefined) return `app:${app}`;
+  const windowId = decodeOptionalBoundary(args.window_id, boundary.number);
+  return windowId === undefined ? GLOBAL_LANE : `window:${windowId}`;
 }

@@ -114,8 +114,9 @@ export class ComputerUseReadinessService {
       if (!test.ok) {
         return settle({ state: 'failed', engineChoice, detail: test.error?.message ?? 'The engine did not answer.' });
       }
-      // M1 runs every engine choice on Cua Driver; Auto picks the Codex runtime once its adapter ships (M3).
-      return settle({ state: 'ready', engineChoice, engine: engine.id, checkedAt: this.deps.now() });
+      const ready: ComputerUseReadiness = { state: 'ready', engineChoice, engine: engine.id, checkedAt: this.deps.now() };
+      if (status.fallbackReason) ready.detail = status.fallbackReason;
+      return settle(ready);
     } catch (error) {
       return settle({ state: 'failed', engineChoice, detail: error instanceof Error ? error.message : String(error) });
     }

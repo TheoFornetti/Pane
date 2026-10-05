@@ -13,6 +13,7 @@ import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
 import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
+import { draftKey, readDraft, writeDraft } from '../composer/composerDrafts';
 import { insertAtSelection, type Selection } from '../composer/insertText';
 import { useAffordances } from '../hosts/hostSettings';
 import { useMarkPaneSeen } from '../panes/hooks';
@@ -84,7 +85,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id);
   const title = session ? session.session.name || 'Untitled' : pane.data?.name ?? '';
 
-  const composer = useComposerDraft();
+  const composer = useComposerDraft(panel ? draftKey(profile.id, paneId, panel.id) : null);
   const { draft, setDraft } = composer;
   const voice = useVoiceDictation(composer.insert);
   const uploads = useUploads(paneId, composer.insert);
@@ -321,7 +322,13 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   );
 }
 
+function initialDraft(key: string | null): DraftState {
+  return { key, text: key ? readDraft(key) : '', cursor: null, moveTo: undefined };
+}
+
 interface DraftState {
+  /** Where the text is saved; null before a terminal tab is chosen. */
+  key: string | null;
   text: string;
   /** Last known cursor; null means the end. */
   cursor: Selection | null;
@@ -332,21 +339,28 @@ interface DraftState {
 /**
  * The draft and its cursor, kept together so uploads, dictation, paste and
  * shortcuts land where the person was typing, even when two arrive at once.
+ * Each terminal tab has its own draft, kept on the device under `key` until
+ * sent, so it survives leaving the pane and restarting the app.
  */
-function useComposerDraft() {
-  const [state, setState] = useState<DraftState>({ text: '', cursor: null, moveTo: undefined });
+function useComposerDraft(key: string | null) {
+  const [state, setState] = useState<DraftState>(() => initialDraft(key));
+  // Switching tabs loads that tab's draft.
+  if (state.key !== key) setState(initialDraft(key));
+  useEffect(() => {
+    if (state.key) writeDraft(state.key, state.text);
+  }, [state.key, state.text]);
   return {
     draft: state.text,
     selection: state.moveTo,
     setDraft: (next: SetStateAction<string>) => setState(current => {
       const text = typeof next === 'function' ? next(current.text) : next;
-      return { text, cursor: text === '' ? null : current.cursor, moveTo: undefined };
+      return { ...current, text, cursor: text === '' ? null : current.cursor, moveTo: undefined };
     }),
     onSelectionChange: (cursor: Selection) => setState(current => ({ ...current, cursor, moveTo: undefined })),
     insert: (insert: string) => setState(current => {
       const result = insertAtSelection(current.text, current.cursor, insert);
       const cursor = { start: result.cursor, end: result.cursor };
-      return { text: result.text, cursor, moveTo: cursor };
+      return { ...current, text: result.text, cursor, moveTo: cursor };
     }),
   };
 }

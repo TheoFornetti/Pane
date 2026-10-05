@@ -1,6 +1,7 @@
 /**
  * One agent connection's script process. It runs each `js` call in a context that persists
  * between calls, and reaches the desktop only through `engine.call`, which the daemon serves.
+ * The daemon confines this process (see `ScriptHosts`), since agent code can reach its `process`.
  */
 import { Console } from 'node:console';
 import { Writable } from 'node:stream';
@@ -16,8 +17,13 @@ const MAX_IMAGES = 20;
 const imageSourceSchema = boundary.union(imageSchema, boundary.object({ images: boundary.array(imageSchema) }));
 type ImageSource = EngineImage | Pick<EngineResult, 'images'>;
 
+const holdLanesSchema = boundary.object({ pid: boundary.optional(boundary.number), clipboard: boundary.optional(boundary.boolean) });
+type HoldLanes = { pid?: number; clipboard?: boolean };
+
 const pendingCalls = new Map<number, (result: EngineResult) => void>();
 let nextCallId = 1;
+const pendingHolds = new Map<number, () => void>();
+let nextHoldId = 1;
 let output = '';
 let images: EngineImage[] = [];
 
@@ -32,6 +38,29 @@ const collector = new Writable({
   },
 });
 const scriptConsole = new Console({ stdout: collector, stderr: collector });
+
+/** Adds images to this call's result, within the per-call limit. */
+function addImages(added: EngineImage[]): void {
+  if (images.length + added.length > MAX_IMAGES) throw new RangeError(`A js call can return at most ${MAX_IMAGES} images`);
+  images.push(...added);
+}
+
+/**
+ * Runs `fn` while no other agent's engine calls reach the app (`pid`), or the clipboard, so an
+ * action made of several calls (a line break between typed lines, a paste) can't be interleaved.
+ */
+async function holdLanes<T>(lanes: HoldLanes, fn: () => Promise<T>): Promise<T> {
+  const holdId = nextHoldId++;
+  await new Promise<void>((held) => {
+    pendingHolds.set(holdId, held);
+    send({ type: 'hold', holdId, pid: lanes.pid, clipboard: lanes.clipboard === true });
+  });
+  try {
+    return await fn();
+  } finally {
+    send({ type: 'release', holdId });
+  }
+}
 
 /** Keeps the message and the frames in the agent's code, not the host's. */
 function scriptFrames(stack: string): string {
@@ -53,13 +82,15 @@ const context = vm.createContext({
         send(message);
       });
     },
+    hold<T>(lanes: HoldLanes, fn: () => Promise<T>): Promise<T> {
+      return holdLanes(decodeBoundary(lanes, holdLanesSchema), fn);
+    },
   },
   image(source: ImageSource): void {
     const parsed = decodeBoundary(source, imageSourceSchema);
     const added = 'images' in parsed ? parsed.images : [parsed];
     if (added.length === 0) throw new TypeError('image() got an engine result with no images');
-    if (images.length + added.length > MAX_IMAGES) throw new RangeError(`image() allows ${MAX_IMAGES} images per call`);
-    images.push(...added);
+    addImages(added);
   },
   sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
   console: scriptConsole,
@@ -101,6 +132,11 @@ async function run(runId: number, code: string, maxOutputChars: number): Promise
 process.on('message', (message: ParentMessage) => {
   if (message.type === 'run') {
     void run(message.runId, message.code, message.maxOutputChars);
+    return;
+  }
+  if (message.type === 'held') {
+    pendingHolds.get(message.holdId)?.();
+    pendingHolds.delete(message.holdId);
     return;
   }
   const resolve = pendingCalls.get(message.callId);

@@ -64,7 +64,7 @@ describe('cua in the script host', () => {
     const second = await hosts.run('a', `await app.click(2); await app.getAXState()`, (step) => steps.push(step));
     expect(second.text).toBe(['Finder · "Downloads" · window 9', 'Changes since the last read: 1 added, 0 removed, 0 changed.', '+ 3 staticText "untitled folder"'].join('\n'));
     expect(steps).toEqual([
-      { index: 0, action: 'click', args: { app: 'Finder', windowId: 9, target: 2, button: 'left', clickCount: 1 }, result: 'ok', screenshotPng: 'cG5n', at: expect.any(String) },
+      { index: 0, action: 'click', args: { app: 'Finder', windowId: 9, target: 2, button: 'left', clickCount: 1 }, result: 'ok', screenshot: { mime: 'image/png', base64: 'cG5n' }, at: expect.any(String) },
     ]);
   });
 

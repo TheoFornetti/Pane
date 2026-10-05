@@ -289,7 +289,7 @@ export class App {
       action: verb,
       args: stepArgs,
       result,
-      screenshotPng: screenshot?.mime === 'image/png' ? screenshot.base64 : undefined,
+      screenshot,
       at,
     });
     if (failure) throw failure;

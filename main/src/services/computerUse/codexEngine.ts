@@ -20,11 +20,12 @@ const CALL_TIMEOUT_MS = CELL_TIMEOUT_MS + 15_000;
 const VERBS = new Map(Object.entries({
   list_apps: 'return { apps: await cua.listApps({ emit: false }) };',
   list_windows: 'return { windows: cua.listWindows ? await cua.listWindows({ emit: false }) : [] };',
+  launch_app: 'if (!cua.computer.launch_app) throw new Error("This Codex runtime can\'t launch apps; open the app first."); await cua.computer.launch_app({ app: a.app }); return {};',
   get_app_state: 'return { state: await (await target()).getAXState({ emit: false, disableDiffing: a.disable_diff === true }) };',
   screenshot: 'await nodeRepl.emitImage(await (await target()).getScreenshot({ emit: false })); return {};',
   click: 'await (await target()).click(point(), { mouseButton: a.mouse_button, clickCount: a.click_count }); return {};',
   drag: 'await (await target()).drag(a.from, a.to); return {};',
-  scroll: 'await (await target()).scroll(point(), a.direction, a.pages); return {};',
+  scroll: 'await (await target()).scroll(point(), a.direction, a.pixels !== undefined ? { pixels: a.pixels } : a.pages); return {};',
   type_text: 'await (await target()).typeText(a.text); return {};',
   press_key: 'await (await target()).pressKey(a.key); return {};',
   paste: 'await (await target()).paste(a.text, { format: a.format }); return {};',

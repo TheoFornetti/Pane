@@ -92,7 +92,7 @@ export class App {
   }
 
   async getScreenshot(options: ObservationOptions = {}): Promise<EngineImage> {
-    const snapshot = await this.read({ wait: true });
+    const snapshot = this.native ? { screenshot: await this.capture() } : await this.read({ wait: true });
     if (!snapshot.screenshot) throw new Error(`${this.name} returned no screenshot. Screen Recording may be off for the engine.`);
     if (options.emit !== false) this.layer.host.emitImage(snapshot.screenshot);
     return snapshot.screenshot;
@@ -155,6 +155,7 @@ export class App {
     const { prefix = '', suffix = '', selectionType = 'text' } = options;
     return this.act('selectText', { elementIndex, text, prefix, suffix, selectionType }, options, async () => {
       const ref = this.refFor(elementIndex);
+      if (this.native) return this.perform({ kind: 'selectTextMatch', ref, text: String(text), prefix: String(prefix), suffix: String(suffix), selectionType }, options);
       const value = this.layer.treeFor(this.window.id).valueFor(elementIndex) ?? '';
       const wanted = String(text);
       const at = findText(value, wanted, String(prefix), String(suffix));
@@ -178,6 +179,7 @@ export class App {
   paste(text: string, options: ForegroundOption & { format?: 'text' | 'md' | 'html' } = {}): Promise<void> {
     const format = options.format ?? 'text';
     return this.act('paste', { text, format }, options, async () => {
+      if (this.native) return this.perform({ kind: 'paste', text: String(text), format }, options);
       if (format === 'html') return { ok: false, needsForeground: false, message: "This engine can't paste HTML yet. Paste it as text or md." };
       const saved = await this.layer.driver.readClipboard().catch(() => undefined);
       if (!saved?.restorable) {
@@ -197,14 +199,31 @@ export class App {
 
   // --- Internals
 
+  private get native(): boolean {
+    return this.layer.driver.renders === 'native';
+  }
+
+  private async capture(): Promise<EngineImage | undefined> {
+    return this.layer.driver.captureWindow?.(this.window);
+  }
+
   private header(snapshot: WindowSnapshot): string {
     const title = snapshot.title ?? this.window.title;
     return `${this.name}${title ? ` · ${JSON.stringify(title)}` : ''} · window ${this.window.id}${snapshot.busy ? ' · still loading' : ''}`;
   }
 
   private async observe(options: StateOptions, withImage: boolean): Promise<{ state: string; screenshot?: EngineImage }> {
-    const snapshot = await this.read({ wait: true });
-    const body = this.layer.treeFor(this.window.id).render({ full: options.disableDiffing === true || options.disableDiff === true });
+    const full = options.disableDiffing === true || options.disableDiff === true;
+    let snapshot: WindowSnapshot;
+    let body: string;
+    if (this.native) {
+      snapshot = await this.readOnce({ full });
+      body = snapshot.text ?? '';
+      if (withImage) snapshot.screenshot ??= await this.capture();
+    } else {
+      snapshot = await this.read({ wait: true });
+      body = this.layer.treeFor(this.window.id).render({ full });
+    }
     const state = `${this.header(snapshot)}\n${body}`;
     if (options.emit !== false) {
       this.layer.host.write(state);
@@ -214,6 +233,10 @@ export class App {
   }
 
   private refFor(elementIndex: number): string {
+    if (this.native) {
+      if (!Number.isInteger(Number(elementIndex))) throw new TypeError(`Element ids are whole numbers, not ${JSON.stringify(elementIndex)}.`);
+      return String(Number(elementIndex));
+    }
     const tree = this.layer.treeFor(this.window.id);
     const id = Number(elementIndex);
     if (!tree.has(id)) throw new Error(`Element ${elementIndex} isn't in ${this.name}'s window now. Call getAXState() and use an id from it.`);
@@ -287,6 +310,8 @@ export class App {
 
   /** Waits for the app to settle after an action and returns the window's screenshot. */
   private async settle(wait: boolean): Promise<EngineImage | undefined> {
+    // A native engine waits for the UI itself before its next capture.
+    if (this.native) return this.capture();
     if (wait) await sleep(this.layer.settleMs);
     return (await this.read({ wait })).screenshot;
   }
@@ -307,15 +332,15 @@ export class App {
   }
 
   /** Reads once; when the window closed, follows the app to its main window. */
-  private async readOnce(): Promise<WindowSnapshot> {
+  private async readOnce(options: { full?: boolean } = {}): Promise<WindowSnapshot> {
     try {
-      return await this.layer.driver.readWindow(this.window);
+      return await this.layer.driver.readWindow(this.window, options);
     } catch (error) {
       if (!(error instanceof WindowGoneError)) throw error;
       const next = mainWindow(await this.layer.driver.listWindows(this.window.pid));
       if (!next) throw new Error(`${this.name} has no open window now.`);
       this.window = next;
-      return this.layer.driver.readWindow(this.window);
+      return this.layer.driver.readWindow(this.window, options);
     }
   }
 }
@@ -387,6 +412,8 @@ export function createCua(host: LayerHost) {
       window = (await driver.listWindows()).find((w) => w.id === windowId);
       if (!window) throw new Error(`No open window has id ${windowId}. cua.listWindows() lists them.`);
       name = window.app;
+    } else if (driver.resolveApp) {
+      ({ window, name } = await driver.resolveApp(decodeBoundary(target, boundary.nonEmptyString)));
     } else {
       const wanted = decodeBoundary(target, boundary.nonEmptyString);
       const apps = await driver.listApps();

@@ -1,9 +1,10 @@
 import type { JsonObject, JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import type { EngineImage, EngineResult } from './engine';
+import type { EngineId, EngineImage, EngineResult } from './engine';
 
 /** Messages between the daemon and a script process, over the child's IPC channel. */
 export type ParentMessage =
-  | { type: 'run'; runId: number; code: string }
+  /** `engine` picks the layer's driver for this run. */
+  | { type: 'run'; runId: number; code: string; engine: EngineId }
   | { type: 'callResult'; callId: number; result: EngineResult }
   /** The foreground notice is up; `text` is the line for the script's result. */
   | { type: 'foregroundNoticeShown'; noticeId: number; text?: string };

@@ -147,7 +147,7 @@ export class ScriptHosts {
         }
         resolve({ ...result, text: this.capOutput(result.text) });
       };
-      host.child.send({ type: 'run', runId, code } satisfies ParentMessage);
+      host.child.send({ type: 'run', runId, code, engine: this.options.getEngine().id } satisfies ParentMessage);
     });
   }
 

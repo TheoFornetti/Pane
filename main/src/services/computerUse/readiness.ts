@@ -107,7 +107,7 @@ export class ComputerUseReadinessService {
         return settle({ state: 'failed', engineChoice, detail: test.error?.message ?? 'The engine did not answer.' });
       }
       const ready: ComputerUseReadiness = { state: 'ready', engineChoice, engine: engine.id, checkedAt: this.deps.now() };
-      if (status.detail) ready.detail = status.detail;
+      if (status.fallbackReason) ready.detail = status.fallbackReason;
       return settle(ready);
     } catch (error) {
       return settle({ state: 'failed', engineChoice, detail: error instanceof Error ? error.message : String(error) });

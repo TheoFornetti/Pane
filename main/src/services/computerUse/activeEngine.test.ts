@@ -35,7 +35,7 @@ describe('engine selection', () => {
   it('falls back to Cua Driver and names the reason when ChatGPT is missing', async () => {
     const selected = selector(engine('codex', { installed: false, detail: 'ChatGPT is not installed.' }).fake, engine('cua-driver').fake);
 
-    await expect(selected.status()).resolves.toMatchObject({ installed: true, detail: 'Codex runtime not used: ChatGPT is not installed.' });
+    await expect(selected.status()).resolves.toMatchObject({ installed: true, fallbackReason: 'Codex runtime not used: ChatGPT is not installed.' });
     expect(selected.id).toBe('cua-driver');
     await expect(selected.call('click', {})).resolves.toEqual({ ok: true, data: { engine: 'cua-driver' } });
   });
@@ -45,7 +45,7 @@ describe('engine selection', () => {
     const selected = selector(codex.fake, engine('cua-driver').fake);
 
     await expect(selected.status()).resolves.toMatchObject({
-      detail: 'Codex runtime not used: it refused calls from Pane (Sender process is not authenticated).',
+      fallbackReason: 'Codex runtime not used: it refused calls from Pane (Sender process is not authenticated).',
     });
     expect(selected.id).toBe('cua-driver');
     expect(codex.stops()).toBeGreaterThan(0);
@@ -71,5 +71,36 @@ describe('engine selection', () => {
     installed = true;
     await selected.status();
     expect(selected.id).toBe('codex');
+  });
+
+  it('keeps a selected Codex runtime on later checks without stopping it', async () => {
+    const codex = engine('codex');
+    const selected = selector(codex.fake, engine('cua-driver').fake);
+
+    await selected.status();
+    await selected.status();
+
+    expect(selected.id).toBe('codex');
+    expect(codex.calls).toEqual(['list_apps']);
+    expect(codex.stops()).toBe(0);
+  });
+
+  it('leaves no engine running when computer use stops during a selection', async () => {
+    let finishStatus: () => void = () => undefined;
+    const codex = engine('codex');
+    const status = codex.fake.status;
+    codex.fake.status = () => {
+      codex.fake.status = status;
+      return new Promise((resolve) => { finishStatus = () => resolve(status()); });
+    };
+    const selected = selector(codex.fake, engine('cua-driver').fake);
+
+    const checking = selected.status();
+    await selected.stop();
+    const stopsAfterTurnOff = codex.stops();
+    finishStatus();
+    await checking;
+
+    expect(codex.stops()).toBeGreaterThan(stopsAfterTurnOff);
   });
 });

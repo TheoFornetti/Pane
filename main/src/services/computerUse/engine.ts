@@ -12,6 +12,8 @@ export interface EngineStatus {
   permissions: { accessibility?: boolean; screenRecording?: boolean };
   desktopSession: boolean;
   detail?: string;
+  /** Set when Auto runs on Cua Driver: why the Codex runtime wasn't used. */
+  fallbackReason?: string;
 }
 
 export interface EngineImage {

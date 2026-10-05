@@ -11,7 +11,6 @@ const START_TIMEOUT_MS = 30_000;
 /** The runtime's own `js` default is 30 s; settling and approvals can add to it. */
 const CELL_TIMEOUT_MS = 60_000;
 const CALL_TIMEOUT_MS = CELL_TIMEOUT_MS + 15_000;
-const RESULT_MARKER = '@@pane-codex-result@@';
 
 /**
  * The Codex engine's raw tools, one `js` cell each. Apps are named by `app` (name, bundle id or
@@ -37,7 +36,7 @@ const VERBS = new Map(Object.entries({
 /** On Windows the runtime brings a window to the front to send it input. */
 const INPUT_VERBS = new Set(['click', 'drag', 'scroll', 'type_text', 'press_key', 'paste', 'set_value', 'select_text', 'perform_secondary_action']);
 
-function cellFor(tool: string, args: JsonObject): string | null {
+function cellFor(tool: string, args: JsonObject, marker: string): string | null {
   const body = VERBS.get(tool);
   if (!body) return null;
   // An async wrapper keeps every name local, so cells never collide in the runtime's persistent scope.
@@ -57,7 +56,7 @@ function cellFor(tool: string, args: JsonObject): string | null {
   } catch (error) {
     outcome = { ok: false, message: String(error?.message ?? error) };
   }
-  nodeRepl.write(${JSON.stringify(RESULT_MARKER)} + JSON.stringify(outcome));
+  nodeRepl.write(${JSON.stringify(marker)} + JSON.stringify(outcome));
 })();`;
 }
 
@@ -110,7 +109,9 @@ class CodexEngine implements ComputerUseEngine {
   }
 
   async call(tool: string, args: JsonObject): Promise<EngineResult> {
-    const cell = cellFor(tool, args);
+    // A fresh marker per call, so no text an app shows can pass for the result.
+    const marker = `@@pane-result-${randomUUID()}@@`;
+    const cell = cellFor(tool, args, marker);
     if (!cell) return { ok: false, error: { code: 'unknown_tool', message: `The Codex runtime has no tool named ${tool}.` } };
     let server: CodexServer;
     try {
@@ -118,7 +119,7 @@ class CodexEngine implements ComputerUseEngine {
     } catch (error) {
       return { ok: false, error: { code: 'engine_unavailable', message: error instanceof Error ? error.message : String(error) } };
     }
-    const result = await server.runCell(cell);
+    const result = await server.runCell(cell, marker);
     if (result.ok && server.platform === 'win32' && INPUT_VERBS.has(tool)) {
       return { ...result, data: { ...asObject(result.data), broughtForward: true } };
     }
@@ -188,6 +189,8 @@ class CodexServer {
     });
     // A failed spawn reports only 'error'; a crash reports 'exit'.
     child.on('error', (error) => this.finish(error.message));
+    // Writing after the runtime closed its stdin raises EPIPE here; unhandled, it would take down the daemon.
+    child.stdin.on('error', (error) => this.finish(error.message));
     child.on('exit', () => this.finish(this.stderrTail.trim().split('\n').pop() ?? ''));
   }
 
@@ -224,7 +227,7 @@ class CodexServer {
     this.child.kill();
   }
 
-  async runCell(code: string): Promise<EngineResult> {
+  async runCell(code: string, marker: string): Promise<EngineResult> {
     const reply = await this.request('tools/call', { name: 'js', arguments: { code, timeout_ms: CELL_TIMEOUT_MS } }, CALL_TIMEOUT_MS);
     if (reply.error) return { ok: false, error: { code: 'engine_error', message: reply.error.message ?? 'The Codex runtime failed.' } };
     const result = decodeOptionalBoundary(reply.result, toolResultSchema);
@@ -232,8 +235,8 @@ class CodexServer {
 
     const text = result.content.flatMap((item) => (item.type === 'text' && item.text ? [item.text] : [])).join('\n');
     const images: EngineImage[] = result.content.flatMap((item) => (item.type === 'image' && item.data ? [{ mime: item.mimeType ?? 'image/png', base64: item.data }] : []));
-    const marker = text.lastIndexOf(RESULT_MARKER);
-    const outcome = marker === -1 ? undefined : parseOutcome(text.slice(marker + RESULT_MARKER.length).split('\n', 1)[0]);
+    const at = text.indexOf(marker);
+    const outcome = at === -1 ? undefined : parseOutcome(text.slice(at + marker.length).split('\n', 1)[0]);
     if (!outcome) {
       return { ok: false, error: { code: 'codex_error', message: firstLine(text) || 'The Codex runtime returned no result.' } };
     }

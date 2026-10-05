@@ -66,7 +66,8 @@ export function IntegrationsSettings({ persistence, onDirtyChange }: Integration
     if (saved && !apnsDirty) onDirtyChange(false);
   };
 
-  const source = (id: SharedCredentialId, value: string) => keySource(config, id, value.trim().length > 0);
+  // Only a saved key has a source; an edit in progress doesn't.
+  const source = (id: 'falApiKey' | 'openRouterApiKey' | 'deepgramApiKey') => keySource(config, id, draft[id].length > 0 && draft[id] === persisted[id]);
 
   return (
     <SettingsPage title="Integrations" description="Provider credentials used by Pane's voice dictation and iPhone notifications.">
@@ -84,7 +85,7 @@ export function IntegrationsSettings({ persistence, onDirtyChange }: Integration
               label="Fal API key"
               value={draft.falApiKey}
               placeholder="fal_..."
-              helperText={source('falApiKey', draft.falApiKey)}
+              helperText={source('falApiKey')}
               onChange={(value) => setDraft((current) => ({ ...current, falApiKey: value }))}
               onRemove={() => setDraft((current) => ({ ...current, falApiKey: '' }))}
             />
@@ -92,7 +93,7 @@ export function IntegrationsSettings({ persistence, onDirtyChange }: Integration
               label="OpenRouter API key (optional)"
               value={draft.openRouterApiKey}
               placeholder="sk-or-..."
-              helperText={source('openRouterApiKey', draft.openRouterApiKey)}
+              helperText={source('openRouterApiKey')}
               onChange={(value) => setDraft((current) => ({ ...current, openRouterApiKey: value }))}
               onRemove={() => setDraft((current) => ({ ...current, openRouterApiKey: '' }))}
             />
@@ -100,7 +101,7 @@ export function IntegrationsSettings({ persistence, onDirtyChange }: Integration
               label="Deepgram API key"
               value={draft.deepgramApiKey}
               placeholder="dg_..."
-              helperText={source('deepgramApiKey', draft.deepgramApiKey)}
+              helperText={source('deepgramApiKey')}
               onChange={(value) => setDraft((current) => ({ ...current, deepgramApiKey: value }))}
               onRemove={() => setDraft((current) => ({ ...current, deepgramApiKey: '' }))}
             />
@@ -177,18 +178,20 @@ function ApnsSettings({ persistence, onDirtyChange }: IntegrationsSettingsProps)
             label="APNs key (.p8)"
             value={draft.privateKey}
             placeholder="Choose the key file below"
-            helperText={keySource(config, 'apns', draft.privateKey.length > 0) ?? pickError ?? undefined}
+            helperText={pickError ?? keySource(config, 'apns', draft.privateKey.length > 0 && draft.privateKey === config.apns?.privateKey)}
             readOnly
-            onRemove={() => setDraft(current => ({ ...current, privateKey: '' }))}
           />
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            {draft.privateKey && (
+              <Button type="button" size="sm" variant="ghost" onClick={() => setDraft(current => ({ ...current, privateKey: '' }))}>Remove key</Button>
+            )}
             <Button type="button" size="sm" variant="secondary" onClick={() => void chooseKey()}>Choose key file…</Button>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Input label="Team ID" value={draft.teamId} placeholder="ABCDE12345" onChange={event => setDraft(current => ({ ...current, teamId: event.target.value }))} />
-            <Input label="Key ID" value={draft.keyId} placeholder="From the file name" onChange={event => setDraft(current => ({ ...current, keyId: event.target.value }))} />
+            <Input label="Team ID" fullWidth value={draft.teamId} placeholder="ABCDE12345" onChange={event => setDraft(current => ({ ...current, teamId: event.target.value }))} />
+            <Input label="Key ID" fullWidth value={draft.keyId} placeholder="From the file name" onChange={event => setDraft(current => ({ ...current, keyId: event.target.value }))} />
           </div>
-          <Input label="App bundle ID" value={draft.topic} onChange={event => setDraft(current => ({ ...current, topic: event.target.value }))} />
+          <Input label="App bundle ID" fullWidth value={draft.topic} onChange={event => setDraft(current => ({ ...current, topic: event.target.value }))} />
           <SegmentedControl<ApnsCredentialConfig['environment']>
             label="APNs environment"
             value={draft.environment}

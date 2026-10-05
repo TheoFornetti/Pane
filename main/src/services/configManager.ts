@@ -12,7 +12,7 @@ import { randomUUID } from 'crypto';
 import { HOME_GIT_SCAN_WARNING, isHomeDirectory } from '../utils/gitScanSafety';
 import { getAppDirectory } from '../utils/appDirectory';
 import { clearShellPathCache } from '../utils/shellPath';
-import { stampSharedCredentials } from './sharedCredentials';
+import { restampSharedCredentials } from './sharedCredentials';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
   AppearanceValidationError,
@@ -235,9 +235,16 @@ export class ConfigManager extends EventEmitter {
         this.config.analytics.posthogHost = DEFAULT_POSTHOG_HOST;
         shouldPersistMigration = true;
       }
+      const restamped = restampSharedCredentials(this.config, 'untimed');
+      if (restamped) {
+        this.config.sharedCredentials = restamped;
+        shouldPersistMigration = true;
+      }
       if (shouldPersistMigration) {
         await this.writeConfigToDisk(this.config);
       }
+      // Lets key sharing pick up a key edited by hand.
+      if (restamped) this.emit('config-updated', this.config);
     } catch (error: unknown) {
       let errorCode: string | undefined;
       try {
@@ -403,7 +410,7 @@ export class ConfigManager extends EventEmitter {
           defaultsVersion: boundary.optional(boundary.number),
         }));
       }
-      next.sharedCredentials = stampSharedCredentials(this.config, updates, next);
+      next.sharedCredentials = restampSharedCredentials(next, 'now') ?? next.sharedCredentials;
       this.validateAppearanceUpdate(updates, next);
       await this.writeConfigToDisk(next);
       this.config = next;

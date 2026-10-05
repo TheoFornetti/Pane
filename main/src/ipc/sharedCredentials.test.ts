@@ -105,4 +105,31 @@ describe('shared credentials on a host', () => {
 
     expect((await read()).anthropicApiKey?.value).toBe('sk-ant-new');
   });
+
+  it('shares a key edited by hand in config.json as newly set', async () => {
+    const { configManager, read, apply } = await registerHost();
+    await apply({ anthropicApiKey: { value: 'sk-ant-from-mac', updatedAt: '2026-01-01T00:00:00.000Z', source: 'Mac' } });
+    const configPath = path.join(process.env.PANE_DIR ?? '', 'config.json');
+
+    const onDisk = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(configPath, JSON.stringify({ ...onDisk, anthropicApiKey: 'sk-ant-hand-edited' }, null, 2));
+    await configManager.reloadFromDisk();
+
+    // Set on the Mac after its first copy but before the hand edit.
+    await apply({ anthropicApiKey: { value: 'sk-ant-older', updatedAt: '2026-02-01T00:00:00.000Z', source: 'Mac' } });
+    expect((await read()).anthropicApiKey?.value).toBe('sk-ant-hand-edited');
+  });
+
+  it('shares a hand edit of a key that was set before sharing existed', async () => {
+    const { configManager, read } = await registerHost({ openaiApiKey: 'sk-openai-untimed' });
+    const configPath = path.join(process.env.PANE_DIR ?? '', 'config.json');
+
+    const onDisk = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(configPath, JSON.stringify({ ...onDisk, openaiApiKey: 'sk-openai-hand-edited' }, null, 2));
+    await configManager.reloadFromDisk();
+
+    const credentials = await read();
+    expect(credentials.openaiApiKey?.value).toBe('sk-openai-hand-edited');
+    expect(Date.parse(credentials.openaiApiKey?.updatedAt ?? '')).toBeGreaterThan(0);
+  });
 });

@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import os from 'os';
 import type { AppConfig } from '../types/config';
 import type { ConfigManager } from './configManager';
@@ -52,29 +53,37 @@ function configPatchValue(id: SharedCredentialId, value: string | null): Partial
   return { apns };
 }
 
+function valueDigest(value: string | undefined): string | undefined {
+  return value === undefined ? undefined : createHash('sha256').update(value).digest('hex').slice(0, 16);
+}
+
 /** The keys this host holds in its config. Keys that exist only in its environment stay local. */
 export function readSharedCredentials(config: AppConfig): SharedCredentials {
   const credentials: SharedCredentials = {};
   for (const id of SHARED_CREDENTIAL_IDS) {
     const value = configValue(config, id);
     const meta = config.sharedCredentials?.[id];
-    if (meta) credentials[id] = { value: value ?? null, ...meta };
-    else if (value) credentials[id] = { value, updatedAt: UNTIMED_CREDENTIAL, source: localHostLabel() };
+    if (meta) credentials[id] = { value: value ?? null, updatedAt: meta.updatedAt, source: meta.source };
   }
   return credentials;
 }
 
-/** Records when and where each shared key in `updates` was set or cleared, unless the update carries its own record. */
-export function stampSharedCredentials(current: AppConfig, updates: Partial<AppConfig>, next: AppConfig): AppConfig['sharedCredentials'] {
-  let stamped = next.sharedCredentials;
+/**
+ * New records for keys whose value changed since their record was written, or null when none did.
+ * A changed key counts as set now, on this host. A key with no record is stamped now when it was just
+ * saved, or untimed when it comes from a config written before sharing existed, so upgrading never
+ * overwrites another host's key. Keys merged from another host already carry a matching record.
+ */
+export function restampSharedCredentials(config: AppConfig, unrecorded: 'now' | 'untimed'): AppConfig['sharedCredentials'] | null {
+  let restamped: AppConfig['sharedCredentials'] | null = null;
   for (const id of SHARED_CREDENTIAL_IDS) {
-    if (!(id in updates) || updates.sharedCredentials?.[id]) continue;
-    const before = configValue(current, id);
-    const after = configValue(next, id);
-    if (before === after || (!before && !current.sharedCredentials?.[id] && !after)) continue;
-    stamped = { ...stamped, [id]: { updatedAt: new Date().toISOString(), source: localHostLabel() } };
+    const meta = config.sharedCredentials?.[id];
+    const digest = valueDigest(configValue(config, id));
+    if (meta ? meta.valueDigest === digest : digest === undefined) continue;
+    const updatedAt = meta || unrecorded === 'now' ? new Date().toISOString() : UNTIMED_CREDENTIAL;
+    restamped = { ...(restamped ?? config.sharedCredentials), [id]: { updatedAt, source: localHostLabel(), valueDigest: digest } };
   }
-  return stamped;
+  return restamped;
 }
 
 /** Saves each key in `incoming` that is newer than this host's copy. Returns this host's keys afterwards and the ids that changed. */
@@ -89,7 +98,7 @@ export async function applySharedCredentials(configManager: ConfigManager, incom
       // SAFETY: `changed` lists only ids present in the merged set.
       const { value, updatedAt, source } = merged.credentials[id] as SharedCredential;
       Object.assign(patch, configPatchValue(id, value));
-      patch.sharedCredentials = { ...patch.sharedCredentials, [id]: { updatedAt, source } };
+      patch.sharedCredentials = { ...patch.sharedCredentials, [id]: { updatedAt, source, valueDigest: valueDigest(configValue({ ...config, ...patch }, id)) } };
     }
     return patch;
   });

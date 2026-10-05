@@ -14,7 +14,10 @@ export interface SharedCredential {
 export type SharedCredentials = Partial<Record<SharedCredentialId, SharedCredential>>;
 
 /** When and where a host's copy of a key was set; stored next to the key in host config. */
-export type SharedCredentialMeta = Pick<SharedCredential, 'updatedAt' | 'source'>;
+export interface SharedCredentialMeta extends Pick<SharedCredential, 'updatedAt' | 'source'> {
+  /** Short hash of the value when it was stamped. A value that no longer matches was edited in config.json by hand. */
+  valueDigest?: string;
+}
 
 /** Apple push credentials, kept in host config so they can be shared. Env vars on a host override them. */
 export interface ApnsCredentialConfig {
@@ -30,7 +33,7 @@ export interface ApnsCredentialConfig {
 export const UNTIMED_CREDENTIAL = '1970-01-01T00:00:00.000Z';
 
 /** The newer copy wins; on a tie the current one stays, so two hosts never trade values back and forth. */
-export function isNewerCredential(candidate: SharedCredential, current: SharedCredential | undefined): boolean {
+function isNewerCredential(candidate: SharedCredential, current: SharedCredential | undefined): boolean {
   return !current || Date.parse(candidate.updatedAt) > Date.parse(current.updatedAt);
 }
 

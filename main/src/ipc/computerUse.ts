@@ -113,5 +113,8 @@ export function registerComputerUseHandlers(
     return { ok: true, reset: hosts.reset(connectionId) };
   });
 
-  commandRegistry.register('computer-use:status', () => ({ enabled, hosts: hosts.summaries() }));
+  // Connection ids are the only key to a script's state, so they stay on this machine.
+  commandRegistry.register('computer-use:status', () => (
+    isRemotePaneCommand() ? { enabled, hosts: [] } : { enabled, hosts: hosts.summaries() }
+  ));
 }

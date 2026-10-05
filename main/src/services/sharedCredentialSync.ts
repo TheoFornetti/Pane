@@ -6,6 +6,7 @@ import type { RemotePaneConnectionProfile } from '../../../shared/types/remoteDa
 import { syncSharedCredentials, type SharedCredentialHost } from '../../../shared/types/sharedCredentials';
 
 const SYNC_DEBOUNCE_MS = 500;
+const PEER_RETRY_MS = 60_000;
 
 /**
  * Shares integration keys between this host and every host the desktop has
@@ -92,7 +93,11 @@ export class SharedCredentialSync {
       if (this.peers.has(key)) continue;
       const peer = new RemotePaneClient(profile, {
         eventSink: { send: channel => { if (channel === 'remote:settings-changed') this.request(); } },
-        onConnectionStateChange: status => { if (status === 'connected') this.request(); },
+        onConnectionStateChange: (status) => {
+          if (status === 'connected') this.request();
+          // The client gives up after its reconnect backoff; keep listening for a host that sleeps for hours.
+          if (status === 'error') setTimeout(() => { if (this.peers.get(key) === peer) void peer.connect().catch(() => undefined); }, PEER_RETRY_MS);
+        },
         onResyncRequired: () => this.request(),
       });
       this.peers.set(key, peer);

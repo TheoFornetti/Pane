@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { Button } from '../../ui/Button';
 import { Input } from '../../ui/Input';
 import { SettingsSection } from '../../ui/SettingsSection';
@@ -48,11 +48,15 @@ export function IntegrationsSettings({ persistence, onDirtyChange }: Integration
   };
   const persistedKey = JSON.stringify(persisted);
   const [draft, setDraft] = useState(persisted);
-  const [apnsDirty, setApnsDirty] = useState(false);
+  const persistedApnsKey = JSON.stringify(config.apns ?? EMPTY_APNS);
+  const [apnsDraft, setApnsDraft] = useState<ApnsCredentialConfig>(config.apns ?? EMPTY_APNS);
+  const apnsDirty = JSON.stringify(apnsDraft) !== persistedApnsKey;
   const dirty = JSON.stringify(draft) !== persistedKey;
 
   // SAFETY: App-owned storage writes this value through the matching typed serializer.
   useEffect(() => setDraft(JSON.parse(persistedKey) as typeof persisted), [persistedKey]);
+  // SAFETY: persistedApnsKey is serialized from the same ApnsCredentialConfig shape.
+  useEffect(() => setApnsDraft(JSON.parse(persistedApnsKey) as ApnsCredentialConfig), [persistedApnsKey]);
   useEffect(() => onDirtyChange(dirty || apnsDirty), [dirty, apnsDirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
@@ -123,25 +127,25 @@ export function IntegrationsSettings({ persistence, onDirtyChange }: Integration
           </div>
         </SettingRow>
       </SettingsSection>
-      <ApnsSettings persistence={persistence} onDirtyChange={setApnsDirty} />
+      <ApnsSettings persistence={persistence} draft={apnsDraft} setDraft={setApnsDraft} dirty={apnsDirty} />
     </SettingsPage>
   );
 }
 
 const EMPTY_APNS: ApnsCredentialConfig = { teamId: '', keyId: '', privateKey: '', topic: DEFAULT_APNS_TOPIC, environment: 'production' };
 
-function ApnsSettings({ persistence, onDirtyChange }: IntegrationsSettingsProps) {
+interface ApnsSettingsProps {
+  persistence: SettingsPersistence;
+  draft: ApnsCredentialConfig;
+  setDraft: Dispatch<SetStateAction<ApnsCredentialConfig>>;
+  dirty: boolean;
+}
+
+function ApnsSettings({ persistence, draft, setDraft, dirty }: ApnsSettingsProps) {
   const config = persistence.config!;
-  const persistedKey = JSON.stringify(config.apns ?? EMPTY_APNS);
-  const [draft, setDraft] = useState<ApnsCredentialConfig>(config.apns ?? EMPTY_APNS);
   const [pickError, setPickError] = useState<string | null>(null);
-  const dirty = JSON.stringify(draft) !== persistedKey;
   const complete = [draft.teamId, draft.keyId, draft.privateKey, draft.topic].every(value => value.trim().length > 0);
   const cleared = draft.privateKey.length === 0 && config.apns !== undefined;
-
-  // SAFETY: persistedKey is serialized from the same ApnsCredentialConfig shape above.
-  useEffect(() => setDraft(JSON.parse(persistedKey) as ApnsCredentialConfig), [persistedKey]);
-  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
   const chooseKey = async () => {
     setPickError(null);

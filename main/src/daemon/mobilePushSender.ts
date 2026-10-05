@@ -54,10 +54,6 @@ export const STABLE_IDLE_MS = 10_000;
 const PROVIDER_TIMEOUT_MS = 15_000;
 const senderByConfigManager = new WeakMap<MobilePushConfigManager, MobilePushSender>();
 
-/**
- * Host-owned sender. Its credentials are read only from operator environment
- * variables, never from a pairing payload, remote config, or the mobile app.
- */
 type AttentionKind = 'needs-input' | 'completed';
 
 export interface MobilePushSenderOptions {
@@ -65,6 +61,10 @@ export interface MobilePushSenderOptions {
   resolveName?: (paneId: string) => string | undefined;
 }
 
+/**
+ * Host-owned sender. Its credentials are read only from operator environment
+ * variables, never from a pairing payload, remote config, or the mobile app.
+ */
 export class MobilePushSender {
   private mutationQueue: Promise<void> = Promise.resolve();
   /** Panels whose agent visibly worked and has not been reported finished yet. */

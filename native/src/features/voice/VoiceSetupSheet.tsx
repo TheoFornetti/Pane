@@ -114,7 +114,7 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
           Sent once over this phone's connection and stored on {profile.label}. Pane never shows a saved key again.
           {missing[0] ? (
             <Text variant="footnote" tone="accent" onPress={() => void Linking.openURL(KEY_INFO[missing[0].key].url)}>
-              {` Get a ${KEY_INFO[missing[0].key].name} key`}
+              {` Get a key from ${KEY_INFO[missing[0].key].name}`}
             </Text>
           ) : null}
         </Text>
@@ -130,7 +130,7 @@ export function VoiceSetupSheet({ visible, onClose, voice, onStarted }: VoiceSet
         ) : (
           <Button
             testID="voice-setup-save"
-            title={entries.length > 0 ? 'Save and start recording' : 'Start recording'}
+            title={entries.length > 0 || missing.length > 0 ? 'Save and start recording' : 'Start recording'}
             icon={<Icon ios="mic.fill" android="mic" size={15} color={colors.onAccent} />}
             disabled={!ready}
             loading={busy}

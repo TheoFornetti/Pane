@@ -5,6 +5,11 @@ import { scriptExecutionTracker } from '../services/scriptExecutionTracker';
 import type { AppServices } from './types';
 import { registerProjectHandlers } from './project';
 
+interface ProjectUpdateServices {
+  databaseService: Pick<AppServices['databaseService'], 'updateProject'>;
+  sessionManager: Pick<AppServices['sessionManager'], 'invalidateProjectContext' | 'emit'>;
+}
+
 afterEach(() => {
   scriptExecutionTracker.stop('session', 'pane');
   scriptExecutionTracker.stop('project', 1);
@@ -45,12 +50,21 @@ it.each(['session', 'project'] as const)('stops the %s logs process before delet
 });
 
 it('stores a WSL UNC path edited in project settings as the Linux path and its distro', async () => {
-  const updateProject = vi.fn((_id: number, updates: object) => ({ id: 1, name: 'Repo', ...updates }));
-  // SAFETY: The fixture provides only the repository boundary used by projects:update.
-  const services = {
+  const updateProject = vi.fn<AppServices['databaseService']['updateProject']>((id, updates) => ({
+    id,
+    name: 'Repo',
+    path: '/isolated/repo',
+    active: true,
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+    ...updates,
+  }));
+  const serviceFixture: ProjectUpdateServices = {
     databaseService: { updateProject },
     sessionManager: { invalidateProjectContext: () => {}, emit: () => true },
-  } as unknown as AppServices;
+  };
+  // SAFETY: The fixture provides the service methods used by projects:update.
+  const services = serviceFixture as AppServices;
   // SAFETY: This registry test only needs IpcMain.handle for channel binding.
   const ipc = { handle: vi.fn() } as IpcMain;
   const registry = new PaneCommandRegistry();
